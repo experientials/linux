@@ -10,7 +10,7 @@
 	compatible = "rockchip,rv1126-evb-ddr3-v10-tb", "rockchip,rv1126";
 
 	chosen {
-		bootargs = "loglevel=0 initcall_nr_threads=-1 initcall_debug=0 printk.devkmsg=on root=/dev/rd0 rk.root2nd=/dev/mmcblk0p7 console=ttyFIQ0 snd_aloop.index=7";
+		bootargs = "loglevel=0 initcall_nr_threads=-1 initcall_debug=0 printk.devkmsg=on root=/dev/rd0 rk.root2nd=/dev/mmcblk0p7 console=ttyFIQ0 snd_aloop.index=7 driver_async_probe=dwmmc_rockchip";
 	};
 
 	memory {
@@ -25,8 +25,16 @@
 
 	reserved-memory {
 		trust@0 {
-			reg = <0x00000000 0x00208000>;
+			reg = <0x00000000 0x00200000>;
 			no-map;
+		};
+
+		trust@200000 {
+			reg = <0x00200000 0x00008000>;
+		};
+
+		mmc_ecsd: mmc@20f000 {
+			reg = <0x0020f000 0x00001000>;
 		};
 
 		ramoops@210000 {
@@ -43,6 +51,10 @@
 			no-map;
 		};
 
+		idma_descriptor: mmc_idma@500000 {
+			reg = <0x00500000 0x00100000>;
+		};
+
 		ramdisk_r: ramdisk@2800000 {
 			reg = <0x02800000 (40 * 0x00100000)>;
 		};
@@ -50,6 +62,14 @@
 		ramdisk_c: ramdisk@5800000 {
 			reg = <0x05800000 (20 * 0x00100000)>;
 		};
+	};
+
+	rockchip_tb {
+		compatible = "rockchip,thunder-boot-mmc";
+		reg = <0xffc50000 0x4000>;
+		memory-region-src = <&ramdisk_c>;
+		memory-region-dst = <&ramdisk_r>;
+		memory-region-idmac = <&idma_descriptor>;
 	};
 };
 
@@ -68,6 +88,11 @@
 
 &ddr_timing {
 	status = "disabled";
+};
+
+&emmc {
+	memory-region-ecsd = <&mmc_ecsd>;
+	post-power-on-delay-ms = <0>;
 };
 
 &hw_decompress {

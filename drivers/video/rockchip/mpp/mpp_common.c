@@ -57,7 +57,6 @@ struct mpp_msg_v1 {
 };
 
 static void mpp_free_task(struct kref *ref);
-static int mpp_dev_reset(struct mpp_dev *mpp);
 
 /* task queue schedule */
 static int
@@ -181,7 +180,7 @@ mpp_taskqueue_trigger_work(struct mpp_taskqueue *queue,
 	return 0;
 }
 
-static int mpp_power_on(struct mpp_dev *mpp)
+int mpp_power_on(struct mpp_dev *mpp)
 {
 	pm_runtime_get_sync(mpp->dev);
 	pm_stay_awake(mpp->dev);
@@ -192,7 +191,7 @@ static int mpp_power_on(struct mpp_dev *mpp)
 	return 0;
 }
 
-static int mpp_power_off(struct mpp_dev *mpp)
+int mpp_power_off(struct mpp_dev *mpp)
 {
 	if (mpp->hw_ops->power_off)
 		mpp->hw_ops->power_off(mpp);
@@ -369,17 +368,26 @@ static int mpp_process_task(struct mpp_session *session,
 	return 0;
 }
 
-static int mpp_refresh_pm_runtime(struct device *dev)
+static int mpp_refresh_pm_runtime(struct mpp_iommu_info *info,
+				  struct device *dev)
 {
+	int i;
+	int usage_count;
 	struct device_link *link;
+	struct device *iommu_dev = &info->pdev->dev;
 
 	rcu_read_lock();
 
-	list_for_each_entry_rcu(link, &dev->links.suppliers, c_node)
-		pm_runtime_put_sync(link->supplier);
+	usage_count = atomic_read(&iommu_dev->power.usage_count);
+	list_for_each_entry_rcu(link, &dev->links.suppliers, c_node) {
+		for (i = 0; i < usage_count; i++)
+			pm_runtime_put_sync(link->supplier);
+	}
 
-	list_for_each_entry_rcu(link, &dev->links.suppliers, c_node)
-		pm_runtime_get_sync(link->supplier);
+	list_for_each_entry_rcu(link, &dev->links.suppliers, c_node) {
+		for (i = 0; i < usage_count; i++)
+			pm_runtime_get_sync(link->supplier);
+	}
 
 	rcu_read_unlock();
 
@@ -466,7 +474,7 @@ fail:
 	return NULL;
 }
 
-static int mpp_dev_reset(struct mpp_dev *mpp)
+int mpp_dev_reset(struct mpp_dev *mpp)
 {
 	dev_info(mpp->dev, "resetting...\n");
 
@@ -496,7 +504,7 @@ static int mpp_dev_reset(struct mpp_dev *mpp)
 	 * as an empty operation. Therefore, force to close and then open,
 	 * will be update the domain. In this way, domain can really attach.
 	 */
-	mpp_refresh_pm_runtime(mpp->dev);
+	mpp_refresh_pm_runtime(mpp->iommu_info, mpp->dev);
 
 	mpp_iommu_attach(mpp->iommu_info);
 	up_write(&mpp->reset_group->rw_sem);

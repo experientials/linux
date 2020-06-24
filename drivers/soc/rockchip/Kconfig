@@ -96,6 +96,13 @@ config ROCKCHIP_SYSTEM_MONITOR
 	help
 	  Say y here to enable rockchip system monitor support.
 
+config ROCKCHIP_MTD_VENDOR_STORAGE
+	bool "Rockchip mtd vendor storage support"
+	depends on MTD
+	default y
+	help
+	  Say y here to enable rockchip mtd vendor storage support.
+
 config ROCKCHIP_VENDOR_STORAGE_UPDATE_LOADER
 	bool "Rockchip vendor storage update loader support"
 	default n
@@ -114,5 +121,11 @@ config ROCKCHIP_THUNDER_BOOT
 	help
 	  Say y here to enable Rockchip thunder boot support.
 	  This option make the kernel boot faster.
+
+config ROCKCHIP_THUNDER_BOOT_MMC
+	bool "Rockchip Thunder Boot from MMC"
+	depends on ROCKCHIP_THUNDER_BOOT
+	help
+	  Say y if boot from MMC.
 
 endif

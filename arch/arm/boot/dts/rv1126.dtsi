@@ -12,6 +12,7 @@
 #include <dt-bindings/soc/rockchip,boot-mode.h>
 #include <dt-bindings/soc/rockchip-system-status.h>
 #include <dt-bindings/suspend/rockchip-rv1126.h>
+#include <dt-bindings/thermal/thermal.h>
 #include "rv1126-dram-default-timing.dtsi"
 
 / {
@@ -52,6 +53,8 @@
 			enable-method = "psci";
 			clocks = <&cru ARMCLK>;
 			operating-points-v2 = <&cpu0_opp_table>;
+			dynamic-power-coefficient = <60>;
+			#cooling-cells = <2>;
 			cpu-idle-states = <&CPU_SLEEP>;
 		};
 
@@ -62,6 +65,7 @@
 			enable-method = "psci";
 			clocks = <&cru ARMCLK>;
 			operating-points-v2 = <&cpu0_opp_table>;
+			dynamic-power-coefficient = <60>;
 			cpu-idle-states = <&CPU_SLEEP>;
 		};
 
@@ -72,6 +76,7 @@
 			enable-method = "psci";
 			clocks = <&cru ARMCLK>;
 			operating-points-v2 = <&cpu0_opp_table>;
+			dynamic-power-coefficient = <60>;
 			cpu-idle-states = <&CPU_SLEEP>;
 		};
 
@@ -82,6 +87,7 @@
 			enable-method = "psci";
 			clocks = <&cru ARMCLK>;
 			operating-points-v2 = <&cpu0_opp_table>;
+			dynamic-power-coefficient = <60>;
 			cpu-idle-states = <&CPU_SLEEP>;
 		};
 
@@ -238,6 +244,7 @@
 		compatible = "rockchip,display-subsystem";
 		ports = <&vop_out>;
 		status = "disabled";
+		logo-memory-region = <&drm_logo>;
 
 		route {
 			route_dsi: route-dsi {
@@ -280,8 +287,8 @@
 
 	mpp_srv: mpp-srv {
 		compatible = "rockchip,mpp-service";
-		rockchip,taskqueue-count = <3>;
-		rockchip,resetgroup-count = <3>;
+		rockchip,taskqueue-count = <4>;
+		rockchip,resetgroup-count = <4>;
 		status = "disabled";
 	};
 
@@ -294,6 +301,11 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;
+
+		drm_logo: drm-logo@00000000 {
+			compatible = "rockchip,drm-logo";
+			reg = <0x0 0x0>;
+		};
 
 		isp_reserved: isp {
 			compatible = "shared-dma-pool";
@@ -339,9 +351,57 @@
 		cpu_thermal: cpu-thermal {
 			polling-delay-passive = <20>; /* milliseconds */
 			polling-delay = <1000>; /* milliseconds */
-			sustainable-power = <977>; /* milliwatts */
+			sustainable-power = <875>; /* milliwatts */
+			k_pu = <75>;
+			k_po = <175>;
+			k_i = <0>;
 
 			thermal-sensors = <&cpu_tsadc 0>;
+
+			trips {
+				threshold: trip-point-0 {
+					/* millicelsius */
+					temperature = <75000>;
+					/* millicelsius */
+					hysteresis = <2000>;
+					type = "passive";
+				};
+				target: trip-point-1 {
+					/* millicelsius */
+					temperature = <85000>;
+					/* millicelsius */
+					hysteresis = <2000>;
+					type = "passive";
+				};
+				soc_crit: soc-crit {
+					/* millicelsius */
+					temperature = <115000>;
+					/* millicelsius */
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&target>;
+					cooling-device =
+						<&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+					contribution = <1024>;
+				};
+				map1 {
+					trip = <&target>;
+					cooling-device =
+						<&npu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+					contribution = <1024>;
+				};
+				map2 {
+					trip = <&target>;
+					cooling-device =
+						<&rkvenc THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+					contribution = <1060>;
+				};
+			};
 		};
 
 		npu_thermal: npu-thermal {
@@ -749,6 +809,7 @@
 			#dma-cells = <1>;
 			clocks = <&cru ACLK_DMAC>;
 			clock-names = "apb_pclk";
+			arm,pl330-periph-burst;
 		};
 	};
 
@@ -1324,6 +1385,8 @@
 		interrupts = <GIC_SPI 81 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru ACLK_DECOM>, <&cru DCLK_DECOM>, <&cru PCLK_DECOM>;
 		clock-names = "aclk", "dclk", "pclk";
+		resets = <&cru SRST_DECOM_D>;
+		reset-names = "dresetn";
 		status = "disabled";
 	};
 
@@ -1579,6 +1642,36 @@
 		status = "disabled";
 	};
 
+	iep: iep@ffb20000 {
+		compatible = "rockchip,rv1126-iep", "rockchip,iep-v2";
+		reg = <0xffb20000 0x500>;
+		interrupts = <GIC_SPI 114 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru ACLK_IEP>, <&cru HCLK_IEP>, <&cru CLK_IEP_CORE>;
+		clock-names = "aclk", "hclk", "sclk";
+		resets = <&cru SRST_IEP_A>, <&cru SRST_IEP_H>,
+			<&cru SRST_IEP_CORE>;
+		reset-names = "rst_a", "rst_h", "rst_s";
+		power-domains = <&power RV1126_PD_VO>;
+		rockchip,srv = <&mpp_srv>;
+		rockchip,taskqueue-node = <3>;
+		rockchip,resetgroup-node = <3>;
+		iommus = <&iep_mmu>;
+		status = "disabled";
+	};
+
+	iep_mmu: iommu@ffb20800 {
+		compatible = "rockchip,iommu";
+		reg = <0xffb20800 0x100>;
+		interrupts = <GIC_SPI 114 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "iep_mmu";
+		clocks = <&cru ACLK_IEP>, <&cru HCLK_IEP>;
+		clock-names = "aclk", "iface";
+		#iommu-cells = <0>;
+		power-domains = <&power RV1126_PD_VO>;
+		//rockchip,disable-device-link-resume;
+		status = "disabled";
+	};
+
 	dsi: dsi@ffb30000 {
 		compatible = "rockchip,rv1126-mipi-dsi";
 		reg = <0xffb30000 0x500>;
@@ -1762,6 +1855,8 @@
 		assigned-clocks = <&cru ACLK_VENC>, <&cru CLK_VENC_CORE>;
 		assigned-clock-rates = <297000000>, <594000000>;
 		operating-points-v2 = <&rkvenc_opp_table>;
+		dynamic-power-coefficient = <1418>;
+		#cooling-cells = <2>;
 		iommus = <&rkvenc_mmu>;
 		node-name = "rkvenc";
 		rockchip,srv = <&mpp_srv>;
@@ -1949,6 +2044,8 @@
 		assigned-clocks = <&cru CLK_CORE_NPU>;
 		assigned-clock-rates = <396000000>;
 		operating-points-v2 = <&npu_opp_table>;
+		dynamic-power-coefficient = <1343>;
+		#cooling-cells = <2>;
 		interrupts = <GIC_SPI 107 IRQ_TYPE_LEVEL_HIGH>;
 		power-domains = <&power RV1126_PD_NPU>;
 		status = "disabled";
@@ -1984,6 +2081,11 @@
 		opp-800000000 {
 			opp-hz = /bits/ 64 <800000000>;
 			opp-microvolt = <825000 825000 1000000>;
+		};
+		opp-934000000 {
+			opp-hz = /bits/ 64 <934000000>;
+			opp-microvolt = <900000 900000 1000000>;
+			status = "disabled";
 		};
 	};
 

@@ -9,6 +9,7 @@
  * V0.0X01.0X03 fix gain range.
  * V0.0X01.0X04 add enum_frame_interval function.
  * V0.0X01.0X05 fix gain reg, add otp and dpc.
+ * V0.0X01.0X06 add set dpc cfg.
  */
 
 #include <linux/clk.h>
@@ -30,7 +31,7 @@
 #include <media/v4l2-subdev.h>
 #include <linux/pinctrl/consumer.h>
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x05)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x06)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -71,6 +72,10 @@
 
 #define GC4C33_REG_VTS_H			0x0340
 #define GC4C33_REG_VTS_L			0x0341
+
+#define GC4C33_REG_DPCC_ENABLE		0x00aa
+#define GC4C33_REG_DPCC_SINGLE		0x00a1
+#define GC4C33_REG_DPCC_DOUBLE		0x00a2
 
 #define REG_NULL			0xFFFF
 
@@ -583,8 +588,8 @@ static const struct regval gc4c33_linear10bit_2560x1440_regs[] = {
 	{0x00aa, 0x3a},
 	{0x00a7, 0x18},
 	{0x00a8, 0x10},
-	{0x00a1, 0xE0},
-	{0x00a2, 0xE0},
+	{0x00a1, 0xFF},
+	{0x00a2, 0xFF},
 	{REG_NULL, 0x00},
 };
 
@@ -793,8 +798,8 @@ static const struct regval gc4c33_linear10bit_1280x720_regs[] = {
 	{0x00aa, 0x3a},
 	{0x00a7, 0x18},
 	{0x00a8, 0x10},
-	{0x00a1, 0xE0},
-	{0x00a2, 0xE0},
+	{0x00a1, 0xFF},
+	{0x00a2, 0xFF},
 	{REG_NULL, 0x00},
 };
 
@@ -1063,8 +1068,8 @@ static const struct regval gc4c33_linear10bit_1920x1080_regs[] = {
 	{0x00aa, 0x3a},
 	{0x00a7, 0x18},
 	{0x00a8, 0x10},
-	{0x00a1, 0xE0},
-	{0x00a2, 0xE0},
+	{0x00a1, 0xFF},
+	{0x00a2, 0xFF},
 	{REG_NULL, 0x00},
 };
 
@@ -1417,6 +1422,48 @@ static int gc4c33_set_gain_reg_720P(struct gc4c33 *gc4c33, u32 gain)
 	return 0;
 }
 
+static int gc4c33_set_dpcc_cfg(struct gc4c33 *gc4c33,
+			       struct rkmodule_dpcc_cfg *dpcc)
+{
+	int ret = 0;
+
+	if (dpcc->enable) {
+		ret = gc4c33_write_reg(gc4c33->client,
+				       GC4C33_REG_DPCC_ENABLE,
+				       GC4C33_REG_VALUE_08BIT,
+				       0x3a);
+
+		ret |= gc4c33_write_reg(gc4c33->client,
+					GC4C33_REG_DPCC_SINGLE,
+					GC4C33_REG_VALUE_08BIT,
+					255 - dpcc->cur_dpcc *
+					255 / dpcc->total_dpcc);
+
+		ret |= gc4c33_write_reg(gc4c33->client,
+					GC4C33_REG_DPCC_DOUBLE,
+					GC4C33_REG_VALUE_08BIT,
+					255 - dpcc->cur_dpcc *
+					255 / dpcc->total_dpcc);
+	} else {
+		ret = gc4c33_write_reg(gc4c33->client,
+				       GC4C33_REG_DPCC_ENABLE,
+				       GC4C33_REG_VALUE_08BIT,
+				       0x38);
+
+		ret |= gc4c33_write_reg(gc4c33->client,
+					GC4C33_REG_DPCC_SINGLE,
+					GC4C33_REG_VALUE_08BIT,
+					0xff);
+
+		ret |= gc4c33_write_reg(gc4c33->client,
+					GC4C33_REG_DPCC_DOUBLE,
+					GC4C33_REG_VALUE_08BIT,
+					0xff);
+	}
+
+	return ret;
+}
+
 static int gc4c33_g_frame_interval(struct v4l2_subdev *sd,
 				   struct v4l2_subdev_frame_interval *fi)
 {
@@ -1464,6 +1511,7 @@ static long gc4c33_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 {
 	struct gc4c33 *gc4c33 = to_gc4c33(sd);
 	struct rkmodule_hdr_cfg *hdr;
+	struct rkmodule_nr_switch_threshold *nr_switch;
 	u32 i, h, w;
 	long ret = 0;
 
@@ -1507,6 +1555,17 @@ static long gc4c33_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		break;
 	case PREISP_CMD_SET_HDRAE_EXP:
 		break;
+	case RKMODULE_SET_DPCC_CFG:
+		ret = gc4c33_set_dpcc_cfg(gc4c33, (struct rkmodule_dpcc_cfg *)arg);
+		break;
+	case RKMODULE_GET_NR_SWITCH_THRESHOLD:
+		nr_switch = (struct rkmodule_nr_switch_threshold *)arg;
+		nr_switch->direct = 0;
+		nr_switch->up_thres = 3014;
+		nr_switch->down_thres = 3014;
+		nr_switch->div_coeff = 100;
+		ret = 0;
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -1523,7 +1582,9 @@ static long gc4c33_compat_ioctl32(struct v4l2_subdev *sd,
 	struct rkmodule_inf *inf;
 	struct rkmodule_awb_cfg *cfg;
 	struct rkmodule_hdr_cfg *hdr;
+	struct rkmodule_dpcc_cfg *dpcc;
 	struct preisp_hdrae_exp_s *hdrae;
+	struct rkmodule_nr_switch_threshold *nr_switch;
 	long ret;
 
 	switch (cmd) {
@@ -1575,6 +1636,18 @@ static long gc4c33_compat_ioctl32(struct v4l2_subdev *sd,
 			ret = gc4c33_ioctl(sd, cmd, hdr);
 		kfree(hdr);
 		break;
+	case RKMODULE_SET_DPCC_CFG:
+		dpcc = kzalloc(sizeof(*dpcc), GFP_KERNEL);
+		if (!dpcc) {
+			ret = -ENOMEM;
+			return ret;
+		}
+
+		ret = copy_from_user(dpcc, up, sizeof(*dpcc));
+		if (!ret)
+			ret = gc4c33_ioctl(sd, cmd, dpcc);
+		kfree(dpcc);
+		break;
 	case PREISP_CMD_SET_HDRAE_EXP:
 		hdrae = kzalloc(sizeof(*hdrae), GFP_KERNEL);
 		if (!hdrae) {
@@ -1586,6 +1659,18 @@ static long gc4c33_compat_ioctl32(struct v4l2_subdev *sd,
 		if (!ret)
 			ret = gc4c33_ioctl(sd, cmd, hdrae);
 		kfree(hdrae);
+		break;
+	case RKMODULE_GET_NR_SWITCH_THRESHOLD:
+		nr_switch = kzalloc(sizeof(*nr_switch), GFP_KERNEL);
+		if (!nr_switch) {
+			ret = -ENOMEM;
+			return ret;
+		}
+
+		ret = gc4c33_ioctl(sd, cmd, nr_switch);
+		if (!ret)
+			ret = copy_to_user(up, nr_switch, sizeof(*nr_switch));
+		kfree(nr_switch);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;

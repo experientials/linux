@@ -322,7 +322,7 @@ static int
 rockchip_usb2phy_clk480m_register(struct rockchip_usb2phy *rphy)
 {
 	struct device_node *node = rphy->dev->of_node;
-	struct clk_init_data init;
+	struct clk_init_data init = {};
 	struct clk *refclk = of_clk_get_by_name(node, "phyclk");
 	const char *clk_name;
 	int ret;
@@ -1375,10 +1375,24 @@ static int rv1126_usb2phy_tuning(struct rockchip_usb2phy *rphy)
 {
 	int ret = 0;
 
-	/* set iddig interrupt filter time to 10ms */
-	ret = regmap_write(rphy->grf, 0x1031c, 0x000f4240);
-	if (ret)
-		goto out;
+	if (rphy->phy_cfg->reg == 0xff4c0000) {
+		/* set iddig interrupt filter time to 10ms */
+		ret = regmap_write(rphy->grf, 0x1031c, 0x000f4240);
+		if (ret)
+			goto out;
+
+		/* set pready_cnt to 1 and rden_cnt to 0 */
+		ret = regmap_write(rphy->grf, 0x1027c, 0x0f0f0100);
+		if (ret)
+			goto out;
+	}
+
+	if (rphy->phy_cfg->reg == 0xff4c8000) {
+		/* set pready_cnt to 1 and rden_cnt to 0 */
+		ret = regmap_write(rphy->grf, 0x1028c, 0x0f0f0100);
+		if (ret)
+			goto out;
+	}
 
 out:
 	return ret;
