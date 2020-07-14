@@ -80,13 +80,63 @@ struct rockchip_drm_mode_set {
 	int bottom_margin;
 
 	bool mode_changed;
-	bool ymirror;
 	int ratio;
 };
 
+static DEFINE_MUTEX(rockchip_drm_sub_dev_lock);
+static LIST_HEAD(rockchip_drm_sub_dev_list);
+
+void rockchip_drm_register_sub_dev(struct rockchip_drm_sub_dev *sub_dev)
+{
+	mutex_lock(&rockchip_drm_sub_dev_lock);
+	list_add_tail(&sub_dev->list, &rockchip_drm_sub_dev_list);
+	mutex_unlock(&rockchip_drm_sub_dev_lock);
+}
+EXPORT_SYMBOL(rockchip_drm_register_sub_dev);
+
+void rockchip_drm_unregister_sub_dev(struct rockchip_drm_sub_dev *sub_dev)
+{
+	mutex_lock(&rockchip_drm_sub_dev_lock);
+	list_del(&sub_dev->list);
+	mutex_unlock(&rockchip_drm_sub_dev_lock);
+}
+EXPORT_SYMBOL(rockchip_drm_unregister_sub_dev);
+
+struct rockchip_drm_sub_dev *rockchip_drm_get_sub_dev(struct device_node *node)
+{
+	struct rockchip_drm_sub_dev *sub_dev = NULL;
+
+	mutex_lock(&rockchip_drm_sub_dev_lock);
+	list_for_each_entry(sub_dev, &rockchip_drm_sub_dev_list, list) {
+		if (sub_dev->of_node == node)
+			break;
+	}
+	mutex_unlock(&rockchip_drm_sub_dev_lock);
+
+	return sub_dev;
+}
+EXPORT_SYMBOL(rockchip_drm_get_sub_dev);
+
+int rockchip_drm_get_sub_dev_type(void)
+{
+	int connector_type = DRM_MODE_CONNECTOR_Unknown;
+	struct rockchip_drm_sub_dev *sub_dev = NULL;
+
+	mutex_lock(&rockchip_drm_sub_dev_lock);
+	list_for_each_entry(sub_dev, &rockchip_drm_sub_dev_list, list) {
+		if (sub_dev->connector->encoder) {
+			connector_type = sub_dev->connector->connector_type;
+			break;
+		}
+	}
+	mutex_unlock(&rockchip_drm_sub_dev_lock);
+
+	return connector_type;
+}
+EXPORT_SYMBOL(rockchip_drm_get_sub_dev_type);
+
 #ifndef MODULE
-static struct drm_crtc *find_crtc_by_node(struct drm_device *drm_dev,
-					  struct device_node *node)
+static struct drm_crtc *find_crtc_by_node(struct drm_device *drm_dev, struct device_node *node)
 {
 	struct device_node *np_crtc;
 	struct drm_crtc *crtc;
@@ -107,55 +157,37 @@ static struct drm_connector *find_connector_by_node(struct drm_device *drm_dev,
 						    struct device_node *node)
 {
 	struct device_node *np_connector;
-	struct drm_connector *connector;
-	struct drm_connector_list_iter conn_iter;
+	struct rockchip_drm_sub_dev *sub_dev;
 
 	np_connector = of_graph_get_remote_port_parent(node);
 	if (!np_connector || !of_device_is_available(np_connector))
 		return NULL;
 
-	drm_connector_list_iter_begin(drm_dev, &conn_iter);
-	drm_for_each_connector_iter(connector, &conn_iter) {
-		if (connector->port == np_connector) {
-			drm_connector_list_iter_end(&conn_iter);
-			return connector;
-		}
-	}
-	drm_connector_list_iter_end(&conn_iter);
+	sub_dev = rockchip_drm_get_sub_dev(np_connector);
+	if (!sub_dev)
+		return NULL;
 
-	return NULL;
+	return sub_dev->connector;
 }
 
-static
-struct drm_connector *find_connector_by_bridge(struct drm_device *drm_dev,
-					       struct device_node *node)
+static struct drm_connector *find_connector_by_bridge(struct drm_device *drm_dev,
+						      struct device_node *node)
 {
 	struct device_node *np_encoder, *np_connector = NULL;
-	struct drm_encoder *encoder;
 	struct drm_connector *connector = NULL;
 	struct device_node *port, *endpoint;
-	bool encoder_bridge = false;
-	bool found_connector = false;
-	struct drm_connector_list_iter conn_iter;
+	struct rockchip_drm_sub_dev *sub_dev;
 
 	np_encoder = of_graph_get_remote_port_parent(node);
 	if (!np_encoder || !of_device_is_available(np_encoder))
 		goto err_put_encoder;
-	drm_for_each_encoder(encoder, drm_dev) {
-		if (encoder->port == np_encoder && encoder->bridge) {
-			encoder_bridge = true;
-			break;
-		}
-	}
-	if (!encoder_bridge) {
-		dev_err(drm_dev->dev, "can't found encoder bridge!\n");
-		goto err_put_encoder;
-	}
+
 	port = of_graph_get_port_by_id(np_encoder, 1);
 	if (!port) {
 		dev_err(drm_dev->dev, "can't found port point!\n");
 		goto err_put_encoder;
 	}
+
 	for_each_child_of_node(port, endpoint) {
 		np_connector = of_graph_get_remote_port_parent(endpoint);
 		if (!np_connector) {
@@ -176,17 +208,10 @@ struct drm_connector *find_connector_by_bridge(struct drm_device *drm_dev,
 		goto err_put_port;
 	}
 
-	drm_connector_list_iter_begin(drm_dev, &conn_iter);
-	drm_for_each_connector_iter(connector, &conn_iter) {
-		if (connector->port == np_connector) {
-			found_connector = true;
-			break;
-		}
-	}
-	drm_connector_list_iter_end(&conn_iter);
-
-	if (!found_connector)
-		connector = NULL;
+	sub_dev = rockchip_drm_get_sub_dev(np_connector);
+	if (!sub_dev)
+		goto err_put_port;
+	connector = sub_dev->connector;
 
 	of_node_put(np_connector);
 err_put_port:
@@ -220,7 +245,7 @@ void rockchip_free_loader_memory(struct drm_device *drm)
 	free_reserved_area(start, end, -1, "drm_logo");
 	kfree(logo);
 	private->logo = NULL;
-	drm->mode_config.loader_protect = false;
+	private->loader_protect = false;
 }
 
 static int init_loader_memory(struct drm_device *drm_dev)
@@ -315,10 +340,10 @@ get_framebuffer_by_node(struct drm_device *drm_dev, struct device_node *node)
 
 	switch (bpp) {
 	case 16:
-		mode_cmd.pixel_format = DRM_FORMAT_BGR565;
+		mode_cmd.pixel_format = DRM_FORMAT_RGB565;
 		break;
 	case 24:
-		mode_cmd.pixel_format = DRM_FORMAT_BGR888;
+		mode_cmd.pixel_format = DRM_FORMAT_RGB888;
 		break;
 	case 32:
 		mode_cmd.pixel_format = DRM_FORMAT_XRGB8888;
@@ -385,9 +410,6 @@ of_parse_display_resource(struct drm_device *drm_dev, struct device_node *route)
 
 	if (!of_property_read_u32(route, "video,aspect_ratio", &val))
 		set->picture_aspect_ratio = val;
-
-	if (!of_property_read_u32(route, "logo,ymirror", &val))
-		set->ymirror = val;
 
 	if (!of_property_read_u32(route, "overscan,left_margin", &val))
 		set->left_margin = val;
@@ -697,7 +719,6 @@ static int update_state(struct drm_device *drm_dev,
 			struct rockchip_drm_mode_set *set,
 			unsigned int *plane_mask)
 {
-	struct rockchip_drm_private *priv = drm_dev->dev_private;
 	struct drm_crtc *crtc = set->crtc;
 	struct drm_connector *connector = set->connector;
 	struct drm_display_mode *mode = set->mode;
@@ -770,35 +791,7 @@ static int update_state(struct drm_device *drm_dev,
 	drm_framebuffer_put(set->fb);
 	ret = drm_atomic_set_crtc_for_plane(primary_state, crtc);
 
-	if (set->ymirror) {
-		/*
-		 * TODO:
-		 * some vop maybe not support ymirror, but force use it now.
-		 */
-		ret = drm_atomic_set_property(state,
-					      &primary_state->plane->base,
-					      priv->logo_ymirror_prop, true);
-		if (ret)
-			DRM_ERROR("Failed to initial logo_ymirror_prop\n");
-	}
-
 	return ret;
-}
-
-static bool is_support_hotplug(uint32_t output_type)
-{
-	switch (output_type) {
-	case DRM_MODE_CONNECTOR_DVII:
-	case DRM_MODE_CONNECTOR_DVID:
-	case DRM_MODE_CONNECTOR_DVIA:
-	case DRM_MODE_CONNECTOR_DisplayPort:
-	case DRM_MODE_CONNECTOR_HDMIA:
-	case DRM_MODE_CONNECTOR_HDMIB:
-	case DRM_MODE_CONNECTOR_TV:
-		return true;
-	default:
-		return false;
-	}
 }
 
 static void show_loader_logo(struct drm_device *drm_dev)
@@ -806,6 +799,7 @@ static void show_loader_logo(struct drm_device *drm_dev)
 	struct drm_atomic_state *state, *old_state;
 	struct device_node *np = drm_dev->dev->of_node;
 	struct drm_mode_config *mode_config = &drm_dev->mode_config;
+	struct rockchip_drm_private *private = drm_dev->dev_private;
 	struct device_node *root, *route;
 	struct rockchip_drm_mode_set *set, *tmp, *unset;
 	struct list_head mode_set_list;
@@ -946,7 +940,7 @@ static void show_loader_logo(struct drm_device *drm_dev)
 	drm_atomic_state_put(old_state);
 	drm_atomic_state_put(state);
 
-	mode_config->loader_protect = true;
+	private->loader_protect = true;
 	drm_modeset_unlock_all(drm_dev);
 	return;
 err_free_old_state:
@@ -1048,6 +1042,7 @@ int rockchip_drm_crtc_send_mcu_cmd(struct drm_device *drm_dev,
 
 	return 0;
 }
+EXPORT_SYMBOL(rockchip_drm_crtc_send_mcu_cmd);
 
 /*
  * Attach a (component) device to the shared drm dma mapping from master drm
@@ -1281,16 +1276,16 @@ static int rockchip_drm_create_properties(struct drm_device *dev)
 	private->alpha_scale_prop = prop;
 
 	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
-					 "LOGO_YMIRROR", 0, 1);
-	if (!prop)
-		return -ENOMEM;
-	private->logo_ymirror_prop = prop;
-
-	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
 					 "ASYNC_COMMIT", 0, 1);
 	if (!prop)
 		return -ENOMEM;
 	private->async_commit_prop = prop;
+
+	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
+					 "SHARE_ID", 0, UINT_MAX);
+	if (!prop)
+		return -ENOMEM;
+	private->share_id_prop = prop;
 
 	return drm_mode_create_tv_properties(dev, 0, NULL);
 }
@@ -1348,10 +1343,10 @@ static void rockchip_attach_connector_property(struct drm_device *drm)
 
 	drm_connector_list_iter_begin(drm, &conn_iter);
 	drm_for_each_connector_iter(connector, &conn_iter) {
-		ROCKCHIP_PROP_ATTACH(conf->tv_brightness_property, 100);
-		ROCKCHIP_PROP_ATTACH(conf->tv_contrast_property, 100);
-		ROCKCHIP_PROP_ATTACH(conf->tv_saturation_property, 100);
-		ROCKCHIP_PROP_ATTACH(conf->tv_hue_property, 100);
+		ROCKCHIP_PROP_ATTACH(conf->tv_brightness_property, 50);
+		ROCKCHIP_PROP_ATTACH(conf->tv_contrast_property, 50);
+		ROCKCHIP_PROP_ATTACH(conf->tv_saturation_property, 50);
+		ROCKCHIP_PROP_ATTACH(conf->tv_hue_property, 50);
 	}
 	drm_connector_list_iter_end(&conn_iter);
 #undef ROCKCHIP_PROP_ATTACH
@@ -1376,33 +1371,23 @@ static void rockchip_drm_set_property_default(struct drm_device *drm)
 	}
 	state->acquire_ctx = conf->acquire_ctx;
 
-#define CONNECTOR_SET_PROP(prop, val) \
-	do { \
-		ret = drm_atomic_set_property(state, &connector->base, \
-					      prop, \
-					      val); \
-		if (ret) \
-			DRM_ERROR("Connector[%d]: Failed to initial %s\n", \
-				  connector->base.id, #prop); \
-	} while (0)
-
 	drm_connector_list_iter_begin(drm, &conn_iter);
 	drm_for_each_connector_iter(connector, &conn_iter) {
 		struct drm_connector_state *connector_state;
 
 		connector_state = drm_atomic_get_connector_state(state,
 								 connector);
-		if (IS_ERR(connector_state))
-			DRM_ERROR("Connector[%d]: Failed to get state\n",
-				  connector->base.id);
+		if (IS_ERR(connector_state)) {
+			DRM_ERROR("Connector[%d]: Failed to get state\n", connector->base.id);
+			continue;
+		}
 
-		CONNECTOR_SET_PROP(conf->tv_brightness_property, 50);
-		CONNECTOR_SET_PROP(conf->tv_contrast_property, 50);
-		CONNECTOR_SET_PROP(conf->tv_saturation_property, 50);
-		CONNECTOR_SET_PROP(conf->tv_hue_property, 50);
+		connector_state->tv.brightness = 50;
+		connector_state->tv.contrast = 50;
+		connector_state->tv.saturation = 50;
+		connector_state->tv.hue = 50;
 	}
 	drm_connector_list_iter_end(&conn_iter);
-#undef CONNECTOR_SET_PROP
 
 	ret = drm_atomic_commit(state);
 	WARN_ON(ret == -EDEADLK);
@@ -1412,6 +1397,22 @@ static void rockchip_drm_set_property_default(struct drm_device *drm)
 
 err_unlock:
 	drm_modeset_unlock_all(drm);
+}
+
+static bool is_support_hotplug(uint32_t output_type)
+{
+	switch (output_type) {
+	case DRM_MODE_CONNECTOR_DVII:
+	case DRM_MODE_CONNECTOR_DVID:
+	case DRM_MODE_CONNECTOR_DVIA:
+	case DRM_MODE_CONNECTOR_DisplayPort:
+	case DRM_MODE_CONNECTOR_HDMIA:
+	case DRM_MODE_CONNECTOR_HDMIB:
+	case DRM_MODE_CONNECTOR_TV:
+		return true;
+	default:
+		return false;
+	}
 }
 
 static int rockchip_drm_bind(struct device *dev)
@@ -1551,7 +1552,6 @@ err_fbdev_fini:
 err_kms_helper_poll_fini:
 	rockchip_gem_pool_destroy(drm_dev);
 	drm_kms_helper_poll_fini(drm_dev);
-	drm_vblank_cleanup(drm_dev);
 err_unbind_all:
 	component_unbind_all(dev, drm_dev);
 err_mode_config_cleanup:
@@ -1574,7 +1574,6 @@ static void rockchip_drm_unbind(struct device *dev)
 	rockchip_gem_pool_destroy(drm_dev);
 	drm_kms_helper_poll_fini(drm_dev);
 
-	drm_vblank_cleanup(drm_dev);
 	drm_atomic_helper_shutdown(drm_dev);
 	component_unbind_all(dev, drm_dev);
 	drm_mode_config_cleanup(drm_dev);

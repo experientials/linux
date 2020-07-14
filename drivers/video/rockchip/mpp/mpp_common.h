@@ -101,6 +101,28 @@ enum MPP_DEV_COMMAND_TYPE {
 	MPP_CMD_BUTT,
 };
 
+enum MPP_CLOCK_MODE {
+	CLK_MODE_BASE		= 0,
+	CLK_MODE_DEFAULT	= CLK_MODE_BASE,
+	CLK_MODE_DEBUG,
+	CLK_MODE_REDUCE,
+	CLK_MODE_NORMAL,
+	CLK_MODE_ADVANCED,
+	CLK_MODE_BUTT,
+};
+
+enum MPP_RESET_TYPE {
+	RST_TYPE_BASE		= 0,
+	RST_TYPE_A		= RST_TYPE_BASE,
+	RST_TYPE_H,
+	RST_TYPE_NIU_A,
+	RST_TYPE_NIU_H,
+	RST_TYPE_CORE,
+	RST_TYPE_CABAC,
+	RST_TYPE_HEVC_CABAC,
+	RST_TYPE_BUTT,
+};
+
 /* data common struct for parse out */
 struct mpp_request {
 	__u32 cmd;
@@ -155,6 +177,22 @@ struct reg_offset_elem {
 struct reg_offset_info {
 	u32 cnt;
 	struct reg_offset_elem elem[MPP_MAX_REG_TRANS_NUM];
+};
+
+struct mpp_clk_info {
+	struct clk *clk;
+
+	/* debug rate, from debugfs */
+	u32 debug_rate_hz;
+	/* normal rate, from dtsi */
+	u32 normal_rate_hz;
+	/* high performance rate, from dtsi */
+	u32 advanced_rate_hz;
+
+	u32 default_rate_hz;
+	u32 reduce_rate_hz;
+	/* record last used rate */
+	u32 used_rate_hz;
 };
 
 struct mpp_dev_var {
@@ -240,12 +278,14 @@ struct mpp_session {
 
 /* task state in work thread */
 enum mpp_task_state {
-	TASK_STATE_PENDING	= BIT(0),
-	TASK_STATE_RUNNING	= BIT(1),
-	TASK_STATE_START	= BIT(2),
-	TASK_STATE_IRQ		= BIT(3),
-	TASK_STATE_DONE		= BIT(4),
-	TASK_STATE_TIMEOUT	= BIT(5),
+	TASK_STATE_PENDING	= 0,
+	TASK_STATE_RUNNING	= 1,
+	TASK_STATE_START	= 2,
+	TASK_STATE_HANDLE	= 3,
+	TASK_STATE_IRQ		= 4,
+	TASK_STATE_FINISH	= 5,
+	TASK_STATE_TIMEOUT	= 6,
+	TASK_STATE_DONE		= 7,
 };
 
 /* The context for the a task */
@@ -263,7 +303,7 @@ struct mpp_task {
 	struct list_head mem_region_list;
 
 	/* state in the taskqueue */
-	enum mpp_task_state state;
+	unsigned long state;
 	atomic_t abort_request;
 	/* delayed work for hardware timeout */
 	struct delayed_work timeout_work;
@@ -296,15 +336,13 @@ struct mpp_taskqueue {
 	struct list_head mmu_list;
 };
 
-struct mpp_reset_clk {
-	struct list_head link;
-	struct reset_control *clk;
-	char name[20];
-};
-
 struct mpp_reset_group {
+	/* the flag for whether use rw_sem */
+	u32 rw_sem_on;
 	struct rw_semaphore rw_sem;
-	struct list_head clk;
+	struct reset_control *resets[RST_TYPE_BUTT];
+	/* for set rw_sem */
+	struct mpp_taskqueue *queue;
 };
 
 struct mpp_service {
@@ -316,7 +354,7 @@ struct mpp_service {
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif
-	u32 hw_support;
+	unsigned long hw_support;
 	atomic_t shutdown_request;
 	/* follows for device probe */
 	struct mpp_grf_info grf_infos[MPP_DRIVER_BUTT];
@@ -333,8 +371,8 @@ struct mpp_service {
  * struct mpp_hw_ops - context specific operations for device
  * @init	Do something when hardware probe.
  * @exit	Do something when hardware remove.
- * @power_on	Get pm and enable clks.
- * @power_off	Put pm and disable clks.
+ * @clk_on	Enable clocks.
+ * @clk_off	Disable clocks.
  * @get_freq	Get special freq for setting.
  * @set_freq	Set freq to hardware.
  * @reduce_freq	Reduce freq when hardware is not running.
@@ -343,8 +381,8 @@ struct mpp_service {
 struct mpp_hw_ops {
 	int (*init)(struct mpp_dev *mpp);
 	int (*exit)(struct mpp_dev *mpp);
-	int (*power_on)(struct mpp_dev *mpp);
-	int (*power_off)(struct mpp_dev *mpp);
+	int (*clk_on)(struct mpp_dev *mpp);
+	int (*clk_off)(struct mpp_dev *mpp);
 	int (*get_freq)(struct mpp_dev *mpp,
 			struct mpp_task *mpp_task);
 	int (*set_freq)(struct mpp_dev *mpp,
@@ -388,8 +426,6 @@ struct mpp_dev_ops {
 
 int mpp_taskqueue_init(struct mpp_taskqueue *queue,
 		       struct mpp_service *srv);
-int mpp_reset_group_init(struct mpp_reset_group *group,
-			 struct mpp_service *srv);
 
 struct mpp_mem_region *
 mpp_task_attach_fd(struct mpp_task *task, int fd);
@@ -426,11 +462,9 @@ int mpp_dev_reset(struct mpp_dev *mpp);
 irqreturn_t mpp_dev_irq(int irq, void *param);
 irqreturn_t mpp_dev_isr_sched(int irq, void *param);
 
-struct reset_control *
-mpp_reset_control_get(struct mpp_dev *mpp, const char *name);
-
-int mpp_safe_reset(struct reset_control *rst);
-int mpp_safe_unreset(struct reset_control *rst);
+struct reset_control *mpp_reset_control_get(struct mpp_dev *mpp,
+					    enum MPP_RESET_TYPE type,
+					    const char *name);
 
 u32 mpp_get_grf(struct mpp_grf_info *grf_info);
 int mpp_set_grf(struct mpp_grf_info *grf_info);
@@ -442,6 +476,17 @@ int mpp_write_req(struct mpp_dev *mpp, u32 *regs,
 		  u32 start_idx, u32 end_idx, u32 en_idx);
 int mpp_read_req(struct mpp_dev *mpp, u32 *regs,
 		 u32 start_idx, u32 end_idx);
+
+int mpp_get_clk_info(struct mpp_dev *mpp,
+		     struct mpp_clk_info *clk_info,
+		     const char *name);
+int mpp_set_clk_info_rate_hz(struct mpp_clk_info *clk_info,
+			     enum MPP_CLOCK_MODE mode,
+			     unsigned long val);
+unsigned long mpp_get_clk_info_rate_hz(struct mpp_clk_info *clk_info,
+				       enum MPP_CLOCK_MODE mode);
+int mpp_clk_set_rate(struct mpp_clk_info *clk_info,
+		     enum MPP_CLOCK_MODE mode);
 
 static inline int mpp_write(struct mpp_dev *mpp, u32 reg, u32 val)
 {
@@ -487,6 +532,70 @@ static inline u32 mpp_read_relaxed(struct mpp_dev *mpp, u32 reg)
 		  "read reg[%03d] %04x: 0x%08x\n", idx, reg, val);
 
 	return val;
+}
+
+static inline int mpp_safe_reset(struct reset_control *rst)
+{
+	if (rst)
+		reset_control_assert(rst);
+
+	return 0;
+}
+
+static inline int mpp_safe_unreset(struct reset_control *rst)
+{
+	if (rst)
+		reset_control_deassert(rst);
+
+	return 0;
+}
+
+static inline int mpp_clk_safe_enable(struct clk *clk)
+{
+	if (clk)
+		clk_prepare_enable(clk);
+
+	return 0;
+}
+
+static inline int mpp_clk_safe_disable(struct clk *clk)
+{
+	if (clk)
+		clk_disable_unprepare(clk);
+
+	return 0;
+}
+
+static inline int mpp_reset_down_read(struct mpp_reset_group *group)
+{
+	if (group && group->rw_sem_on)
+		down_read(&group->rw_sem);
+
+	return 0;
+}
+
+static inline int mpp_reset_up_read(struct mpp_reset_group *group)
+{
+	if (group && group->rw_sem_on)
+		up_read(&group->rw_sem);
+
+	return 0;
+}
+
+static inline int mpp_reset_down_write(struct mpp_reset_group *group)
+{
+	if (group && group->rw_sem_on)
+		down_write(&group->rw_sem);
+
+	return 0;
+}
+
+static inline int mpp_reset_up_write(struct mpp_reset_group *group)
+{
+	if (group && group->rw_sem_on)
+		up_write(&group->rw_sem);
+
+	return 0;
 }
 
 /* workaround according hardware */

@@ -171,7 +171,9 @@ static void __dwc3_set_mode(struct work_struct *work)
 				otg_set_vbus(dwc->usb2_phy->otg, true);
 			phy_set_mode(dwc->usb2_generic_phy, PHY_MODE_USB_HOST);
 			phy_set_mode(dwc->usb3_generic_phy, PHY_MODE_USB_HOST);
-			phy_calibrate(dwc->usb2_generic_phy);
+			if (!of_device_is_compatible(dwc->dev->parent->of_node,
+						     "rockchip,rk3399-dwc3"))
+				phy_calibrate(dwc->usb2_generic_phy);
 		}
 		break;
 	case DWC3_GCTL_PRTCAP_DEVICE:
@@ -242,7 +244,10 @@ runtime:
 					     PHY_MODE_USB_HOST);
 				phy_set_mode(dwc->usb3_generic_phy,
 					     PHY_MODE_USB_HOST);
-				phy_calibrate(dwc->usb2_generic_phy);
+				if (!of_device_is_compatible(
+						dwc->dev->parent->of_node,
+						"rockchip,rk3399-dwc3"))
+					phy_calibrate(dwc->usb2_generic_phy);
 			}
 			break;
 		case DWC3_GCTL_PRTCAP_DEVICE:
@@ -1276,7 +1281,9 @@ static int dwc3_core_init_mode(struct dwc3 *dwc)
 				dev_err(dev, "failed to initialize host\n");
 			return ret;
 		}
-		phy_calibrate(dwc->usb2_generic_phy);
+		if (!of_device_is_compatible(dwc->dev->parent->of_node,
+					     "rockchip,rk3399-dwc3"))
+			phy_calibrate(dwc->usb2_generic_phy);
 		break;
 	case USB_DR_MODE_OTG:
 		INIT_WORK(&dwc->drd_work, __dwc3_set_mode);
@@ -1559,6 +1566,17 @@ static int dwc3_probe(struct platform_device *pdev)
 	dwc->reset = devm_reset_control_get_optional_shared(dev, NULL);
 	if (IS_ERR(dwc->reset))
 		return PTR_ERR(dwc->reset);
+
+	ret = reset_control_deassert(dwc->reset);
+	if (ret)
+		return ret;
+
+	/* Reset the whole dwc3 controller */
+	ret = reset_control_assert(dwc->reset);
+	if (ret)
+		return ret;
+
+	udelay(1);
 
 	ret = reset_control_deassert(dwc->reset);
 	if (ret)

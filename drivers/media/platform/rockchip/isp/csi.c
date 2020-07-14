@@ -415,8 +415,7 @@ int rkisp_csi_config_patch(struct rkisp_device *dev)
 	if (IS_HDR_RDBK(dev->hdr.op_mode))
 		isp_set_bits(dev->base_addr + CTRL_SWS_CFG,
 			     0, SW_MPIP_DROP_FRM_DIS);
-	dev->csi_dev.is_first = true;
-	kfifo_reset(&dev->csi_dev.rdbk_kfifo);
+	dev->csi_dev.is_isp_end = true;
 	return ret;
 }
 
@@ -455,7 +454,8 @@ void rkisp_trigger_read_back(struct rkisp_csi_device *csi, u8 dma2frm)
 	v4l2_dbg(2, rkisp_debug, &dev->v4l2_dev,
 		 "isp readback frame:%d time:%d\n",
 		 cur_frame_id, dma2frm + 1);
-	writel(SW_CSI2RX_EN | SW_DMA_2FRM_MODE(dma2frm) | readl(addr), addr);
+	writel(SW_DMA_2FRM_MODE(dma2frm) | SW_IBUF_OP_MODE(dev->hdr.op_mode) |
+		   SW_CSI2RX_EN | readl(addr), addr);
 }
 
 /* handle read back event from user or isp idle isr */
@@ -475,13 +475,20 @@ int rkisp_csi_trigger_event(struct rkisp_csi_device *csi, void *arg)
 	spin_lock_irqsave(&csi->rdbk_lock, lock_flags);
 	if (!trigger)
 		csi->is_isp_end = true;
+
+	/* isp doesn't ready to read back */
+	if (dev->isp_state != ISP_START) {
+		if (trigger)
+			kfifo_in(fifo, trigger, sizeof(*trigger));
+		csi->is_isp_end = true;
+		goto end;
+	}
+
 	if (trigger &&
-	    (csi->is_first ||
-	     (csi->is_isp_end && kfifo_is_empty(fifo)))) {
+	    (csi->is_isp_end && kfifo_is_empty(fifo))) {
 		/* isp idle and no event in queue
 		 * start read back direct
 		 */
-		csi->is_first = false;
 		dev->dmarx_dev.pre_frame = dev->dmarx_dev.cur_frame;
 		dev->dmarx_dev.cur_frame.id = trigger->frame_id;
 		dev->dmarx_dev.cur_frame.timestamp = trigger->frame_timestamp;
@@ -509,6 +516,7 @@ int rkisp_csi_trigger_event(struct rkisp_csi_device *csi, void *arg)
 			v4l2_err(&dev->v4l2_dev,
 				 "csi trigger fifo is full\n");
 	}
+end:
 	spin_unlock_irqrestore(&csi->rdbk_lock, lock_flags);
 
 	if (times >= 0)

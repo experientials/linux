@@ -79,8 +79,8 @@
 				(RKVENC_BIT_AXI_WRITE_CHANNEL) |\
 				(RKVENC_BIT_AXI_READ_CHANNEL) |\
 				(RKVENC_BIT_TIMEOUT))
-
-#define RKVENC_ENC_PIC_INDEX			10
+#define RKVENC_ENC_RSL_INDEX			12
+#define RKVENC_ENC_PIC_INDEX			13
 #define RKVENC_ENC_PIC_BASE			0x034
 #define RKVENC_GET_FORMAT(x)			((x) & 0x1)
 #define RKVENC_ENC_PIC_NODE_INT_EN		BIT(31)
@@ -105,6 +105,10 @@
 #define RKVENC_L2_WRITE_BASE			(0x3f4)
 #define RKVENC_L2_READ_BASE			(0x3f8)
 #define RKVENC_L2_BURST_TYPE			BIT(0)
+
+#define RKVENC_GET_WIDTH(x)			(((x & 0x1ff) + 1) << 3)
+#define RKVENC_GET_HEIGHT(x)			((((x >> 16) & 0x1ff) + 1) << 3)
+#define RKVENC_DEFAULT_MAX_LOAD			(1920 * 1088)
 
 #define to_rkvenc_task(ctx)		\
 		container_of(ctx, struct rkvenc_task, mpp_task)
@@ -136,6 +140,9 @@ struct rkvenc_task {
 	u32 reg_offset;
 	u32 reg_num;
 	u32 reg[RKVENC_REG_L1_NUM];
+	u32 width;
+	u32 height;
+	u32 pixels;
 	/* level 2 register setting */
 	u32 reg_l2_offset;
 	u32 reg_l2_num;
@@ -143,8 +150,7 @@ struct rkvenc_task {
 	/* register offset info */
 	struct reg_offset_info off_inf;
 
-	unsigned long aclk_freq_mhz;
-	unsigned long clk_core_freq_mhz;
+	enum MPP_CLOCK_MODE clk_mode;
 	u32 irq_status;
 	/* req for current task */
 	u32 w_req_cnt;
@@ -156,15 +162,13 @@ struct rkvenc_task {
 struct rkvenc_dev {
 	struct mpp_dev mpp;
 
-	struct clk *aclk;
-	struct clk *hclk;
-	struct clk *clk_core;
+	struct mpp_clk_info aclk_info;
+	struct mpp_clk_info hclk_info;
+	struct mpp_clk_info core_clk_info;
+	u32 default_max_load;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs;
 #endif
-	u32 aclk_debug_mhz;
-	u32 clk_core_debug_mhz;
-	u32 session_max_buffers_debug;
 
 	struct reset_control *rst_a;
 	struct reset_control *rst_h;
@@ -174,8 +178,8 @@ struct rkvenc_dev {
 	struct regulator *vdd;
 	struct devfreq *devfreq;
 	unsigned long volt;
-	unsigned long core_freq_mhz;
-	unsigned long core_last_freq_hz;
+	unsigned long core_rate_hz;
+	unsigned long core_last_rate_hz;
 	struct ipa_power_model_data *model_data;
 	struct thermal_cooling_device *devfreq_cooling;
 #endif
@@ -341,6 +345,12 @@ static void *rkvenc_alloc_task(struct mpp_session *session,
 					      &task->off_inf, task->reg);
 	}
 	task->link_mode = RKVENC_MODE_ONEFRAME;
+	task->clk_mode = CLK_MODE_NORMAL;
+	/* get resolution info */
+	task->width = RKVENC_GET_WIDTH(task->reg[RKVENC_ENC_RSL_INDEX]);
+	task->height = RKVENC_GET_HEIGHT(task->reg[RKVENC_ENC_RSL_INDEX]);
+	task->pixels = task->width * task->height;
+	mpp_debug(DEBUG_TASK_INFO, "width=%d, height=%d\n", task->width, task->height);
 
 	mpp_debug_leave();
 
@@ -589,13 +599,13 @@ static int rkvenc_free_task(struct mpp_session *session,
 	return 0;
 }
 
+#ifdef CONFIG_DEBUG_FS
 static int rkvenc_debugfs_remove(struct mpp_dev *mpp)
 {
-#ifdef CONFIG_DEBUG_FS
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 
 	debugfs_remove_recursive(enc->debugfs);
-#endif
+
 	return 0;
 }
 
@@ -603,10 +613,6 @@ static int rkvenc_debugfs_init(struct mpp_dev *mpp)
 {
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 
-	enc->aclk_debug_mhz = 0;
-	enc->clk_core_debug_mhz = 0;
-	enc->session_max_buffers_debug = 0;
-#ifdef CONFIG_DEBUG_FS
 	enc->debugfs = debugfs_create_dir(mpp->dev->of_node->name,
 					  mpp->srv->debugfs);
 	if (IS_ERR_OR_NULL(enc->debugfs)) {
@@ -615,17 +621,25 @@ static int rkvenc_debugfs_init(struct mpp_dev *mpp)
 		return -EIO;
 	}
 	debugfs_create_u32("aclk", 0644,
-			   enc->debugfs, &enc->aclk_debug_mhz);
+			   enc->debugfs, &enc->aclk_info.debug_rate_hz);
 	debugfs_create_u32("clk_core", 0644,
-			   enc->debugfs, &enc->clk_core_debug_mhz);
+			   enc->debugfs, &enc->core_clk_info.debug_rate_hz);
 	debugfs_create_u32("session_buffers", 0644,
-			   enc->debugfs, &enc->session_max_buffers_debug);
-#endif
-	if (enc->session_max_buffers_debug)
-		mpp->session_max_buffers = enc->session_max_buffers_debug;
+			   enc->debugfs, &mpp->session_max_buffers);
 
 	return 0;
 }
+#else
+static inline int rkvenc_debugfs_remove(struct mpp_dev *mpp)
+{
+	return 0;
+}
+
+static inline int rkvenc_debugfs_init(struct mpp_dev *mpp)
+{
+	return 0;
+}
+#endif
 
 #ifdef CONFIG_PM_DEVFREQ
 static int rkvenc_devfreq_target(struct device *dev,
@@ -650,7 +664,7 @@ static int rkvenc_devfreq_target(struct device *dev,
 	dev_pm_opp_put(opp);
 
 	if (old_clk_rate == target_freq) {
-		enc->core_last_freq_hz = target_freq;
+		enc->core_last_rate_hz = target_freq;
 		if (enc->volt == target_volt)
 			return ret;
 		ret = regulator_set_voltage(enc->vdd, target_volt, INT_MAX);
@@ -672,9 +686,9 @@ static int rkvenc_devfreq_target(struct device *dev,
 	}
 
 	dev_dbg(dev, "%lu-->%lu\n", old_clk_rate, target_freq);
-	clk_set_rate(enc->clk_core, target_freq);
+	clk_set_rate(enc->core_clk_info.clk, target_freq);
 	stat->current_frequency = target_freq;
-	enc->core_last_freq_hz = target_freq;
+	enc->core_last_rate_hz = target_freq;
 
 	if (old_clk_rate > target_freq) {
 		ret = regulator_set_voltage(enc->vdd, target_volt, INT_MAX);
@@ -699,7 +713,7 @@ static int rkvenc_devfreq_get_cur_freq(struct device *dev,
 {
 	struct rkvenc_dev *enc = dev_get_drvdata(dev);
 
-	*freq = enc->core_last_freq_hz;
+	*freq = enc->core_last_rate_hz;
 
 	return 0;
 }
@@ -715,7 +729,7 @@ static int devfreq_venc_ondemand_func(struct devfreq *df, unsigned long *freq)
 	struct rkvenc_dev *enc = df->data;
 
 	if (enc)
-		*freq = enc->core_freq_mhz * MHZ;
+		*freq = enc->core_rate_hz;
 	else
 		*freq = df->previous_freq;
 
@@ -753,10 +767,11 @@ static struct devfreq_cooling_power venc_cooling_power_data = {
 static int rkvenc_devfreq_init(struct mpp_dev *mpp)
 {
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
+	struct clk *clk_core = enc->core_clk_info.clk;
 	struct devfreq_cooling_power *venc_dcp = &venc_cooling_power_data;
 	int ret = 0;
 
-	if (!enc->clk_core)
+	if (!clk_core)
 		return 0;
 
 	enc->vdd = devm_regulator_get_optional(mpp->dev, "venc");
@@ -784,7 +799,7 @@ static int rkvenc_devfreq_init(struct mpp_dev *mpp)
 		goto governor_err;
 	}
 
-	rkvenc_devfreq_profile.initial_freq = clk_get_rate(enc->clk_core);
+	rkvenc_devfreq_profile.initial_freq = clk_get_rate(clk_core);
 
 	enc->devfreq = devm_devfreq_add_device(mpp->dev,
 					       &rkvenc_devfreq_profile,
@@ -853,40 +868,36 @@ static int rkvenc_init(struct mpp_dev *mpp)
 
 	mpp->grf_info = &mpp->srv->grf_infos[MPP_DRIVER_RKVENC];
 
-	enc->aclk = devm_clk_get(mpp->dev, "aclk_vcodec");
-	if (IS_ERR(enc->aclk)) {
+	/* Get clock info from dtsi */
+	ret = mpp_get_clk_info(mpp, &enc->aclk_info, "aclk_vcodec");
+	if (ret)
 		mpp_err("failed on clk_get aclk_vcodec\n");
-		enc->aclk = NULL;
-	}
-	enc->hclk = devm_clk_get(mpp->dev, "hclk_vcodec");
-	if (IS_ERR(enc->hclk)) {
+	ret = mpp_get_clk_info(mpp, &enc->hclk_info, "hclk_vcodec");
+	if (ret)
 		mpp_err("failed on clk_get hclk_vcodec\n");
-		enc->hclk = NULL;
-	}
-	enc->clk_core = devm_clk_get(mpp->dev, "clk_core");
-	if (IS_ERR_OR_NULL(enc->clk_core)) {
-		dev_err(mpp->dev, "failed on clk_get core\n");
-		enc->clk_core = NULL;
-	}
+	ret = mpp_get_clk_info(mpp, &enc->core_clk_info, "clk_core");
+	if (ret)
+		mpp_err("failed on clk_get clk_core\n");
+	/* Get normal max workload from dtsi */
+	of_property_read_u32(mpp->dev->of_node,
+			     "rockchip,default-max-load",
+			     &enc->default_max_load);
+	if (!enc->default_max_load)
+		enc->default_max_load = RKVENC_DEFAULT_MAX_LOAD;
+	/* Set default rates */
+	mpp_set_clk_info_rate_hz(&enc->aclk_info, CLK_MODE_DEFAULT, 300 * MHZ);
+	mpp_set_clk_info_rate_hz(&enc->core_clk_info, CLK_MODE_DEFAULT, 600 * MHZ);
 
-	enc->rst_a = devm_reset_control_get_shared(mpp->dev, "video_a");
-	if (IS_ERR_OR_NULL(enc->rst_a)) {
+	/* Get reset control from dtsi */
+	enc->rst_a = mpp_reset_control_get(mpp, RST_TYPE_A, "video_a");
+	if (!enc->rst_a)
 		mpp_err("No aclk reset resource define\n");
-		enc->rst_a = NULL;
-	}
-	enc->rst_h = devm_reset_control_get_shared(mpp->dev, "video_h");
-	if (IS_ERR_OR_NULL(enc->rst_h)) {
+	enc->rst_h = mpp_reset_control_get(mpp, RST_TYPE_H, "video_h");
+	if (!enc->rst_h)
 		mpp_err("No hclk reset resource define\n");
-		enc->rst_h = NULL;
-	}
-	enc->rst_core = devm_reset_control_get_shared(mpp->dev, "video_core");
-	if (IS_ERR_OR_NULL(enc->rst_core)) {
+	enc->rst_core = mpp_reset_control_get(mpp, RST_TYPE_CORE, "video_core");
+	if (!enc->rst_core)
 		mpp_err("No core reset resource define\n");
-		enc->rst_core = NULL;
-	}
-	mpp_safe_unreset(enc->rst_a);
-	mpp_safe_unreset(enc->rst_h);
-	mpp_safe_unreset(enc->rst_core);
 
 #ifdef CONFIG_PM_DEVFREQ
 	ret = rkvenc_devfreq_init(mpp);
@@ -914,10 +925,8 @@ static int rkvenc_reset(struct mpp_dev *mpp)
 	if (enc->devfreq)
 		mutex_lock(&enc->devfreq->lock);
 #endif
-	if (enc->aclk)
-		clk_set_rate(enc->aclk, 50 * MHZ);
-	if (enc->clk_core)
-		clk_set_rate(enc->clk_core, 50 * MHZ);
+	mpp_clk_set_rate(&enc->aclk_info, CLK_MODE_REDUCE);
+	mpp_clk_set_rate(&enc->core_clk_info, CLK_MODE_REDUCE);
 
 	mpp_write(mpp, RKVENC_INT_EN_BASE, RKVENC_SAFE_CLR_BIT);
 	mpp_write(mpp, RKVENC_CLR_BASE, RKVENC_SAFE_CLR_BIT);
@@ -942,30 +951,24 @@ static int rkvenc_reset(struct mpp_dev *mpp)
 	return 0;
 }
 
-static int rkvenc_power_on(struct mpp_dev *mpp)
+static int rkvenc_clk_on(struct mpp_dev *mpp)
 {
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 
-	if (enc->aclk)
-		clk_prepare_enable(enc->aclk);
-	if (enc->hclk)
-		clk_prepare_enable(enc->hclk);
-	if (enc->clk_core)
-		clk_prepare_enable(enc->clk_core);
+	mpp_clk_safe_enable(enc->aclk_info.clk);
+	mpp_clk_safe_enable(enc->hclk_info.clk);
+	mpp_clk_safe_enable(enc->core_clk_info.clk);
 
 	return 0;
 }
 
-static int rkvenc_power_off(struct mpp_dev *mpp)
+static int rkvenc_clk_off(struct mpp_dev *mpp)
 {
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 
-	if (enc->aclk)
-		clk_disable_unprepare(enc->aclk);
-	if (enc->hclk)
-		clk_disable_unprepare(enc->hclk);
-	if (enc->clk_core)
-		clk_disable_unprepare(enc->clk_core);
+	clk_disable_unprepare(enc->aclk_info.clk);
+	clk_disable_unprepare(enc->hclk_info.clk);
+	clk_disable_unprepare(enc->core_clk_info.clk);
 
 	return 0;
 }
@@ -973,10 +976,31 @@ static int rkvenc_power_off(struct mpp_dev *mpp)
 static int rkvenc_get_freq(struct mpp_dev *mpp,
 			   struct mpp_task *mpp_task)
 {
+	u32 task_cnt;
+	u32 workload;
+	struct mpp_task *loop = NULL, *n;
+	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 	struct rkvenc_task *task = to_rkvenc_task(mpp_task);
 
-	task->aclk_freq_mhz = 300;
-	task->clk_core_freq_mhz = 600;
+	task_cnt = 1;
+	workload = task->pixels;
+	/* calc workload in pending list */
+	mutex_lock(&mpp->queue->pending_lock);
+	list_for_each_entry_safe(loop, n,
+				 &mpp->queue->pending_list,
+				 queue_link) {
+		struct rkvenc_task *loop_task = to_rkvenc_task(loop);
+
+		task_cnt++;
+		workload += loop_task->pixels;
+	}
+	mutex_unlock(&mpp->queue->pending_lock);
+
+	if (workload > enc->default_max_load)
+		task->clk_mode = CLK_MODE_ADVANCED;
+
+	mpp_debug(DEBUG_TASK_INFO, "pending task %d, workload %d, clk_mode=%d\n",
+		  task_cnt, workload, task->clk_mode);
 
 	return 0;
 }
@@ -987,43 +1011,39 @@ static int rkvenc_set_freq(struct mpp_dev *mpp,
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 	struct rkvenc_task *task = to_rkvenc_task(mpp_task);
 
-	task->aclk_freq_mhz = enc->aclk_debug_mhz ?
-		enc->aclk_debug_mhz : task->aclk_freq_mhz;
-	task->clk_core_freq_mhz = enc->clk_core_debug_mhz ?
-		enc->clk_core_debug_mhz : task->clk_core_freq_mhz;
-
-	if (enc->aclk)
-		clk_set_rate(enc->aclk, task->aclk_freq_mhz * MHZ);
+	mpp_clk_set_rate(&enc->aclk_info, task->clk_mode);
 
 #ifdef CONFIG_PM_DEVFREQ
 	if (enc->devfreq) {
+		unsigned long core_rate_hz;
+
 		mutex_lock(&enc->devfreq->lock);
-		if (enc->core_freq_mhz != task->clk_core_freq_mhz) {
-			enc->core_freq_mhz = task->clk_core_freq_mhz;
+		core_rate_hz = mpp_get_clk_info_rate_hz(&enc->core_clk_info, task->clk_mode);
+		if (enc->core_rate_hz != core_rate_hz) {
+			enc->core_rate_hz = core_rate_hz;
 			update_devfreq(enc->devfreq);
 		} else {
 			/*
 			 * Restore frequency when frequency is changed by
 			 * rkvenc_reduce_freq()
 			 */
-			clk_set_rate(enc->clk_core, enc->core_last_freq_hz);
+			clk_set_rate(enc->core_clk_info.clk, enc->core_last_rate_hz);
 		}
 		mutex_unlock(&enc->devfreq->lock);
 		return 0;
 	}
 #else
-	if (enc->clk_core)
-		clk_set_rate(enc->clk_core, task->clk_core_freq_mhz * MHZ);
-
+	mpp_clk_set_rate(&enc->core_clk_info, task->clk_mode);
 #endif
+
 	return 0;
 }
 
 static struct mpp_hw_ops rkvenc_hw_ops = {
 	.init = rkvenc_init,
 	.exit = rkvenc_exit,
-	.power_on = rkvenc_power_on,
-	.power_off = rkvenc_power_off,
+	.clk_on = rkvenc_clk_on,
+	.clk_off = rkvenc_clk_off,
 	.get_freq = rkvenc_get_freq,
 	.set_freq = rkvenc_set_freq,
 	.reset = rkvenc_reset,
@@ -1093,7 +1113,6 @@ static int rkvenc_probe(struct platform_device *pdev)
 
 	mpp->session_max_buffers = RKVENC_SESSION_MAX_BUFFERS;
 	rkvenc_debugfs_init(mpp);
-
 	dev_info(dev, "probing finish\n");
 
 	return 0;

@@ -11,6 +11,7 @@
 #include <linux/extcon-provider.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/gpio/consumer.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
@@ -39,6 +40,12 @@ enum rockchip_usb2phy_port_id {
 	USB2PHY_PORT_OTG,
 	USB2PHY_PORT_HOST,
 	USB2PHY_NUM_PORTS,
+};
+
+enum calibrate_state {
+	SWING_CALIBRATION,
+	CURRENT_COMPENSATION,
+	CALIBRATION_DONE,
 };
 
 static const unsigned int rockchip_usb2phy_extcon_cable[] = {
@@ -141,6 +148,7 @@ struct rockchip_usb2phy_port_cfg {
  * @clks: array of input clocks
  * @num_clks: number of input clocks.
  * @phy_tuning: phy default parameters tuning.
+ * @phy_lowpower: phy low power mode.
  * @clkout_ctl: keep on/turn off output clk of phy.
  * @port_cfgs: ports register configuration, assigned by driver data.
  * @chg_det: charger detection registers.
@@ -152,6 +160,7 @@ struct rockchip_usb2phy_cfg {
 	const struct	clk_bulk_data *clks;
 	int		num_clks;
 	int		(*phy_tuning)(struct rockchip_usb2phy *rphy);
+	int		(*phy_lowpower)(struct rockchip_usb2phy *rphy, bool en);
 	struct		usb2phy_reg clkout_ctl;
 	const struct	rockchip_usb2phy_port_cfg port_cfgs[USB2PHY_NUM_PORTS];
 	const struct	rockchip_chg_det_reg chg_det;
@@ -202,7 +211,7 @@ struct rockchip_usb2phy_port {
 
 /**
  * struct rockchip_usb2phy: usb2.0 phy driver data.
- * @dev: pointer to our struct device
+ * @dev: pointer to our struct device.
  * @grf: General Register Files regmap.
  * @base: the base address of APB interface.
  * @reset: power reset signal for phy.
@@ -212,7 +221,10 @@ struct rockchip_usb2phy_port {
  * @clk480m_hw: clock struct of phy output clk management.
  * @chg_type: USB charger types.
  * @edev_self: represent the source of extcon.
- * @edev: extcon device for notification registration
+ * @edev: extcon device for notification registration.
+ * @vup_gpio: gpio switch for pull-up register on DM.
+ * @wait_timer: hrtimer for phy calibration delay.
+ * @cal_state: state of phy calibration.
  * @phy_cfg: phy register configuration, assigned by driver data.
  * @ports: phy port instance.
  */
@@ -228,6 +240,9 @@ struct rockchip_usb2phy {
 	enum power_supply_type	chg_type;
 	bool			edev_self;
 	struct extcon_dev	*edev;
+	struct gpio_desc	*vup_gpio;
+	struct hrtimer		wait_timer;
+	enum calibrate_state	cal_state;
 	const struct		rockchip_usb2phy_cfg *phy_cfg;
 	struct			rockchip_usb2phy_port ports[USB2PHY_NUM_PORTS];
 };
@@ -569,23 +584,15 @@ static int rockchip_usb2phy_power_on(struct phy *phy)
 		goto unlock;
 	}
 
-	ret = clk_bulk_enable(rphy->num_clks, rphy->clks);
-	if (ret)
-		goto unlock;
-
 	ret = property_enable(rphy->grf, &rport->port_cfg->phy_sus, false);
 	if (ret)
-		goto disable_clks;
+		goto unlock;
 
 	/* waiting for the utmi_clk to become stable */
 	usleep_range(2500, 3000);
 
 	rport->suspended = false;
 
-	goto unlock;
-
-disable_clks:
-	clk_bulk_disable(rphy->num_clks, rphy->clks);
 unlock:
 	mutex_unlock(&rport->mutex);
 
@@ -610,8 +617,6 @@ static int rockchip_usb2phy_power_off(struct phy *phy)
 	ret = property_enable(rphy->grf, &rport->port_cfg->phy_sus, true);
 	if (ret)
 		goto unlock;
-
-	clk_bulk_disable(rphy->num_clks, rphy->clks);
 
 	rport->suspended = true;
 
@@ -685,13 +690,87 @@ static int rockchip_usb2phy_set_mode(struct phy *phy, enum phy_mode mode)
 	return ret;
 }
 
-static const struct phy_ops rockchip_usb2phy_ops = {
-	.init		= rockchip_usb2phy_init,
-	.exit		= rockchip_usb2phy_exit,
-	.power_on	= rockchip_usb2phy_power_on,
-	.power_off	= rockchip_usb2phy_power_off,
-	.set_mode	= rockchip_usb2phy_set_mode,
-	.owner		= THIS_MODULE,
+static enum hrtimer_restart rv1126_wait_timer_fn(struct hrtimer *t)
+{
+	enum hrtimer_restart ret;
+	ktime_t delay;
+	static u32 reg;
+	struct rockchip_usb2phy *rphy = container_of(t, struct rockchip_usb2phy,
+						     wait_timer);
+
+	switch (rphy->cal_state) {
+	case SWING_CALIBRATION:
+		/* disable tx swing calibrate */
+		writel(0x5d, rphy->base + 0x20);
+		/* read the value of rsistance calibration */
+		reg = readl(rphy->base + 0x10);
+
+		/* open the pull-up resistor */
+		gpiod_set_value(rphy->vup_gpio, 1);
+		/* set cfg_hs_strg 0 to increase chirpk amplitude */
+		writel(0x08, rphy->base + 0x00);
+		/*
+		 * set internal 45 Ohm resistance minimal to
+		 * increase chirpk amplitude
+		 */
+		writel(0x7c, rphy->base + 0x10);
+
+		delay = ktime_set(0, 1200000);
+		hrtimer_forward_now(&rphy->wait_timer, delay);
+		rphy->cal_state = CURRENT_COMPENSATION;
+		ret = HRTIMER_RESTART;
+		break;
+	case CURRENT_COMPENSATION:
+		/* close the pull-up resistor */
+		gpiod_set_value(rphy->vup_gpio, 0);
+		/*
+		 * set cfg_sel_strength and cfg_sel_pw 1 to
+		 * correct the effect of pull-up resistor
+		 */
+		writel(0xe8, rphy->base + 0x00);
+		/* write the value of rsistance calibration */
+		writel(reg, rphy->base + 0x10);
+
+		delay = ktime_set(0, 1000000);
+		hrtimer_forward_now(&rphy->wait_timer, delay);
+		rphy->cal_state = CALIBRATION_DONE;
+		ret = HRTIMER_RESTART;
+		break;
+	case CALIBRATION_DONE:
+		/* enable tx swing calibrate */
+		writel(0x4d, rphy->base + 0x20);
+		/* fall through */
+	default:
+		ret = HRTIMER_NORESTART;
+		break;
+	}
+
+	return ret;
+}
+
+static int rv1126_usb2phy_calibrate(struct phy *phy)
+{
+	struct rockchip_usb2phy_port *rport = phy_get_drvdata(phy);
+	struct rockchip_usb2phy *rphy = dev_get_drvdata(phy->dev.parent);
+	ktime_t delay;
+
+	if (rport->port_id != USB2PHY_PORT_OTG)
+		return 0;
+
+	delay = ktime_set(0, 500000);
+	rphy->cal_state = SWING_CALIBRATION;
+	hrtimer_start(&rphy->wait_timer, delay, HRTIMER_MODE_REL);
+
+	return 0;
+}
+
+static struct phy_ops rockchip_usb2phy_ops = {
+	.init			= rockchip_usb2phy_init,
+	.exit			= rockchip_usb2phy_exit,
+	.power_on		= rockchip_usb2phy_power_on,
+	.power_off		= rockchip_usb2phy_power_off,
+	.set_mode		= rockchip_usb2phy_set_mode,
+	.owner			= THIS_MODULE,
 };
 
 static const char *chg_to_string(enum power_supply_type chg_type)
@@ -759,6 +838,9 @@ static void rockchip_chg_detect(struct rockchip_usb2phy *rphy,
 
 	usleep_range(1000, 1100);
 	reset_control_deassert(rphy->reset);
+	/* waiting for the utmi_clk to become stable */
+	usleep_range(2500, 3000);
+
 	/* disable the chg detection module */
 	property_enable(rphy->grf, &rphy->phy_cfg->chg_det.chg_rst, true);
 	property_enable(rphy->grf, &rphy->phy_cfg->chg_det.chg_en, false);
@@ -846,15 +928,7 @@ static void rockchip_usb2phy_otg_sm_work(struct work_struct *work)
 		if (rport->perip_connected)
 			return;
 
-		if (clk_bulk_enable(rphy->num_clks, rphy->clks))
-			return;
-
-		/* waiting for the utmi_clk to become stable */
-		usleep_range(2500, 3000);
-
 		rockchip_chg_detect(rphy, rport);
-
-		clk_bulk_disable(rphy->num_clks, rphy->clks);
 
 		switch (rphy->chg_type) {
 		case POWER_SUPPLY_TYPE_USB:
@@ -1065,6 +1139,39 @@ static int rockchip_usb2phy_otg_port_init(struct rockchip_usb2phy *rphy,
 		goto out;
 	}
 
+	/* Request otg iddig interrupt only if there is no extcon property */
+	if (rphy->edev_self) {
+		rport->id_irq = of_irq_get_byname(child_np, "otg-id");
+		if (rport->id_irq <= 0) {
+			dev_err(rphy->dev, "no otg id irq provided\n");
+			return -EINVAL;
+		}
+
+		ret = devm_request_threaded_irq(rphy->dev,
+						rport->id_irq, NULL,
+						rockchip_usb2phy_id_irq,
+						IRQF_ONESHOT,
+						"rockchip_usb2phy_id",
+						rport);
+		if (ret) {
+			dev_err(rphy->dev,
+				"failed to request otg-id irq handle\n");
+			return ret;
+		}
+
+		iddig = property_enabled(rphy->grf,
+					 &rport->port_cfg->utmi_iddig);
+		if (!iddig) {
+			extcon_set_state(rphy->edev, EXTCON_USB, false);
+			extcon_set_state(rphy->edev, EXTCON_USB_HOST, true);
+			extcon_set_state(rphy->edev, EXTCON_USB_VBUS_EN, true);
+			/* Enable VBUS supply */
+			ret = rockchip_set_vbus_power(rport, true);
+			if (ret)
+				return ret;
+		}
+	}
+
 	if (rport->vbus_always_on)
 		goto out;
 
@@ -1088,40 +1195,6 @@ static int rockchip_usb2phy_otg_port_init(struct rockchip_usb2phy *rphy,
 	}
 
 	INIT_DELAYED_WORK(&rport->otg_sm_work, rockchip_usb2phy_otg_sm_work);
-
-	if (!rphy->edev_self)
-		goto out;
-
-	/* Request otg iddig interrupt only if there is no extcon property */
-	rport->id_irq = of_irq_get_byname(child_np, "otg-id");
-	if (rport->id_irq <= 0) {
-		dev_err(rphy->dev, "no otg id irq provided\n");
-		return -EINVAL;
-	}
-
-	ret = devm_request_threaded_irq(rphy->dev,
-					rport->id_irq, NULL,
-					rockchip_usb2phy_id_irq,
-					IRQF_ONESHOT,
-					"rockchip_usb2phy_id",
-					rport);
-	if (ret) {
-		dev_err(rphy->dev,
-			"failed to request otg-id irq handle\n");
-		return ret;
-	}
-
-	iddig = property_enabled(rphy->grf,
-				 &rport->port_cfg->utmi_iddig);
-	if (!iddig) {
-		extcon_set_state(rphy->edev, EXTCON_USB, false);
-		extcon_set_state(rphy->edev, EXTCON_USB_HOST, true);
-		extcon_set_state(rphy->edev, EXTCON_USB_VBUS_EN, true);
-		/* Enable VBUS supply */
-		ret = rockchip_set_vbus_power(rport, true);
-		if (ret)
-			return ret;
-	}
 
 out:
 	/*
@@ -1236,6 +1309,13 @@ static int rockchip_usb2phy_probe(struct platform_device *pdev)
 	if (IS_ERR(rphy->reset))
 		return PTR_ERR(rphy->reset);
 
+	rphy->vup_gpio = devm_gpiod_get_optional(dev, "vup", GPIOD_OUT_LOW);
+	if (IS_ERR(rphy->vup_gpio)) {
+		ret = PTR_ERR(rphy->vup_gpio);
+		dev_err(dev, "failed to get vup gpio (%d)\n", ret);
+		return ret;
+	}
+
 	reset_control_assert(rphy->reset);
 	udelay(1);
 	reset_control_deassert(rphy->reset);
@@ -1307,6 +1387,15 @@ static int rockchip_usb2phy_probe(struct platform_device *pdev)
 		    of_node_cmp(child_np->name, "otg-port"))
 			goto next_child;
 
+		if (rphy->vup_gpio &&
+		    of_device_is_compatible(np, "rockchip,rv1126-usb2phy")) {
+			rockchip_usb2phy_ops.calibrate =
+						rv1126_usb2phy_calibrate;
+			hrtimer_init(&rphy->wait_timer, CLOCK_MONOTONIC,
+				     HRTIMER_MODE_REL);
+			rphy->wait_timer.function = &rv1126_wait_timer_fn;
+		}
+
 		phy = devm_phy_create(dev, child_np, &rockchip_usb2phy_ops);
 		if (IS_ERR(phy)) {
 			dev_err(dev, "failed to create phy\n");
@@ -1351,11 +1440,6 @@ next_child:
 	else
 		device_init_wakeup(rphy->dev, false);
 
-	/*
-	 * Let us disable clks here for saving power consumption, and usb
-	 * controller will resume it during probe time if needed.
-	 */
-	clk_bulk_disable(rphy->num_clks, rphy->clks);
 	return 0;
 
 put_child:
@@ -1368,12 +1452,20 @@ disable_clks:
 
 static int rockchip_usb2phy_remove(struct platform_device *pdev)
 {
+	struct device_node *np = pdev->dev.of_node;
+	struct rockchip_usb2phy *rphy = platform_get_drvdata(pdev);
+
+	if (rphy->vup_gpio &&
+	    of_device_is_compatible(np, "rockchip,rv1126-usb2phy"))
+		hrtimer_cancel(&rphy->wait_timer);
+
 	return 0;
 }
 
 static int rv1126_usb2phy_tuning(struct rockchip_usb2phy *rphy)
 {
 	int ret = 0;
+	u32 rcal, reg;
 
 	if (rphy->phy_cfg->reg == 0xff4c0000) {
 		/* set iddig interrupt filter time to 10ms */
@@ -1385,6 +1477,30 @@ static int rv1126_usb2phy_tuning(struct rockchip_usb2phy *rphy)
 		ret = regmap_write(rphy->grf, 0x1027c, 0x0f0f0100);
 		if (ret)
 			goto out;
+
+		reg = readl(rphy->base + 0x10);
+		/* Enable Rterm self calibration and wait for rcal trim done */
+		writel(reg & ~BIT(2), rphy->base + 0x10);
+		/*
+		 * If Rterm is disconnected, self calibration will fail and
+		 * rcal trim done will be set in about 3.5 us
+		 */
+		udelay(10);
+		if (readl(rphy->base + 0x34) & BIT(4)) {
+			dev_dbg(rphy->dev, "Rterm disconnected");
+		} else {
+			ret = readl_poll_timeout(rphy->base + 0x34, rcal,
+						 rcal & BIT(4),
+						 100, 600);
+			if (ret == -ETIMEDOUT)
+				dev_err(rphy->dev, "Rterm calibration timeout");
+			else
+				/* Use rcal out calibration code */
+				reg = (reg & ~(0x0f << 3)) |
+				      ((rcal & 0x0f) << 3);
+		}
+		/* Disable Rterm self calibration */
+		writel(reg | BIT(2), rphy->base + 0x10);
 	}
 
 	if (rphy->phy_cfg->reg == 0xff4c8000) {
@@ -1396,6 +1512,18 @@ static int rv1126_usb2phy_tuning(struct rockchip_usb2phy *rphy)
 
 out:
 	return ret;
+}
+
+static int rv1126_usb2phy_low_power(struct rockchip_usb2phy *rphy, bool en)
+{
+	unsigned int reg;
+
+	reg = readl(rphy->base + 0x20);
+	/* bypass or enable bc detect */
+	reg = en ? reg | BIT(5) : reg & ~BIT(5);
+	writel(reg, rphy->base + 0x20);
+
+	return 0;
 }
 
 static const struct clk_bulk_data rv1126_clks[] = {
@@ -1453,6 +1581,10 @@ static int rockchip_usb2phy_pm_suspend(struct device *dev)
 			enable_irq_wake(rport->ls_irq);
 	}
 
+	/* enter low power state */
+	if (rphy->phy_cfg->phy_lowpower)
+		ret = rphy->phy_cfg->phy_lowpower(rphy, true);
+
 	return ret;
 }
 
@@ -1468,8 +1600,9 @@ static int rockchip_usb2phy_pm_resume(struct device *dev)
 	if (device_may_wakeup(rphy->dev))
 		wakeup_enable = true;
 
-	if (rphy->phy_cfg->phy_tuning)
-		ret = rphy->phy_cfg->phy_tuning(rphy);
+	/* exit low power state */
+	if (rphy->phy_cfg->phy_lowpower)
+		ret = rphy->phy_cfg->phy_lowpower(rphy, false);
 
 	for (index = 0; index < rphy->phy_cfg->num_ports; index++) {
 		rport = &rphy->ports[index];
@@ -1532,6 +1665,7 @@ static const struct rockchip_usb2phy_cfg rv1126_phy_cfgs[] = {
 		.reg		= 0xff4c0000,
 		.num_ports	= 1,
 		.phy_tuning	= rv1126_usb2phy_tuning,
+		.phy_lowpower	= rv1126_usb2phy_low_power,
 		.num_clks	= 2,
 		.clks		= rv1126_clks,
 		.clkout_ctl	= { 0x10230, 14, 14, 0, 1 },
@@ -1577,6 +1711,7 @@ static const struct rockchip_usb2phy_cfg rv1126_phy_cfgs[] = {
 		.reg		= 0xff4c8000,
 		.num_ports	= 1,
 		.phy_tuning	= rv1126_usb2phy_tuning,
+		.phy_lowpower	= rv1126_usb2phy_low_power,
 		.num_clks	= 2,
 		.clks		= rv1126_clks,
 		.clkout_ctl	= { 0x10238, 9, 9, 0, 1 },

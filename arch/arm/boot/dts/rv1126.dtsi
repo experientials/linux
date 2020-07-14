@@ -1080,6 +1080,19 @@
 		status = "disabled";
 	};
 
+	crypto: crypto@ff500000 {
+		compatible = "rockchip,rv1126-crypto";
+		reg = <0xff500000 0x4000>;
+		interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru CLK_CRYPTO_CORE>, <&cru CLK_CRYPTO_PKA>,
+			<&cru ACLK_CRYPTO>, <&cru HCLK_CRYPTO>;
+		clock-names = "aclk", "hclk", "sclk", "apb_pclk";
+		power-domains = <&power RV1126_PD_CRYPTO>;
+		resets = <&cru SRST_CRYPTO_CORE>;
+		reset-names = "crypto-rst";
+		status = "disabled";
+	};
+
 	i2c1: i2c@ff510000 {
 		compatible = "rockchip,rv1126-i2c", "rockchip,rk3399-i2c";
 		reg = <0xff510000 0x1000>;
@@ -1289,6 +1302,23 @@
 		npu_leakage: npu-leakage@19 {
 			reg = <0x19 0x1>;
 		};
+		cpu_tsadc_trim_l: cpu-tsadc-trim-l@23 {
+			reg = <0x23 0x1>;
+		};
+		cpu_tsadc_trim_h: cpu-tsadc-trim-h@24 {
+			reg = <0x24 0x1>;
+			bits = <0 4>;
+		};
+		npu_tsadc_trim_l: npu-tsadc-trim-l@25 {
+			reg = <0x25 0x1>;
+		};
+		npu_tsadc_trim_h: npu-tsadc-trim-h@26 {
+			reg = <0x26 0x1>;
+			bits = <0 4>;
+		};
+		tsadc_trim_base: tsadc-trim-base@27 {
+			reg = <0x27 0x1>;
+		};
 	};
 
 	saradc: saradc@ff5e0000 {
@@ -1318,6 +1348,13 @@
 		reset-names = "tsadc-apb", "tsadc", "tsadc-phy";
 		rockchip,hw-tshut-temp = <120000>;
 		#thermal-sensor-cells = <1>;
+		nvmem-cells = <&cpu_tsadc_trim_l>, <&cpu_tsadc_trim_h>, <&tsadc_trim_base>;
+		nvmem-cell-names = "trim_l", "trim_h", "trim_base";
+		rockchip,hw-tshut-mode = <0>; /* tshut mode 0:CRU 1:GPIO */
+		rockchip,hw-tshut-polarity = <0>; /* tshut polarity 0:LOW 1:HIGH */
+		pinctrl-names = "gpio", "otpout";
+		pinctrl-0 = <&tsadcm0_pins>;
+		pinctrl-1 = <&tsadc_shutorg>;
 		status = "disabled";
 	};
 
@@ -1336,6 +1373,13 @@
 		reset-names = "tsadc-apb", "tsadc", "tsadc-phy";
 		rockchip,hw-tshut-temp = <120000>;
 		#thermal-sensor-cells = <1>;
+		nvmem-cells = <&npu_tsadc_trim_l>, <&npu_tsadc_trim_h>, <&tsadc_trim_base>;
+		nvmem-cell-names = "trim_l", "trim_h", "trim_base";
+		rockchip,hw-tshut-mode = <0>; /* tshut mode 0:CRU 1:GPIO */
+		rockchip,hw-tshut-polarity = <0>; /* tshut polarity 0:LOW 1:HIGH */
+		pinctrl-names = "gpio", "otpout";
+		pinctrl-0 = <&tsadcm0_pins>;
+		pinctrl-1 = <&tsadc_shutorg>;
 		status = "disabled";
 	};
 
@@ -1849,6 +1893,9 @@
 		clocks = <&cru ACLK_VENC>, <&cru HCLK_VENC>,
 			<&cru CLK_VENC_CORE>;
 		clock-names = "aclk_vcodec", "hclk_vcodec", "clk_core";
+		rockchip,normal-rates = <300000000>, <0>, <400000000>;
+		rockchip,advanced-rates = <300000000>, <0>, <600000000>;
+		rockchip,default-max-load = <2088960>;
 		resets = <&cru SRST_VENC_A>, <&cru SRST_VENC_H>,
 			<&cru SRST_VENC_CORE>;
 		reset-names = "video_a", "video_h", "video_core";

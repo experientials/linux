@@ -10,6 +10,7 @@
  * V0.0X01.0X04 add enum_frame_interval function.
  * V0.0X01.0X05 fix gain reg, add otp and dpc.
  * V0.0X01.0X06 add set dpc cfg.
+ * V0.0X01.0X07 support enum sensor fmt
  */
 
 #include <linux/clk.h>
@@ -31,7 +32,7 @@
 #include <media/v4l2-subdev.h>
 #include <linux/pinctrl/consumer.h>
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x06)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x07)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -88,6 +89,8 @@
 #define OF_CAMERA_HDR_MODE		"rockchip,camera-hdr-mode"
 #define GC4C33_NAME			"gc4c33"
 
+#define GC4C33_ENABLE_DPCC
+#define GC4C33_ENABLE_OTP
 //#define GC4C33_ENABLE_HIGHLIGHT
 
 static const char * const gc4c33_supply_names[] = {
@@ -507,7 +510,6 @@ static const struct regval gc4c33_linear10bit_2560x1440_regs[] = {
 	{0x00c8, 0x15},
 	{0x00df, 0x0a},
 	{0x00de, 0xfe},
-	{0x00aa, 0x3a},
 	{0x00c0, 0x0a},
 	{0x031c, 0x80},
 	{0x031f, 0x10},
@@ -560,10 +562,6 @@ static const struct regval gc4c33_linear10bit_2560x1440_regs[] = {
 	{0x00e9, 0x00},
 	{0x00ea, 0xf0},
 	{0x00ef, 0x04},
-	{0x00a1, 0x05},
-	{0x00a2, 0x05},
-	{0x00a7, 0x00},
-	{0x00a8, 0x20},
 	{0x00a9, 0x20},
 	{0x00b3, 0x00},
 	{0x00b4, 0x10},
@@ -585,7 +583,7 @@ static const struct regval gc4c33_linear10bit_2560x1440_regs[] = {
 	{0x0115, 0x12},
 	{0x0103, 0x00},
 	{0x0104, 0x20},
-	{0x00aa, 0x3a},
+	{0x00aa, 0x38},
 	{0x00a7, 0x18},
 	{0x00a8, 0x10},
 	{0x00a1, 0xFF},
@@ -1427,22 +1425,23 @@ static int gc4c33_set_dpcc_cfg(struct gc4c33 *gc4c33,
 {
 	int ret = 0;
 
+#ifdef GC4C33_ENABLE_DPCC
 	if (dpcc->enable) {
 		ret = gc4c33_write_reg(gc4c33->client,
 				       GC4C33_REG_DPCC_ENABLE,
 				       GC4C33_REG_VALUE_08BIT,
-				       0x3a);
+				       0x38 | (dpcc->enable & 0x03));
 
 		ret |= gc4c33_write_reg(gc4c33->client,
 					GC4C33_REG_DPCC_SINGLE,
 					GC4C33_REG_VALUE_08BIT,
-					255 - dpcc->cur_dpcc *
+					255 - dpcc->cur_single_dpcc *
 					255 / dpcc->total_dpcc);
 
 		ret |= gc4c33_write_reg(gc4c33->client,
 					GC4C33_REG_DPCC_DOUBLE,
 					GC4C33_REG_VALUE_08BIT,
-					255 - dpcc->cur_dpcc *
+					255 - dpcc->cur_multiple_dpcc *
 					255 / dpcc->total_dpcc);
 	} else {
 		ret = gc4c33_write_reg(gc4c33->client,
@@ -1460,6 +1459,22 @@ static int gc4c33_set_dpcc_cfg(struct gc4c33 *gc4c33,
 					GC4C33_REG_VALUE_08BIT,
 					0xff);
 	}
+#else
+	ret = gc4c33_write_reg(gc4c33->client,
+			       GC4C33_REG_DPCC_ENABLE,
+			       GC4C33_REG_VALUE_08BIT,
+			       0x38);
+
+	ret |= gc4c33_write_reg(gc4c33->client,
+				GC4C33_REG_DPCC_SINGLE,
+				GC4C33_REG_VALUE_08BIT,
+				0xff);
+
+	ret |= gc4c33_write_reg(gc4c33->client,
+				GC4C33_REG_DPCC_DOUBLE,
+				GC4C33_REG_VALUE_08BIT,
+				0xff);
+#endif
 
 	return ret;
 }
@@ -1681,6 +1696,7 @@ static long gc4c33_compat_ioctl32(struct v4l2_subdev *sd,
 }
 #endif
 
+#ifdef GC4C33_ENABLE_OTP
 static int gc4c33_sensor_dpc_otp_dd(struct gc4c33 *gc4c33)
 {
 	u32 num = 0;
@@ -1783,6 +1799,7 @@ static int gc4c33_sensor_dpc_otp_dd(struct gc4c33 *gc4c33)
 
 	return ret;
 }
+#endif
 
 static int __gc4c33_start_stream(struct gc4c33 *gc4c33)
 {
@@ -1792,9 +1809,11 @@ static int __gc4c33_start_stream(struct gc4c33 *gc4c33)
 	if (ret)
 		return ret;
 
+#ifdef GC4C33_ENABLE_OTP
 	ret = gc4c33_sensor_dpc_otp_dd(gc4c33);
 	if (ret)
 		return ret;
+#endif
 
 	/* In case these controls are set before streaming */
 	mutex_unlock(&gc4c33->mutex);
@@ -2022,12 +2041,11 @@ static int gc4c33_enum_frame_interval(struct v4l2_subdev *sd,
 	if (fie->index >= ARRAY_SIZE(supported_modes))
 		return -EINVAL;
 
-	if (fie->code != MEDIA_BUS_FMT_SRGGB10_1X10)
-		return -EINVAL;
-
+	fie->code = MEDIA_BUS_FMT_SRGGB10_1X10;
 	fie->width = supported_modes[fie->index].width;
 	fie->height = supported_modes[fie->index].height;
 	fie->interval = supported_modes[fie->index].max_fps;
+	fie->reserved[0] = supported_modes[fie->index].hdr_mode;
 	return 0;
 }
 
