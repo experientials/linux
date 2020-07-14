@@ -506,7 +506,7 @@
 			mipi_in_ucam0: endpoint@1 {
 				reg = <1>;
 				remote-endpoint = <&ucam_out0>;
-				data-lanes = <1 2>;
+				data-lanes = <1 2 3 4>;
 			};
 		};
 		port@1 {
@@ -780,8 +780,8 @@
 			};
 
 			vcc_dvdd: LDO_REG6 {
-				regulator-min-microvolt = <1300000>;
-				regulator-max-microvolt = <1300000>;
+				regulator-min-microvolt = <1200000>;
+				regulator-max-microvolt = <1200000>;
 				regulator-name = "vcc_dvdd";
 				regulator-state-mem {
 					regulator-off-in-suspend;
@@ -903,9 +903,9 @@
 
 	};
 
-	gc4c33: gc4c33@29 {
-		compatible = "galaxycore,gc4c33";
-		reg = <0x29>;
+	os04a10: os04a10@36 {
+		compatible = "ovti,os04a10";
+		reg = <0x36>;
 		clocks = <&cru CLK_MIPICSI_OUT>;
 		clock-names = "xvclk";
 		power-domains = <&power RV1126_PD_VI>;
@@ -917,13 +917,13 @@
 		pwdn-gpios = <&gpio1 RK_PD4 GPIO_ACTIVE_HIGH>;
 		rockchip,camera-module-index = <1>;
 		rockchip,camera-module-facing = "front";
-		rockchip,camera-module-name = "PCORW0009A";
-		rockchip,camera-module-lens-name = "4mm-4M";
-		//ir-cut = <&cam_ircut0>;
+		rockchip,camera-module-name = "CMK-OT1607-FV1";
+		rockchip,camera-module-lens-name = "M12-4IR-4MP-F16";
+		ir-cut = <&cam_ircut0>;
 		port {
 			ucam_out0: endpoint {
 				remote-endpoint = <&mipi_in_ucam0>;
-				data-lanes = <1 2>;
+				data-lanes = <1 2 3 4>;
 			};
 		};
 	};
