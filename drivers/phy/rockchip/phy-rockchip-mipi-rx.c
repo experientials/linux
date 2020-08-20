@@ -1373,7 +1373,7 @@ static int csi_mipidphy_stream_on(struct mipidphy_priv *priv,
 
 	/* not into receive mode/wait stopstate */
 	write_grf_reg(priv, GRF_DPHY_CSIPHY_FORCERXMODE, 0x0);
-
+#if 0
 	/* enable calibration */
 	if (priv->data_rate_mbps > 1500) {
 		write_csiphy_reg(priv, CSIPHY_CLK_CALIB_ENABLE, 0x80);
@@ -1386,7 +1386,7 @@ static int csi_mipidphy_stream_on(struct mipidphy_priv *priv,
 		if (sensor->lanes > 0x03)
 			write_csiphy_reg(priv, CSIPHY_LANE3_CALIB_ENABLE, 0x80);
 	}
-
+#endif
 	/* set clock lane and data lane */
 	for (i = 0; i < num_hsfreq_ranges; i++) {
 		if (hsfreq_ranges[i].range_h >= priv->data_rate_mbps) {
