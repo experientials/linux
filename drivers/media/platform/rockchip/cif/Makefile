@@ -2,4 +2,7 @@
 obj-$(CONFIG_VIDEO_ROCKCHIP_CIF) += video_rkcif.o
 video_rkcif-objs += dev.o \
 			capture.o \
-			mipi-csi2.o
+			mipi-csi2.o \
+			cif-luma.o \
+			hw.o \
+			subdev-itf.o

@@ -117,6 +117,10 @@ static const char * const os04a10_supply_names[] = {
 
 #define OS04A10_NUM_SUPPLIES ARRAY_SIZE(os04a10_supply_names)
 
+#define OS04A10_FLIP_REG		0x3820
+#define MIRROR_BIT_MASK			BIT(1)
+#define FLIP_BIT_MASK			BIT(2)
+
 enum os04a10_max_pad {
 	PAD0,
 	PAD1,
@@ -165,6 +169,8 @@ struct os04a10 {
 	struct v4l2_ctrl	*test_pattern;
 	struct v4l2_ctrl	*pixel_rate;
 	struct v4l2_ctrl	*link_freq;
+	struct v4l2_ctrl	*h_flip;
+	struct v4l2_ctrl	*v_flip;
 	struct mutex		mutex;
 	bool			streaming;
 	bool			power_on;
@@ -182,6 +188,7 @@ struct os04a10 {
 	bool			is_thunderboot;
 	bool			is_thunderboot_ng;
 	bool			is_first_streamoff;
+	u8			flip;
 };
 
 #define to_os04a10(sd) container_of(sd, struct os04a10, subdev)
@@ -466,7 +473,7 @@ static const struct regval os04a10_linear10bit_2688x1520_regs[] = {
 	{0x380e, 0x0c},
 	{0x380f, 0xb0},
 	{0x381c, 0x00},
-	{0x3820, 0x02},
+	{0x3820, 0x00},
 	{0x3833, 0x40},
 	{0x384c, 0x02},
 	{0x384d, 0xdc},
@@ -537,7 +544,7 @@ static const struct regval os04a10_linear12bit_2688x1520_regs[] = {
 	{0x380e, 0x09},
 	{0x380f, 0x84},
 	{0x381c, 0x00},
-	{0x3820, 0x02},
+	{0x3820, 0x00},
 	{0x3833, 0x40},
 	{0x384c, 0x05},
 	{0x384d, 0xc4},
@@ -610,7 +617,7 @@ static const struct regval os04a10_hdr10bit_2688x1520_regs[] = {
 	//{0x380e, 0x0c},
 	//{0x380f, 0xb0},
 	{0x381c, 0x08},
-	{0x3820, 0x03},
+	{0x3820, 0x01},
 	{0x3833, 0x41},
 	{0x384c, 0x02},
 	{0x384d, 0xdc},
@@ -681,7 +688,7 @@ static const struct regval os04a10_hdr12bit_2688x1520_regs[] = {
 	{0x380e, 0x06},
 	{0x380f, 0x58},
 	{0x381c, 0x08},
-	{0x3820, 0x03},
+	{0x3820, 0x01},
 	{0x3833, 0x41},
 	{0x384c, 0x05},
 	{0x384d, 0xc4},
@@ -752,7 +759,7 @@ static const struct regval os04a10_hdr12bit_2560x1440_regs[] = {
 	{0x380e, 0x05},
 	{0x380f, 0xdc},
 	{0x381c, 0x08},
-	{0x3820, 0x03},
+	{0x3820, 0x01},
 	{0x3833, 0x41},
 	{0x384c, 0x05},
 	{0x384d, 0xa0},
@@ -1061,10 +1068,10 @@ static int os04a10_set_fmt(struct v4l2_subdev *sd,
 				}
 			}
 		}
-		v4l2_ctrl_s_ctrl_int64(os04a10->pixel_rate,
-				       dst_pixel_rate);
-		v4l2_ctrl_s_ctrl(os04a10->link_freq,
-				 dst_link_freq);
+		__v4l2_ctrl_s_ctrl_int64(os04a10->pixel_rate,
+					 dst_pixel_rate);
+		__v4l2_ctrl_s_ctrl(os04a10->link_freq,
+				   dst_link_freq);
 	}
 
 	mutex_unlock(&os04a10->mutex);
@@ -1621,6 +1628,9 @@ static int __os04a10_start_stream(struct os04a10 *os04a10)
 		return ret;
 
 	/* In case these controls are set before streaming */
+	ret = __v4l2_ctrl_handler_setup(&os04a10->ctrl_handler);
+	if (ret)
+		return ret;
 	if (os04a10->has_init_exp && os04a10->cur_mode->hdr_mode != NO_HDR) {
 		ret = os04a10_ioctl(&os04a10->subdev, PREISP_CMD_SET_HDRAE_EXP, &os04a10->init_hdrae_exp);
 		if (ret) {
@@ -1628,14 +1638,7 @@ static int __os04a10_start_stream(struct os04a10 *os04a10)
 				"init exp fail in hdr mode\n");
 			return ret;
 		}
-	} else {
-		mutex_unlock(&os04a10->mutex);
-		ret = v4l2_ctrl_handler_setup(&os04a10->ctrl_handler);
-		mutex_lock(&os04a10->mutex);
-		if (ret)
-			return ret;
 	}
-
 	return os04a10_write_reg(os04a10->client, OS04A10_REG_CTRL_MODE,
 		OS04A10_REG_VALUE_08BIT, OS04A10_MODE_STREAMING);
 }
@@ -1938,6 +1941,7 @@ static int os04a10_set_ctrl(struct v4l2_ctrl *ctrl)
 	s64 max;
 	int ret = 0;
 	u32 again, dgain;
+	u32 val = 0;
 
 	/* Propagate change of current control to all related controls */
 	switch (ctrl->id) {
@@ -1992,6 +1996,34 @@ static int os04a10_set_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_TEST_PATTERN:
 		ret = os04a10_enable_test_pattern(os04a10, ctrl->val);
 		break;
+	case V4L2_CID_HFLIP:
+		ret = os04a10_read_reg(os04a10->client, OS04A10_FLIP_REG,
+				       OS04A10_REG_VALUE_08BIT,
+				       &val);
+		if (ctrl->val)
+			val |= MIRROR_BIT_MASK;
+		else
+			val &= ~MIRROR_BIT_MASK;
+		ret = os04a10_write_reg(os04a10->client, OS04A10_FLIP_REG,
+					OS04A10_REG_VALUE_08BIT,
+					val);
+		if (ret == 0)
+			os04a10->flip = val;
+		break;
+	case V4L2_CID_VFLIP:
+		ret = os04a10_read_reg(os04a10->client, OS04A10_FLIP_REG,
+				       OS04A10_REG_VALUE_08BIT,
+				       &val);
+		if (ctrl->val)
+			val |= FLIP_BIT_MASK;
+		else
+			val &= ~FLIP_BIT_MASK;
+		ret = os04a10_write_reg(os04a10->client, OS04A10_FLIP_REG,
+					OS04A10_REG_VALUE_08BIT,
+					val);
+		if (ret == 0)
+			os04a10->flip = val;
+		break;
 	default:
 		dev_warn(&client->dev, "%s Unhandled id:0x%x, val:0x%x\n",
 			 __func__, ctrl->id, ctrl->val);
@@ -2019,7 +2051,7 @@ static int os04a10_initialize_controls(struct os04a10 *os04a10)
 
 	handler = &os04a10->ctrl_handler;
 	mode = os04a10->cur_mode;
-	ret = v4l2_ctrl_handler_init(handler, 8);
+	ret = v4l2_ctrl_handler_init(handler, 9);
 	if (ret)
 		return ret;
 	handler->lock = &os04a10->mutex;
@@ -2041,8 +2073,8 @@ static int os04a10_initialize_controls(struct os04a10 *os04a10)
 			0, PIXEL_RATE_WITH_648M,
 			1, dst_pixel_rate);
 
-	v4l2_ctrl_s_ctrl(os04a10->link_freq,
-			 dst_link_freq);
+	__v4l2_ctrl_s_ctrl(os04a10->link_freq,
+			   dst_link_freq);
 
 	h_blank = mode->hts_def - mode->width;
 	os04a10->hblank = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_HBLANK,
@@ -2072,6 +2104,12 @@ static int os04a10_initialize_controls(struct os04a10 *os04a10)
 				ARRAY_SIZE(os04a10_test_pattern_menu) - 1,
 				0, 0, os04a10_test_pattern_menu);
 
+	os04a10->h_flip = v4l2_ctrl_new_std(handler, &os04a10_ctrl_ops,
+				V4L2_CID_HFLIP, 0, 1, 1, 0);
+
+	os04a10->v_flip = v4l2_ctrl_new_std(handler, &os04a10_ctrl_ops,
+				V4L2_CID_VFLIP, 0, 1, 1, 0);
+	os04a10->flip = 0;
 	if (handler->error) {
 		ret = handler->error;
 		dev_err(&os04a10->client->dev,

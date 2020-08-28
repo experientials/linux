@@ -4,6 +4,7 @@
 #ifndef _RKCIF_VERSION_H
 #define _RKCIF_VERSION_H
 #include <linux/version.h>
+#include <linux/rkcif-config.h>
 
 /*
  *RKCIF DRIVER VERSION NOTE
@@ -26,8 +27,25 @@
  *v0.1.3
  *1. support kernel-4.19 and support vicap single dvp for rv1126
  *2. support vicap + mipi(single) for rv1126
+ *3. support vicap + mipi hdr for rv1126
+ *4. add luma device node for rv1126 vicap
+ *v0.1.4
+ *1. support vicap-full lvds interface to work in linear and hdr mode for rv1126
+ *2. add vicap-lite device for rv1126
+ *v0.1.5
+ *1. support crop function
+ *2. fix compile error when config with module
+ *3. support mipi yuv
+ *4. support selection ioctl for cropping
+ *5. support cif compact mode(lvds & mipi) can be set from user space
+ *v0.1.6
+ *1. add cif self-defined ioctrl cmd:V4L2_CID_CIF_DATA_COMPACT
+ *v0.1.7
+ *1. support dvp and mipi/lvds run simultaneously
+ *2. add subdev as interface for isp
+ *3. support hdr_x3 mode
  */
 
-#define RKCIF_DRIVER_VERSION KERNEL_VERSION(0, 1, 0x3)
+#define RKCIF_DRIVER_VERSION RKCIF_API_VERSION
 
 #endif

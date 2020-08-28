@@ -1801,20 +1801,20 @@ static void vop_plane_atomic_update(struct drm_plane *plane,
 	global_alpha_en = (vop_plane_state->global_alpha == 0xff) ? 0 : 1;
 	if ((is_alpha_support(fb->format->format) || global_alpha_en) &&
 	    (s->dsp_layer_sel & 0x3) != win->win_id) {
-		int src_bland_m0;
+		int src_blend_m0;
 
 		if (is_alpha_support(fb->format->format) && global_alpha_en)
-			src_bland_m0 = ALPHA_PER_PIX_GLOBAL;
+			src_blend_m0 = ALPHA_PER_PIX_GLOBAL;
 		else if (is_alpha_support(fb->format->format))
-			src_bland_m0 = ALPHA_PER_PIX;
+			src_blend_m0 = ALPHA_PER_PIX;
 		else
-			src_bland_m0 = ALPHA_GLOBAL;
+			src_blend_m0 = ALPHA_GLOBAL;
 
 		VOP_WIN_SET(vop, win, dst_alpha_ctl,
 			    DST_FACTOR_M0(ALPHA_SRC_INVERSE));
 		val = SRC_ALPHA_EN(1) | SRC_COLOR_M0(ALPHA_SRC_PRE_MUL) |
 			SRC_ALPHA_M0(ALPHA_STRAIGHT) |
-			SRC_BLEND_M0(src_bland_m0) |
+			SRC_BLEND_M0(src_blend_m0) |
 			SRC_ALPHA_CAL_M0(ALPHA_SATURATION) |
 			SRC_FACTOR_M0(global_alpha_en ?
 				      ALPHA_SRC_GLOBAL : ALPHA_ONE);
@@ -2295,7 +2295,7 @@ static int vop_plane_info_dump(struct seq_file *s, struct drm_plane *plane)
 		DRM_FORMAT_MOD_ARM_AFBC(AFBC_FORMAT_MOD_BLOCK_SIZE_16x16);
 
 	DEBUG_PRINT("    win%d-%d: %s\n", win->win_id, win->area_id,
-		    state->visible ? "ACTIVE" : "DISABLED");
+		    state->crtc ? "ACTIVE" : "DISABLED");
 	if (!fb)
 		return 0;
 
@@ -2388,10 +2388,10 @@ static void vop_crtc_regs_dump(struct drm_crtc *crtc, struct seq_file *s)
 	if (!crtc_state->active)
 		return;
 
-	for (i = 0; i < dump_len; i += 4) {
-		if (i % 16 == 0)
-			DEBUG_PRINT("\n0x%08x: ", i);
-		DEBUG_PRINT("%08x ", vop_readl(vop, i));
+	for (i = 0; i < dump_len; i += 16) {
+		DEBUG_PRINT("0x%08x: %08x %08x %08x %08x\n", i,
+			    vop_readl(vop, i), vop_readl(vop, i + 4),
+			    vop_readl(vop, i + 8), vop_readl(vop, i + 12));
 	}
 }
 
@@ -2909,7 +2909,7 @@ static void vop_crtc_atomic_enable(struct drm_crtc *crtc,
 	if (vop->mcu_timing.mcu_pix_total)
 		vop_mcu_mode(crtc);
 
-	dclk_inv = (adjusted_mode->flags & DRM_MODE_FLAG_PPIXDATA) ? 0 : 1;
+	dclk_inv = (s->bus_flags & DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE) ? 1 : 0;
 
 	VOP_CTRL_SET(vop, dclk_pol, dclk_inv);
 	val = (adjusted_mode->flags & DRM_MODE_FLAG_NHSYNC) ?
@@ -4015,12 +4015,8 @@ static int vop_plane_init(struct vop *vop, struct vop_win *win,
 			  unsigned long possible_crtcs)
 {
 	struct rockchip_drm_private *private = vop->drm_dev->dev_private;
-	struct drm_plane *share = NULL;
 	uint64_t feature = 0;
 	int ret;
-
-	if (win->parent)
-		share = &win->parent->base;
 
 	ret = drm_universal_plane_init(vop->drm_dev, &win->base, possible_crtcs, &vop_plane_funcs,
 				       win->data_formats, win->nformats, NULL, win->type, NULL);

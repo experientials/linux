@@ -5,18 +5,25 @@
 
 /dts-v1/;
 #include "rv1109.dtsi"
-#include "rv11xx-ipc.dtsi"
+#include "rv1126-ipc.dtsi"
 
 / {
 	model = "Rockchip RV1109 38 V10 SPI NAND DDR3 Board";
 	compatible = "rockchip,rv1109-38-v10-spi-nand", "rockchip,rv1109";
 
 	chosen {
-		bootargs = "earlycon=uart8250,mmio32,0xff570000 console=ttyFIQ0 ubi.mtd=3 root=ubi0:rootfs rootfstype=ubifs snd_aloop.index=7";
+		bootargs = "earlycon=uart8250,mmio32,0xff570000 console=ttyFIQ0 ubi.mtd=2 root=ubi0:rootfs rootfstype=ubifs snd_aloop.index=7";
 	};
 
 	/delete-node/ vdd-npu;
 	/delete-node/ vdd-vepu;
+
+	cam_ircut0: cam_ircut {
+		compatible = "rockchip,ircut";
+		status = "okay";
+		ircut-open-gpios = <&gpio3 RK_PB1 GPIO_ACTIVE_HIGH>;
+		ircut-close-gpios = <&gpio3 RK_PB0 GPIO_ACTIVE_HIGH>;
+	};
 
 	vcc_1v8: vcc-1v8 {
 		compatible = "regulator-fixed";
@@ -54,6 +61,7 @@
 		regulator-init-microvolt = <825000>;
 		regulator-always-on;
 		regulator-boot-on;
+		regulator-settling-time-up-us = <250>;
 		pwm-supply = <&vcc3v3_sys>;
 		status = "okay";
 	};
@@ -71,6 +79,7 @@
 		regulator-init-microvolt = <825000>;
 		regulator-always-on;
 		regulator-boot-on;
+		regulator-settling-time-up-us = <250>;
 		pwm-supply = <&vcc3v3_sys>;
 		status = "okay";
 	};
@@ -150,11 +159,12 @@
 		dovdd-supply = <&vcc_1v8>;
 		dvdd-supply = <&vcc_dvdd>;
 		pwdn-gpios = <&gpio1 RK_PD4 GPIO_ACTIVE_HIGH>;
-		rst-gpios = <&gpio1 RK_PD5 GPIO_ACTIVE_LOW>;
+		reset-gpios = <&gpio1 RK_PD5 GPIO_ACTIVE_LOW>;
 		rockchip,camera-module-index = <1>;
 		rockchip,camera-module-facing = "front";
 		rockchip,camera-module-name = "CMK-OT1607-FV1";
 		rockchip,camera-module-lens-name = "M12-4IR-4MP-F16";
+		ir-cut = <&cam_ircut0>;
 
 		port {
 			ucam_out0: endpoint {
@@ -193,13 +203,10 @@
 	vccio7-supply = <&vcc3v3_sys>;
 };
 
-&rkisp {
+&rkisp_vir0 {
 	status = "okay";
 
 	ports {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
 		port@0 {
 			reg = <0>;
 			#address-cells = <1>;
@@ -209,31 +216,6 @@
 				reg = <0>;
 				remote-endpoint = <&csidphy0_out>;
 			};
-		};
-
-		port@1 {
-			reg = <1>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			isp_out: endpoint@1 {
-				reg = <1>;
-				remote-endpoint = <&ispp_in>;
-			};
-		};
-	};
-};
-
-&rkispp {
-	status = "okay";
-
-	port {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		ispp_in: endpoint@0 {
-			reg = <0>;
-			remote-endpoint = <&isp_out>;
 		};
 	};
 };

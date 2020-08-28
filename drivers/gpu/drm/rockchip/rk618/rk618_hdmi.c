@@ -935,40 +935,37 @@ static int rk618_hdmi_setup(struct rk618_hdmi *hdmi,
 	return 0;
 }
 
+static bool rk618_hdmi_hpd_detect(struct rk618_hdmi *hdmi)
+{
+	return !!(hdmi_readb(hdmi, HDMI_STATUS) & m_HOTPLUG);
+}
+
 static enum drm_connector_status
 rk618_hdmi_connector_detect(struct drm_connector *connector, bool force)
 {
 	struct rk618_hdmi *hdmi = connector_to_hdmi(connector);
-	int status;
+	bool status;
 
-	status = hdmi_readb(hdmi, HDMI_STATUS) & m_HOTPLUG;
+	status = rk618_hdmi_hpd_detect(hdmi);
 #ifdef CONFIG_SWITCH
-	if (status)
-		switch_set_state(&hdmi->switchdev, 1);
-	else
-		switch_set_state(&hdmi->switchdev, 0);
+	switch_set_state(&hdmi->switchdev, status);
 #endif
-	if (hdmi->bridge)
-		return connector_status_connected;
 
-	return (hdmi_readb(hdmi, HDMI_STATUS) & m_HOTPLUG) ?
-		connector_status_connected : connector_status_disconnected;
+	return status ? connector_status_connected :
+			connector_status_disconnected;
 }
 
 static int rk618_hdmi_connector_get_modes(struct drm_connector *connector)
 {
 	struct rk618_hdmi *hdmi = connector_to_hdmi(connector);
-	struct drm_display_mode *mode;
 	struct drm_display_info *info = &connector->display_info;
-	const u8 def_modes[6] = {4, 16, 31, 19, 17, 2};
 	struct edid *edid = NULL;
 	int ret = 0;
-	u8 i;
 
 	if (!hdmi->ddc)
 		return 0;
 
-	if ((hdmi_readb(hdmi, HDMI_STATUS) & m_HOTPLUG))
+	if (rk618_hdmi_hpd_detect(hdmi))
 		edid = drm_get_edid(connector, hdmi->ddc);
 
 	if (edid) {
@@ -980,17 +977,7 @@ static int rk618_hdmi_connector_get_modes(struct drm_connector *connector)
 	} else {
 		hdmi->hdmi_data.sink_is_hdmi = true;
 		hdmi->hdmi_data.sink_has_audio = true;
-		for (i = 0; i < sizeof(def_modes); i++) {
-			mode = drm_display_mode_from_vic_index(connector,
-							       def_modes,
-							       31, i);
-			if (mode) {
-				if (!i)
-					mode->type = DRM_MODE_TYPE_PREFERRED;
-				drm_mode_probed_add(connector, mode);
-				ret++;
-			}
-		}
+		ret = rockchip_drm_add_modes_noedid(connector);
 		info->edid_hdmi_dc_modes = 0;
 		info->hdmi.y420_dc_modes = 0;
 		info->color_formats = 0;
@@ -1058,6 +1045,11 @@ static void rk618_hdmi_bridge_enable(struct drm_bridge *bridge)
 	struct rk618_hdmi *hdmi = bridge_to_hdmi(bridge);
 
 	clk_prepare_enable(hdmi->clock);
+
+	if (!rk618_hdmi_hpd_detect(hdmi)) {
+		rk618_hdmi_set_pwr_mode(hdmi, LOWER_PWR);
+		return;
+	}
 
 	rk618_hdmi_setup(hdmi, &hdmi->previous_mode);
 	rk618_hdmi_set_polarity(hdmi, hdmi->hdmi_data.vic);

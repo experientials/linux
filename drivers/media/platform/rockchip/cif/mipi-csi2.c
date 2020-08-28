@@ -17,6 +17,13 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
+#include <media/v4l2-event.h>
+
+#include "mipi-csi2.h"
+
+static int csi2_debug;
+module_param_named(debug_csi2, csi2_debug, int, 0644);
+MODULE_PARM_DESC(debug_csi2, "Debug level (0-1)");
 
 /*
  * there must be 5 pads: 1 input pad from sensor, and
@@ -28,6 +35,9 @@
 #define CSI2_NUM_PADS			5
 #define CSI2_NUM_PADS_SINGLE_LINK	2
 #define MAX_CSI2_SENSORS		2
+
+#define RKCIF_DEFAULT_WIDTH	640
+#define RKCIF_DEFAULT_HEIGHT	480
 
 /*
  * The default maximum bit-rate per lane in Mbps, if the
@@ -84,6 +94,7 @@ struct csi2_dev {
 	struct mutex lock;
 
 	struct v4l2_mbus_framefmt format_mbus;
+	struct v4l2_rect crop;
 
 	int                     stream_count;
 	struct v4l2_subdev      *src_sd;
@@ -91,6 +102,7 @@ struct csi2_dev {
 	struct csi2_sensor	sensors[MAX_CSI2_SENSORS];
 	const struct csi2_match_data	*match_data;
 	int num_sensors;
+	atomic_t frm_sync_seq;
 };
 
 #define DEVICE_NAME "rockchip-mipi-csi2"
@@ -114,6 +126,8 @@ struct csi2_dev {
 
 #define write_csihost_reg(base, addr, val)  writel(val, (addr) + (base))
 #define read_csihost_reg(base, addr) readl((addr) + (base))
+
+static struct csi2_dev *g_csi2_dev;
 
 static inline struct csi2_dev *sd_to_dev(struct v4l2_subdev *sdev)
 {
@@ -213,6 +227,7 @@ static int csi2_start(struct csi2_dev *csi2)
 	if (ret)
 		goto err_assert_reset;
 
+	atomic_set(&csi2->frm_sync_seq, 0);
 	return 0;
 
 err_assert_reset:
@@ -332,10 +347,13 @@ static int csi2_media_init(struct v4l2_subdev *sd)
 	/* set a default mbus format  */
 	csi2->format_mbus.code =  MEDIA_BUS_FMT_UYVY8_2X8;
 	csi2->format_mbus.field = V4L2_FIELD_NONE;
-	csi2->format_mbus.width = 1920;
-	csi2->format_mbus.height = 1080;
+	csi2->format_mbus.width = RKCIF_DEFAULT_WIDTH;
+	csi2->format_mbus.height = RKCIF_DEFAULT_HEIGHT;
+	csi2->crop.top = 0;
+	csi2->crop.left = 0;
+	csi2->crop.width = RKCIF_DEFAULT_WIDTH;
+	csi2->crop.height = RKCIF_DEFAULT_HEIGHT;
 
-	v4l2_err(&csi2->sd, "media entry init\n");
 	return media_entity_pads_init(&sd->entity, num_pads, csi2->pad);
 }
 
@@ -344,13 +362,103 @@ static int csi2_get_set_fmt(struct v4l2_subdev *sd,
 			    struct v4l2_subdev_pad_config *cfg,
 			    struct v4l2_subdev_format *fmt)
 {
+	int ret;
+	struct csi2_dev *csi2 = sd_to_dev(sd);
 	struct v4l2_subdev *sensor = get_remote_sensor(sd);
 
 	/*
 	 * Do not allow format changes and just relay whatever
 	 * set currently in the sensor.
 	 */
-	return v4l2_subdev_call(sensor, pad, get_fmt, NULL, fmt);
+	ret = v4l2_subdev_call(sensor, pad, get_fmt, NULL, fmt);
+	if (!ret)
+		csi2->format_mbus = fmt->format;
+
+	return ret;
+}
+
+static struct v4l2_rect *mipi_csi2_get_crop(struct csi2_dev *csi2,
+						 struct v4l2_subdev_pad_config *cfg,
+						 enum v4l2_subdev_format_whence which)
+{
+	if (which == V4L2_SUBDEV_FORMAT_TRY)
+		return v4l2_subdev_get_try_crop(&csi2->sd, cfg, RK_CSI2_PAD_SINK);
+	else
+		return &csi2->crop;
+}
+
+static int csi2_get_selection(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_pad_config *cfg,
+				   struct v4l2_subdev_selection *sel)
+{
+	struct csi2_dev *csi2 = sd_to_dev(sd);
+	struct v4l2_subdev *sensor = get_remote_sensor(sd);
+	struct v4l2_subdev_format fmt;
+	int ret = 0;
+
+	if (!sel) {
+		v4l2_dbg(1, csi2_debug, &csi2->sd, "sel is null\n");
+		goto err;
+	}
+
+	if (sel->pad > RK_CSI2X_PAD_SOURCE3) {
+		v4l2_dbg(1, csi2_debug, &csi2->sd, "pad[%d] isn't matched\n", sel->pad);
+		goto err;
+	}
+
+	switch (sel->target) {
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+		if (sel->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+			ret = v4l2_subdev_call(sensor, pad, get_selection,
+					       cfg, sel);
+			if (ret) {
+				fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+				ret = v4l2_subdev_call(sensor, pad, get_fmt, NULL, &fmt);
+				if (!ret) {
+					csi2->format_mbus = fmt.format;
+					sel->r.top = 0;
+					sel->r.left = 0;
+					sel->r.width = csi2->format_mbus.width;
+					sel->r.height = csi2->format_mbus.height;
+					csi2->crop = sel->r;
+				} else {
+					sel->r = csi2->crop;
+				}
+			} else {
+				csi2->crop = sel->r;
+			}
+		} else {
+			sel->r = *v4l2_subdev_get_try_crop(&csi2->sd, cfg, sel->pad);
+		}
+		break;
+
+	case V4L2_SEL_TGT_CROP:
+		sel->r = *mipi_csi2_get_crop(csi2, cfg, sel->which);
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+err:
+	return -EINVAL;
+}
+
+static int csi2_set_selection(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_pad_config *cfg,
+				   struct v4l2_subdev_selection *sel)
+{
+	struct csi2_dev *csi2 = sd_to_dev(sd);
+	struct v4l2_subdev *sensor = get_remote_sensor(sd);
+	int ret = 0;
+
+	ret = v4l2_subdev_call(sensor, pad, set_selection,
+			       cfg, sel);
+	if (!ret)
+		csi2->crop = sel->r;
+
+	return ret;
 }
 
 static int csi2_g_mbus_config(struct v4l2_subdev *sd,
@@ -371,6 +479,41 @@ static const struct media_entity_operations csi2_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
 
+void rkcif_csi2_event_inc_sof(void)
+{
+	if (g_csi2_dev) {
+		struct v4l2_event event = {
+			.type = V4L2_EVENT_FRAME_SYNC,
+			.u.frame_sync.frame_sequence =
+				atomic_inc_return(&g_csi2_dev->frm_sync_seq) - 1,
+		};
+		v4l2_event_queue(g_csi2_dev->sd.devnode, &event);
+	}
+}
+
+u32 rkcif_csi2_get_sof(void)
+{
+	if (g_csi2_dev) {
+		return atomic_read(&g_csi2_dev->frm_sync_seq) - 1;
+	}
+
+	return 0;
+}
+
+static int rkcif_csi2_subscribe_event(struct v4l2_subdev *sd, struct v4l2_fh *fh,
+					     struct v4l2_event_subscription *sub)
+{
+	if (sub->type != V4L2_EVENT_FRAME_SYNC)
+		return -EINVAL;
+
+	return v4l2_event_subscribe(fh, sub, 0, NULL);
+}
+
+static const struct v4l2_subdev_core_ops csi2_core_ops = {
+	.subscribe_event = rkcif_csi2_subscribe_event,
+	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
+};
+
 static const struct v4l2_subdev_video_ops csi2_video_ops = {
 	.g_mbus_config = csi2_g_mbus_config,
 	.s_stream = csi2_s_stream,
@@ -379,9 +522,12 @@ static const struct v4l2_subdev_video_ops csi2_video_ops = {
 static const struct v4l2_subdev_pad_ops csi2_pad_ops = {
 	.get_fmt = csi2_get_set_fmt,
 	.set_fmt = csi2_get_set_fmt,
+	.get_selection = csi2_get_selection,
+	.set_selection = csi2_set_selection,
 };
 
 static const struct v4l2_subdev_ops csi2_subdev_ops = {
+	.core = &csi2_core_ops,
 	.video = &csi2_video_ops,
 	.pad = &csi2_pad_ops,
 };
@@ -607,7 +753,7 @@ static int csi2_probe(struct platform_device *pdev)
 	csi2->sd.entity.ops = &csi2_entity_ops;
 	csi2->sd.dev = &pdev->dev;
 	csi2->sd.owner = THIS_MODULE;
-	csi2->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	csi2->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS;
 	ret = strscpy(csi2->sd.name, DEVICE_NAME, sizeof(csi2->sd.name));
 	platform_set_drvdata(pdev, &csi2->sd);
 	/* csi2->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE; */
@@ -675,7 +821,8 @@ static int csi2_probe(struct platform_device *pdev)
 	ret = csi2_notifier(csi2);
 	if (ret)
 		goto rmmutex;
-	v4l2_info(&csi2->sd, "probe success!\n");
+	v4l2_info(&csi2->sd, "probe success, v4l2_dev:%s!\n", csi2->sd.v4l2_dev->name);
+	g_csi2_dev = csi2;
 
 	return 0;
 
@@ -705,7 +852,14 @@ static struct platform_driver csi2_driver = {
 	.remove = csi2_remove,
 };
 
+#ifdef MODULE
+int __init rkcif_csi2_plat_drv_init(void)
+{
+	return platform_driver_register(&csi2_driver);
+}
+#else
 module_platform_driver(csi2_driver);
+#endif
 
 MODULE_DESCRIPTION("Rockchip MIPI CSI2 driver");
 MODULE_AUTHOR("Macrofly.xu <xuhf@rock-chips.com>");
