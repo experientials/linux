@@ -174,7 +174,7 @@ static void rockchip_pmu_unlock(struct rockchip_pm_domain *pd)
 	DOMAIN_M(pwr, pwr, req, idle, idle, wakeup, true)
 
 #define DOMAIN_RV1126_O(pwr, req, idle, r_offset, wakeup)	\
-	DOMAIN_M_O(pwr, pwr, 0, req, idle, idle, r_offset, wakeup, false)
+	DOMAIN_M_O(pwr, pwr, 0, req, idle, idle, r_offset, wakeup, true)
 
 #define DOMAIN_RK3288(pwr, status, req, wakeup)		\
 	DOMAIN(pwr, status, req, req, (req) << 16, wakeup, false)
@@ -1033,6 +1033,8 @@ static int __init rockchip_pd_keepon_release(void)
 	struct generic_pm_domain *genpd;
 	struct rockchip_pm_domain *pd;
 	int i;
+
+	return 0;
 
 	if (!g_pmu)
 		return 0;
