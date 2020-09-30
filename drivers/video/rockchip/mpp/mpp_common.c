@@ -16,11 +16,13 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/of_irq.h>
+#include <linux/proc_fs.h>
 #include <linux/pm_runtime.h>
 #include <linux/poll.h>
 #include <linux/regmap.h>
 #include <linux/rwsem.h>
 #include <linux/mfd/syscon.h>
+#include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/nospec.h>
@@ -1335,6 +1337,28 @@ int mpp_check_req(struct mpp_request *req, int base,
 	return 0;
 }
 
+int mpp_extract_reg_offset_info(struct reg_offset_info *off_inf,
+				struct mpp_request *req)
+{
+	int max_size = ARRAY_SIZE(off_inf->elem);
+	int cnt = req->size / sizeof(off_inf->elem[0]);
+
+	if ((cnt + off_inf->cnt) > max_size) {
+		mpp_err("count %d, total %d, max_size %d\n",
+			cnt, off_inf->cnt, max_size);
+		return -EINVAL;
+	}
+	if (copy_from_user(&off_inf->elem[off_inf->cnt],
+				req->data,
+				req->size)) {
+		mpp_err("copy_from_user failed\n");
+		return -EINVAL;
+	}
+	off_inf->cnt += cnt;
+
+	return 0;
+}
+
 int mpp_query_reg_offset_info(struct reg_offset_info *off_inf,
 			      u32 index)
 {
@@ -1651,6 +1675,8 @@ irqreturn_t mpp_dev_irq(int irq, void *param)
 		set_bit(TASK_STATE_IRQ, &task->state);
 		if (mpp->dev_ops->irq)
 			ret = mpp->dev_ops->irq(mpp);
+	} else {
+		mpp_err("error, task is null\n");
 	}
 
 	return ret;
@@ -1854,6 +1880,49 @@ int mpp_clk_set_rate(struct mpp_clk_info *clk_info,
 
 	return 0;
 }
+
+#ifdef CONFIG_PROC_FS
+static int fops_show_u32(struct seq_file *file, void *v)
+{
+	u32 *val = file->private;
+
+	seq_printf(file, "%d\n", *val);
+
+	return 0;
+}
+
+static int fops_open_u32(struct inode *inode, struct file *file)
+{
+	return single_open(file, fops_show_u32, PDE_DATA(inode));
+}
+
+static ssize_t fops_write_u32(struct file *file, const char __user *buf,
+			      size_t count, loff_t *ppos)
+{
+	int rc;
+	struct seq_file *priv = file->private_data;
+
+	rc = kstrtou32_from_user(buf, count, 0, priv->private);
+	if (rc)
+		return rc;
+
+	return count;
+}
+
+static const struct file_operations procfs_fops_u32 = {
+	.open = fops_open_u32,
+	.read = seq_read,
+	.release = single_release,
+	.write = fops_write_u32,
+};
+
+struct proc_dir_entry *
+mpp_procfs_create_u32(const char *name, umode_t mode,
+		      struct proc_dir_entry *parent, void *data)
+{
+	return proc_create_data(name, mode, parent, &procfs_fops_u32, data);
+}
+#endif
 
 int px30_workaround_combo_init(struct mpp_dev *mpp)
 {

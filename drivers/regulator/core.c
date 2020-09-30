@@ -56,6 +56,7 @@ static DEFINE_MUTEX(regulator_list_mutex);
 static LIST_HEAD(regulator_map_list);
 static LIST_HEAD(regulator_ena_gpio_list);
 static LIST_HEAD(regulator_supply_alias_list);
+static LIST_HEAD(regulator_debug_list);
 static LIST_HEAD(regulator_early_min_volt_list);
 static bool has_full_constraints;
 
@@ -97,6 +98,11 @@ struct regulator_supply_alias {
 	const char *src_supply;
 	struct device *alias_dev;
 	const char *alias_supply;
+};
+
+struct regulator_limit_volt {
+	struct list_head list;
+	struct regulator *reg;
 };
 
 static int _regulator_is_enabled(struct regulator_dev *rdev);
@@ -4148,7 +4154,6 @@ static void regulator_dev_release(struct device *dev)
 }
 
 #ifdef CONFIG_DEBUG_FS
-
 static int reg_debug_enable_set(void *data, u64 val)
 {
 	struct regulator *regulator = data;
@@ -4368,11 +4373,20 @@ static const struct file_operations reg_consumers_fops = {
 
 static void rdev_deinit_debugfs(struct regulator_dev *rdev)
 {
-	if (!IS_ERR_OR_NULL(rdev)) {
-		debugfs_remove_recursive(rdev->debugfs);
-		if (rdev->debug_consumer)
-			rdev->debug_consumer->debugfs = NULL;
-		regulator_put(rdev->debug_consumer);
+	struct regulator_limit_volt *reg_debug, *n;
+
+	if (IS_ERR_OR_NULL(rdev))
+		return;
+
+	debugfs_remove_recursive(rdev->debugfs);
+
+	list_for_each_entry_safe(reg_debug, n, &regulator_debug_list, list) {
+		if (reg_debug->reg->rdev == rdev) {
+			reg_debug->reg->debugfs = NULL;
+			list_del(&reg_debug->list);
+			regulator_put(reg_debug->reg);
+			kfree(reg_debug);
+		}
 	}
 }
 
@@ -4383,6 +4397,7 @@ static void rdev_init_debugfs(struct regulator_dev *rdev)
 	char name[NAME_MAX];
 	struct regulator *regulator;
 	const struct regulator_ops *ops;
+	struct regulator_limit_volt *reg_debug;
 	mode_t mode;
 
 	/* Avoid duplicate debugfs directory names */
@@ -4413,7 +4428,14 @@ static void rdev_init_debugfs(struct regulator_dev *rdev)
 			 PTR_ERR(regulator));
 		return;
 	}
-	rdev->debug_consumer = regulator;
+
+	reg_debug = kzalloc(sizeof(*reg_debug), GFP_KERNEL);
+	if (reg_debug == NULL) {
+		regulator_put(regulator);
+		return;
+	}
+	reg_debug->reg = regulator;
+	list_add(&reg_debug->list, &regulator_debug_list);
 
 	ops = rdev->desc->ops;
 
@@ -4458,7 +4480,6 @@ static void rdev_init_debugfs(struct regulator_dev *rdev)
 }
 
 #else
-
 static inline void rdev_deinit_debugfs(struct regulator_dev *rdev)
 {
 }
@@ -4466,28 +4487,37 @@ static inline void rdev_deinit_debugfs(struct regulator_dev *rdev)
 static inline void rdev_init_debugfs(struct regulator_dev *rdev)
 {
 }
-
 #endif
 
 static void rdev_init_early_min_volt(struct regulator_dev *rdev)
 {
-	struct regulator *regulator;
+	struct device_node *np = rdev->dev.of_node;
+	struct regulator_limit_volt *reg_early;
+	u32 pval;
 
-	if (!rdev->constraints->early_min_uV)
+	/*
+	 * Minimum voltage during system startup, make sure we select a
+	 * voltage that suits the needs of all regulator consumers
+	 */
+	if (of_property_read_u32(np, "regulator-early-min-microvolt", &pval))
 		return;
 
-	regulator = regulator_get(NULL, rdev_get_name(rdev));
-	if (IS_ERR(regulator)) {
+	reg_early = kzalloc(sizeof(*reg_early), GFP_KERNEL);
+	if (reg_early == NULL)
+		return;
+
+	reg_early->reg = regulator_get(NULL, rdev_get_name(rdev));
+	if (IS_ERR(reg_early->reg)) {
 		rdev_err(rdev, "regulator get failed, ret=%ld\n",
-			 PTR_ERR(regulator));
+			 PTR_ERR(reg_early->reg));
 		return;
 	}
 
-	regulator->voltage[PM_SUSPEND_ON].min_uV =
-			rdev->constraints->early_min_uV;
-	regulator->voltage[PM_SUSPEND_ON].max_uV = rdev->constraints->max_uV;
+	reg_early->reg->voltage[PM_SUSPEND_ON].min_uV = pval;
+	reg_early->reg->voltage[PM_SUSPEND_ON].max_uV =
+		rdev->constraints->max_uV;
 
-	list_add(&regulator->early_min_list, &regulator_early_min_volt_list);
+	list_add(&reg_early->list, &regulator_early_min_volt_list);
 }
 
 static int regulator_register_resolve_supply(struct device *dev, void *data)
@@ -5226,21 +5256,22 @@ static DECLARE_DELAYED_WORK(regulator_init_complete_work,
 
 static void __init regulator_release_early_min_volt(void)
 {
-	struct regulator *regulator, *n, *reg;
+	struct regulator_limit_volt *reg_early, *n;
+	struct regulator *reg;
 	struct regulator_dev *rdev;
 	int min_uV = 0, max_uV = 0, ret = 0;
 
 	if (list_empty(&regulator_early_min_volt_list))
 		return;
 
-	list_for_each_entry_safe(regulator, n, &regulator_early_min_volt_list,
-				 early_min_list) {
-		rdev = regulator->rdev;
+	list_for_each_entry_safe(reg_early, n, &regulator_early_min_volt_list,
+				 list) {
+		rdev = reg_early->reg->rdev;
 
 		regulator_lock_supply(rdev);
 
-		regulator->voltage[PM_SUSPEND_ON].min_uV = 0;
-		regulator->voltage[PM_SUSPEND_ON].max_uV = 0;
+		reg_early->reg->voltage[PM_SUSPEND_ON].min_uV = 0;
+		reg_early->reg->voltage[PM_SUSPEND_ON].max_uV = 0;
 		min_uV = rdev->constraints->min_uV;
 		max_uV = rdev->constraints->max_uV;
 
@@ -5248,7 +5279,8 @@ static void __init regulator_release_early_min_volt(void)
 			if (!reg->voltage[PM_SUSPEND_ON].min_uV &&
 			    !reg->voltage[PM_SUSPEND_ON].max_uV)
 				continue;
-			ret = regulator_set_voltage_unlocked(regulator, min_uV,
+			ret = regulator_set_voltage_unlocked(reg_early->reg,
+							     min_uV,
 							     max_uV,
 							     PM_SUSPEND_ON);
 			if (ret)
@@ -5259,8 +5291,9 @@ static void __init regulator_release_early_min_volt(void)
 
 		regulator_unlock_supply(rdev);
 
-		list_del(&regulator->early_min_list);
-		regulator_put(regulator);
+		list_del(&reg_early->list);
+		regulator_put(reg_early->reg);
+		kfree(reg_early);
 	}
 }
 

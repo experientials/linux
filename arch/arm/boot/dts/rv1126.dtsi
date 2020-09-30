@@ -111,6 +111,10 @@
 		opp-shared;
 		rockchip,reboot-freq = <816000>;
 
+		rockchip,temp-freq-table = <
+			100000	1296000
+		>;
+
 		opp-408000000 {
 			opp-hz = /bits/ 64 <408000000>;
 			opp-microvolt = <725000 725000 1000000>;
@@ -1578,6 +1582,19 @@
 		status = "disabled";
 	};
 
+	rkacdc_dig: codec-digital@ff850000 {
+		compatible = "rockchip,rv1126-codec-digital", "rockchip,codec-digital-v1";
+		reg = <0xff850000 0x1000>;
+		clocks = <&cru CLK_ACDCDIG_ADC>, <&cru CLK_ACDCDIG_DAC>, <&cru PCLK_ACDCDIG>;
+		clock-names = "adc", "dac", "pclk";
+		pinctrl-names = "default";
+		pinctrl-0 = <&acodec_pins>;
+		resets = <&cru SRST_ACDCDIG>;
+		reset-names = "reset" ;
+		rockchip,grf = <&grf>;
+		status = "disabled";
+	};
+
 	dfi: dfi@ff9c0000 {
 		reg = <0xff9c0000 0x400>;
 		compatible = "rockchip,rv1126-dfi";
@@ -1641,7 +1658,7 @@
 
 	rkcif: rkcif@ffae0000 {
 		compatible = "rockchip,rv1126-cif";
-		reg = <0xffae0000 0x10000>;
+		reg = <0xffae0000 0x8000>;
 		reg-names = "cif_regs";
 		interrupts = <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "cif-intr";
@@ -2118,6 +2135,11 @@
 	rkvenc_opp_table: rkvenc-opp-table {
 		compatible = "operating-points-v2";
 
+		rockchip,temp-freq-table = <
+			80000	500000
+			100000	396000
+		>;
+
 		/* The source clock is CLK_VENC_CORE */
 		opp-297000000 {
 			opp-hz = /bits/ 64 <297000000>;
@@ -2133,7 +2155,7 @@
 		};
 		opp-594000000 {
 			opp-hz = /bits/ 64 <594000000>;
-			opp-microvolt = <800000 800000 1000000>;
+			opp-microvolt = <825000 825000 1000000>;
 		};
 	};
 
@@ -2146,6 +2168,7 @@
 		clocks = <&cru ACLK_VENC>, <&cru HCLK_VENC>;
 		clock-names = "aclk", "iface";
 		rockchip,disable-mmu-reset;
+		rockchip,enable-cmd-retry;
 		#iommu-cells = <0>;
 		power-domains = <&power RV1126_PD_VEPU>;
 		status = "disabled";
@@ -2279,6 +2302,8 @@
 		interrupts = <GIC_SPI 80 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru SCLK_SFC>, <&cru HCLK_SFC>;
 		clock-names = "clk_sfc", "hclk_sfc";
+		pinctrl-names = "default";
+		pinctrl-0 = <&fspi_pins>;
 		assigned-clocks = <&cru SCLK_SFC>;
 		assigned-clock-rates = <80000000>;
 		power-domains = <&power RV1126_PD_NVM>;
@@ -2290,8 +2315,8 @@
 		reg = <0xffbc0000 0x4000>;
 		clocks = <&cru ACLK_NPU>, <&cru HCLK_NPU>, <&cru PCLK_PDNPU>, <&cru CLK_CORE_NPU>;
 		clock-names = "aclk_npu", "hclk_npu", "pclk_pdnpu", "sclk_npu";
-		assigned-clocks = <&cru CLK_CORE_NPU>;
-		assigned-clock-rates = <396000000>;
+		assigned-clocks = <&cru CLK_CORE_NPU>, <&cru ACLK_NPU>;
+		assigned-clock-rates = <396000000>, <600000000>;
 		operating-points-v2 = <&npu_opp_table>;
 		dynamic-power-coefficient = <1343>;
 		#cooling-cells = <2>;
@@ -2307,6 +2332,12 @@
 		rockchip,bin-scaling-sel = <
 			0	23
 			1	37
+		>;
+
+		rockchip,temp-freq-table = <
+			80000	600000
+			90000	396000
+			100000	300000
 		>;
 
 		opp-200000000 {
@@ -2327,19 +2358,19 @@
 		};
 		opp-600000000 {
 			opp-hz = /bits/ 64 <600000000>;
-			opp-microvolt = <725000 725000 1000000>;
+			opp-microvolt = <750000 750000 1000000>;
 		};
 		opp-700000000 {
 			opp-hz = /bits/ 64 <700000000>;
-			opp-microvolt = <775000 775000 1000000>;
+			opp-microvolt = <800000 800000 1000000>;
 		};
 		opp-800000000 {
 			opp-hz = /bits/ 64 <800000000>;
-			opp-microvolt = <825000 825000 1000000>;
+			opp-microvolt = <850000 850000 1000000>;
 		};
 		opp-934000000 {
 			opp-hz = /bits/ 64 <934000000>;
-			opp-microvolt = <900000 900000 1000000>;
+			opp-microvolt = <950000 950000 1000000>;
 			status = "disabled";
 		};
 	};

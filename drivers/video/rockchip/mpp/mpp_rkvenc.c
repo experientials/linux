@@ -15,6 +15,7 @@
 #include <linux/devfreq_cooling.h>
 #include <linux/iopoll.h>
 #include <linux/interrupt.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/of_platform.h>
@@ -22,7 +23,7 @@
 #include <linux/uaccess.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
-#include <linux/debugfs.h>
+#include <linux/proc_fs.h>
 #include <soc/rockchip/pm_domains.h>
 #include <soc/rockchip/rockchip_ipa.h>
 #include <soc/rockchip/rockchip_opp_select.h>
@@ -166,10 +167,9 @@ struct rkvenc_dev {
 	struct mpp_clk_info hclk_info;
 	struct mpp_clk_info core_clk_info;
 	u32 default_max_load;
-#ifdef CONFIG_DEBUG_FS
-	struct dentry *debugfs;
+#ifdef CONFIG_PROC_FS
+	struct proc_dir_entry *procfs;
 #endif
-
 	struct reset_control *rst_a;
 	struct reset_control *rst_h;
 	struct reset_control *rst_core;
@@ -233,7 +233,6 @@ static int rkvenc_extract_task_msg(struct rkvenc_task *task,
 	u32 i;
 	int ret;
 	struct mpp_request *req;
-	struct reg_offset_info *off_inf = &task->off_inf;
 
 	for (i = 0; i < msgs->req_cnt; i++) {
 		req = &msgs->reqs[i];
@@ -290,18 +289,7 @@ static int rkvenc_extract_task_msg(struct rkvenc_task *task,
 			       req, sizeof(*req));
 		} break;
 		case MPP_CMD_SET_REG_ADDR_OFFSET: {
-			ret = mpp_check_req(req, req->offset,
-					    sizeof(off_inf->elem),
-					    0, sizeof(off_inf->elem));
-			if (ret)
-				return ret;
-			if (copy_from_user(&off_inf->elem[off_inf->cnt],
-					   req->data,
-					   req->size)) {
-				mpp_err("copy_from_user failed\n");
-				return -EINVAL;
-			}
-			off_inf->cnt += req->size / sizeof(off_inf->elem[0]);
+			mpp_extract_reg_offset_info(&task->off_inf, req);
 		} break;
 		default:
 			break;
@@ -393,6 +381,20 @@ static int rkvenc_read_req_l2(struct mpp_dev *mpp,
 	return 0;
 }
 
+static int rkvenc_write_req_backward(struct mpp_dev *mpp, u32 *regs,
+				     s32 start_idx, s32 end_idx, s32 en_idx)
+{
+	int i;
+
+	for (i = end_idx - 1; i >= start_idx; i--) {
+		if (i == en_idx)
+			continue;
+		mpp_write_relaxed(mpp, i * sizeof(u32), regs[i]);
+	}
+
+	return 0;
+}
+
 static int rkvenc_run(struct mpp_dev *mpp,
 		      struct mpp_task *mpp_task)
 {
@@ -430,7 +432,8 @@ static int rkvenc_run(struct mpp_dev *mpp,
 				/* set register L1 */
 				s = req->offset / sizeof(u32);
 				e = s + req->size / sizeof(u32);
-				mpp_write_req(mpp, task->reg, s, e, reg_en);
+				/* NOTE: for rkvenc, register should set backward */
+				rkvenc_write_req_backward(mpp, task->reg, s, e, reg_en);
 			}
 		}
 		/* init current task */
@@ -486,14 +489,10 @@ static int rkvenc_isr(struct mpp_dev *mpp)
 	mpp_debug(DEBUG_IRQ_STATUS, "irq_status: %08x\n", task->irq_status);
 
 	if (task->irq_status & RKVENC_INT_ERROR_BITS) {
-		/*
-		 * according to war running, if the dummy encoding
-		 * running with timeout, we enable a safe clear process,
-		 * we reset the ip, and complete the war procedure.
-		 */
 		atomic_inc(&mpp->reset_request);
-		/* time out error */
-		mpp_write(mpp, RKVENC_INT_ERROR_BITS, RKVENC_INT_MSK_BASE);
+		/* dump register */
+		if (mpp_debug_unlikely(DEBUG_DUMP_ERR_REG))
+			mpp_task_dump_reg(mpp, mpp_task);
 	}
 
 	mpp_task_finish(mpp_task->session, mpp_task);
@@ -600,43 +599,45 @@ static int rkvenc_free_task(struct mpp_session *session,
 	return 0;
 }
 
-#ifdef CONFIG_DEBUG_FS
-static int rkvenc_debugfs_remove(struct mpp_dev *mpp)
+#ifdef CONFIG_PROC_FS
+static int rkvenc_procfs_remove(struct mpp_dev *mpp)
 {
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 
-	debugfs_remove_recursive(enc->debugfs);
+	if (enc->procfs) {
+		proc_remove(enc->procfs);
+		enc->procfs = NULL;
+	}
 
 	return 0;
 }
 
-static int rkvenc_debugfs_init(struct mpp_dev *mpp)
+static int rkvenc_procfs_init(struct mpp_dev *mpp)
 {
 	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 
-	enc->debugfs = debugfs_create_dir(mpp->dev->of_node->name,
-					  mpp->srv->debugfs);
-	if (IS_ERR_OR_NULL(enc->debugfs)) {
-		mpp_err("failed on open debugfs\n");
-		enc->debugfs = NULL;
+	enc->procfs = proc_mkdir(mpp->dev->of_node->name, mpp->srv->procfs);
+	if (IS_ERR_OR_NULL(enc->procfs)) {
+		mpp_err("failed on open procfs\n");
+		enc->procfs = NULL;
 		return -EIO;
 	}
-	debugfs_create_u32("aclk", 0644,
-			   enc->debugfs, &enc->aclk_info.debug_rate_hz);
-	debugfs_create_u32("clk_core", 0644,
-			   enc->debugfs, &enc->core_clk_info.debug_rate_hz);
-	debugfs_create_u32("session_buffers", 0644,
-			   enc->debugfs, &mpp->session_max_buffers);
+	mpp_procfs_create_u32("aclk", 0644,
+			      enc->procfs, &enc->aclk_info.debug_rate_hz);
+	mpp_procfs_create_u32("clk_core", 0644,
+			      enc->procfs, &enc->core_clk_info.debug_rate_hz);
+	mpp_procfs_create_u32("session_buffers", 0644,
+			      enc->procfs, &mpp->session_max_buffers);
 
 	return 0;
 }
 #else
-static inline int rkvenc_debugfs_remove(struct mpp_dev *mpp)
+static inline int rkvenc_procfs_remove(struct mpp_dev *mpp)
 {
 	return 0;
 }
 
-static inline int rkvenc_debugfs_init(struct mpp_dev *mpp)
+static inline int rkvenc_procfs_init(struct mpp_dev *mpp)
 {
 	return 0;
 }
@@ -942,9 +943,14 @@ static int rkvenc_reset(struct mpp_dev *mpp)
 #endif
 	mpp_clk_set_rate(&enc->aclk_info, CLK_MODE_REDUCE);
 	mpp_clk_set_rate(&enc->core_clk_info, CLK_MODE_REDUCE);
-
-	mpp_write(mpp, RKVENC_INT_EN_BASE, RKVENC_SAFE_CLR_BIT);
+	/* safe reset */
+	mpp_write(mpp, RKVENC_INT_MSK_BASE, 0x1FF);
 	mpp_write(mpp, RKVENC_CLR_BASE, RKVENC_SAFE_CLR_BIT);
+	udelay(5);
+	mpp_debug(DEBUG_IRQ_STATUS, "irq_status: %08x\n", mpp_read(mpp, RKVENC_INT_STATUS_BASE));
+	mpp_write(mpp, RKVENC_INT_CLR_BASE, 0xffffffff);
+	mpp_write(mpp, RKVENC_INT_STATUS_BASE, 0);
+	/* cru reset */
 	if (enc->rst_a && enc->rst_h && enc->rst_core) {
 		rockchip_pmu_idle_request(mpp->dev, true);
 		mpp_safe_reset(enc->rst_a);
@@ -1131,7 +1137,7 @@ static int rkvenc_probe(struct platform_device *pdev)
 	}
 
 	mpp->session_max_buffers = RKVENC_SESSION_MAX_BUFFERS;
-	rkvenc_debugfs_init(mpp);
+	rkvenc_procfs_init(mpp);
 	dev_info(dev, "probing finish\n");
 
 	return 0;
@@ -1149,7 +1155,7 @@ static int rkvenc_remove(struct platform_device *pdev)
 
 	dev_info(dev, "remove device\n");
 	mpp_dev_remove(&enc->mpp);
-	rkvenc_debugfs_remove(&enc->mpp);
+	rkvenc_procfs_remove(&enc->mpp);
 
 	return 0;
 }
@@ -1170,6 +1176,8 @@ static void rkvenc_shutdown(struct platform_device *pdev)
 				 val, val == 0, 1000, 200000);
 	if (ret == -ETIMEDOUT)
 		dev_err(dev, "wait total running time out\n");
+
+	dev_info(dev, "shutdown success\n");
 }
 
 struct platform_driver rockchip_rkvenc_driver = {

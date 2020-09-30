@@ -31,6 +31,10 @@ bool rkispp_clk_dbg;
 module_param_named(clk_dbg, rkispp_clk_dbg, bool, 0644);
 MODULE_PARM_DESC(clk_dbg, "rkispp clk set by user");
 
+bool rkispp_monitor;
+module_param_named(monitor, rkispp_monitor, bool, 0644);
+MODULE_PARM_DESC(monitor, "rkispp abnormal restart monitor");
+
 static int rkisp_ispp_mode = ISP_ISPP_FBC;
 module_param_named(mode, rkisp_ispp_mode, int, 0644);
 MODULE_PARM_DESC(mode, "isp->ispp mode: bit0 fbc, bit1 yuv422, bit2 quick");
@@ -264,6 +268,7 @@ static int rkispp_plat_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto err_unreg_media_dev;
 
+	rkispp_proc_init(ispp_dev);
 	pm_runtime_enable(&pdev->dev);
 
 	return 0;
@@ -281,6 +286,7 @@ static int rkispp_plat_remove(struct platform_device *pdev)
 
 	pm_runtime_disable(&pdev->dev);
 
+	rkispp_proc_cleanup(ispp_dev);
 	rkispp_unregister_subdev(ispp_dev);
 	rkispp_unregister_stats_vdev(ispp_dev);
 	rkispp_unregister_params_vdev(ispp_dev);
@@ -308,6 +314,7 @@ static int __maybe_unused rkispp_runtime_resume(struct device *dev)
 
 	ispp_dev->isp_mode = rkisp_ispp_mode;
 	ispp_dev->stream_sync = rkispp_stream_sync;
+	ispp_dev->stream_vdev.monitor.is_en = rkispp_monitor;
 	if (atomic_inc_return(&ispp_dev->hw_dev->power_cnt) > 1)
 		return 0;
 	return pm_runtime_get_sync(ispp_dev->hw_dev->dev);

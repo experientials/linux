@@ -318,6 +318,15 @@ static void print_debug_info(struct rga2_req *req)
 	     req->src.act_w, req->src.act_h, req->src.vir_w, req->src.vir_h,
 	     req->src.x_offset, req->src.y_offset,
 	     rga2_get_format_name(req->src.format));
+	if (req->src1.yrgb_addr != 0 ||
+	    req->src1.uv_addr != 0 ||
+	    req->src1.v_addr != 0) {
+		INFO("src1 : y=%lx uv=%lx v=%lx aw=%d ah=%d vw=%d vh=%d xoff=%d yoff=%d format=%s\n",
+		     req->src1.yrgb_addr, req->src1.uv_addr, req->src1.v_addr,
+		     req->src1.act_w, req->src1.act_h, req->src1.vir_w, req->src1.vir_h,
+		     req->src1.x_offset, req->src1.y_offset,
+		     rga2_get_format_name(req->src1.format));
+	}
 	INFO("dst : y=%lx uv=%lx v=%lx aw=%d ah=%d vw=%d vh=%d xoff=%d yoff=%d format=%s\n",
 	     req->dst.yrgb_addr, req->dst.uv_addr, req->dst.v_addr,
 	     req->dst.act_w, req->dst.act_h, req->dst.vir_w, req->dst.vir_h,
@@ -1417,6 +1426,7 @@ static int rga2_blit_flush_cache(rga2_session *session, struct rga2_req *req)
 #endif
 	if ((req->mmu_info.src0_mmu_flag & 1) || (req->mmu_info.src1_mmu_flag & 1) ||
 	    (req->mmu_info.dst_mmu_flag & 1) || (req->mmu_info.els_mmu_flag & 1)) {
+		reg->MMU_map = true;
 		ret = rga2_set_mmu_info(reg, req);
 		if (ret < 0) {
 			pr_err("%s, [%d] set mmu info error\n", __func__, __LINE__);
@@ -2023,6 +2033,24 @@ static int rga2_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+static void RGA2_flush_page(void)
+{
+	struct rga2_reg *reg;
+	int i;
+
+	reg = list_entry(rga2_service.running.prev,
+			 struct rga2_reg, status_link);
+
+	if (reg == NULL)
+		return;
+	if (reg->MMU_base == NULL)
+		return;
+
+	for (i = 0; i < reg->MMU_count; i++)
+		rga2_dma_flush_page(phys_to_page(reg->MMU_base[i]),
+				    MMU_UNMAP_INVALID);
+}
+
 static irqreturn_t rga2_irq_thread(int irq, void *dev_id)
 {
 #if RGA2_DEBUGFS
@@ -2030,6 +2058,7 @@ static irqreturn_t rga2_irq_thread(int irq, void *dev_id)
 		INFO("irqthread INT[%x],STATS[%x]\n", rga2_read(RGA2_INT),
 		     rga2_read(RGA2_STATUS));
 #endif
+	RGA2_flush_page();
 	mutex_lock(&rga2_service.lock);
 	if (rga2_service.enable) {
 		rga2_del_running_list();

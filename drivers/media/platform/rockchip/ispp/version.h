@@ -13,15 +13,33 @@
  * 1. First version;
  *
  * v0.1.1:
- * support fbc output format
- * support fec function
- * support oneframe mode
+ * 1. support fbc output format
+ * 2. support fec function
+ * 3. support oneframe mode
  *
  * v0.1.2:
- * support multi virtual device;
+ * 1. support multi virtual device;
  *
  * v0.1.3:
- * fix reg write err for fec
+ * 1. fix reg write err for fec
+ *
+ * v0.1.4:
+ * 1. add clk rate set for rv1126
+ * 2. safe to enable shp/fec output
+ * 3. tnr skip input buf if no output buf
+ *
+ * v0.1.5:
+ * 1. add proc fs
+ * 2. add iq part information to procfs
+ * 3. fix config err for stream switch
+ *
+ * v0.1.6:
+ * 1. tnr support dynamic switch
+ *
+ * v0.1.7:
+ * 1. fix cannot change some shadow bits by only config function
+ * 2. fix scl0 format check error
+ * 3. vb2 support cache hints
  */
 
 #define RKISPP_DRIVER_VERSION ISPP_API_VERSION

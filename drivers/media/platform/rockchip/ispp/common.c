@@ -2,6 +2,8 @@
 /* Copyright (C) 2019 Rockchip Electronics Co., Ltd */
 
 #include <media/videobuf2-dma-contig.h>
+#include <linux/delay.h>
+#include <linux/iommu.h>
 #include <linux/of_platform.h>
 #include "dev.h"
 #include "regs.h"
@@ -189,6 +191,7 @@ static int rkispp_init_pool(struct rkispp_hw_dev *hw, struct rkisp_ispp_buf *dbu
 		if (!pool->dbufs)
 			break;
 	}
+	dbufs->is_isp = true;
 	pool->dbufs = dbufs;
 	if (rkispp_debug)
 		dev_info(hw->dev, "%s dbufs[%d]:0x%p\n",
@@ -281,4 +284,17 @@ int rkispp_event_handle(struct rkispp_device *ispp, u32 cmd, void *arg)
 	}
 
 	return ret;
+}
+
+void rkispp_soft_reset(struct rkispp_device *ispp)
+{
+	struct rkispp_hw_dev *hw = ispp->hw_dev;
+	struct iommu_domain *domain = iommu_get_domain_for_dev(hw->dev);
+
+	if (domain)
+		iommu_detach_device(domain, hw->dev);
+	writel(GLB_SOFT_RST_ALL, hw->base_addr + RKISPP_CTRL_RESET);
+	udelay(10);
+	if (domain)
+		iommu_attach_device(domain, hw->dev);
 }

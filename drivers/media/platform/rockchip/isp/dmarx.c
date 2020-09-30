@@ -197,6 +197,7 @@ static struct stream_config rkisp2_dmarx0_stream_config = {
 	.mi = {
 		.y_base_ad_init = MI_RAW0_RD_BASE,
 		.y_base_ad_shd = MI_RAW0_RD_BASE_SHD,
+		.length = MI_RAW0_RD_LENGTH,
 	},
 };
 
@@ -207,6 +208,7 @@ static struct stream_config rkisp2_dmarx1_stream_config = {
 	.mi = {
 		.y_base_ad_init = MI_RAW1_RD_BASE,
 		.y_base_ad_shd = MI_RAW1_RD_BASE_SHD,
+		.length = MI_RAW1_RD_LENGTH,
 	},
 };
 
@@ -217,6 +219,7 @@ static struct stream_config rkisp2_dmarx2_stream_config = {
 	.mi = {
 		.y_base_ad_init = MI_RAW2_RD_BASE,
 		.y_base_ad_shd = MI_RAW2_RD_BASE_SHD,
+		.length = MI_RAW2_RD_LENGTH,
 	},
 };
 
@@ -321,7 +324,7 @@ static int rawrd_config_mi(struct rkisp_stream *stream)
 	rkisp_set_bits(dev, CSI2RX_RAW_RD_CTRL, 0,
 		       dev->csi_dev.memory << 2 |
 		       1 << (stream->id - 1), true);
-
+	mi_raw_length(stream);
 	v4l2_dbg(1, rkisp_debug, &dev->v4l2_dev,
 		 "%s id:%d 0x%x %dx%d\n", __func__,
 		 stream->id, val,
@@ -606,6 +609,7 @@ static int rkisp_init_vb2_queue(struct vb2_queue *q,
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	q->lock = &stream->ispdev->apilock;
 	q->dev = stream->ispdev->hw_dev->dev;
+	q->allow_cache_hints = 1;
 
 	return vb2_queue_init(q);
 }
@@ -656,7 +660,7 @@ static int rkisp_set_fmt(struct rkisp_stream *stream,
 		if (stream->ispdev->isp_ver == ISP_V20 &&
 		    !stream->ispdev->csi_dev.memory &&
 		    stream->id != RKISP_STREAM_DMARX)
-			bytesperline = width * fmt->bpp[i] / 8;
+			bytesperline = ALIGN(width * fmt->bpp[i] / 8, 256);
 		else
 			bytesperline = width * DIV_ROUND_UP(fmt->bpp[i], 8);
 		/* stride is only available for sp stream and y plane */
@@ -948,7 +952,7 @@ void rkisp_dmarx_get_frame(struct rkisp_device *dev,
 	}
 
 	spin_lock_irqsave(&dev->csi_dev.rdbk_lock, flag);
-	if (sync || dev->csi_dev.is_isp_end) {
+	if (sync) {
 		frame_id = dev->dmarx_dev.cur_frame.id;
 		frame_timestamp = dev->dmarx_dev.cur_frame.timestamp;
 	} else {

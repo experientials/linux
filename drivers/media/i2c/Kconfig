@@ -712,6 +712,17 @@ config VIDEO_IMX327
 	  To compile this driver as a module, choose M here: the
 	  module will be called imx327.
 
+config VIDEO_IMX334
+	tristate "Sony IMX334 sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	help
+	  This is a Video4Linux2 sensor driver for the Sony
+	  IMX334 camera.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called imx334.
+
 config VIDEO_IMX335
 	tristate "Sony IMX335 sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
@@ -738,6 +749,7 @@ config VIDEO_IMX378
 	tristate "Sony IMX378 sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
 	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
 	help
 	  This is a Video4Linux2 sensor driver for the Sony
 	  IMX378 camera.
@@ -1462,6 +1474,17 @@ config VIDEO_SC132GS
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called sc132gs.
+
+config VIDEO_SC2310
+	tristate "SmartSens SC2310 sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  Support for the SmartSens SC2310 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called sc2310.
 
 comment "Flash devices"
 

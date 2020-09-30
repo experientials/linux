@@ -182,7 +182,7 @@ struct reg_offset_info {
 struct mpp_clk_info {
 	struct clk *clk;
 
-	/* debug rate, from debugfs */
+	/* debug rate, from debug */
 	u32 debug_rate_hz;
 	/* normal rate, from dtsi */
 	u32 normal_rate_hz;
@@ -351,8 +351,8 @@ struct mpp_service {
 	dev_t dev_id;
 	struct cdev mpp_cdev;
 	struct device *child_dev;
-#ifdef CONFIG_DEBUG_FS
-	struct dentry *debugfs;
+#ifdef CONFIG_PROC_FS
+	struct proc_dir_entry *procfs;
 #endif
 	unsigned long hw_support;
 	atomic_t shutdown_request;
@@ -435,6 +435,8 @@ int mpp_translate_reg_address(struct mpp_session *session,
 
 int mpp_check_req(struct mpp_request *req, int base,
 		  int max_size, u32 off_s, u32 off_e);
+int mpp_extract_reg_offset_info(struct reg_offset_info *off_inf,
+				struct mpp_request *req);
 int mpp_query_reg_offset_info(struct reg_offset_info *off_inf,
 			      u32 index);
 int mpp_translate_reg_offset_info(struct mpp_task *task,
@@ -597,6 +599,19 @@ static inline int mpp_reset_up_write(struct mpp_reset_group *group)
 
 	return 0;
 }
+
+#ifdef CONFIG_PROC_FS
+struct proc_dir_entry *
+mpp_procfs_create_u32(const char *name, umode_t mode,
+		      struct proc_dir_entry *parent, void *data);
+#else
+static inline struct proc_dir_entry *
+mpp_procfs_create_u32(const char *name, umode_t mode,
+		      struct proc_dir_entry *parent, void *data)
+{
+	return 0;
+}
+#endif
 
 /* workaround according hardware */
 int px30_workaround_combo_init(struct mpp_dev *mpp);

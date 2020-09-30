@@ -94,6 +94,7 @@ struct tnr_module {
 	struct rkisp_ispp_buf *cur_rd;
 	struct rkisp_ispp_buf *nxt_rd;
 	struct rkisp_ispp_buf *cur_wr;
+	struct frame_debug_info dbg;
 	u32 uv_offset;
 	bool is_end;
 	bool is_3to1;
@@ -106,6 +107,7 @@ struct nr_module {
 	spinlock_t buf_lock;
 	struct rkisp_ispp_buf *cur_rd;
 	struct rkispp_dummy_buffer *cur_wr;
+	struct frame_debug_info dbg;
 	u32 uv_offset;
 	bool is_end;
 };
@@ -113,6 +115,7 @@ struct nr_module {
 struct fec_module {
 	struct list_head list_rd;
 	struct rkispp_dummy_buffer *cur_rd;
+	struct frame_debug_info dbg;
 	spinlock_t buf_lock;
 	u32 uv_offset;
 	bool is_end;
@@ -158,11 +161,43 @@ struct rkispp_stream {
 	struct stream_config *config;
 	struct capture_fmt out_cap_fmt;
 	struct v4l2_pix_format_mplane out_fmt;
+	struct frame_debug_info dbg;
+
 	u8 last_module;
 	bool streaming;
 	bool stopping;
 	bool linked;
 	bool is_upd;
+	bool is_cfg;
+};
+
+enum {
+	MONITOR_OFF = 0,
+	MONITOR_TNR = BIT(0),
+	MONITOR_NR = BIT(1),
+	MONITOR_FEC = BIT(2),
+};
+
+struct module_monitor {
+	struct rkispp_device *dev;
+	struct work_struct work;
+	struct completion cmpl;
+	u16 time;
+	u8 module;
+	bool is_cancel;
+};
+
+struct rkispp_monitor {
+	struct module_monitor tnr;
+	struct module_monitor nr;
+	struct module_monitor fec;
+	struct completion cmpl;
+	spinlock_t lock;
+	u8 monitoring_module;
+	u8 restart_module;
+	u8 retry;
+	bool is_restart;
+	bool is_en;
 };
 
 /* rkispp stream device */
@@ -173,6 +208,8 @@ struct rkispp_stream_vdev {
 	struct nr_module nr;
 	struct fec_module fec;
 	struct in_fec_buf fec_buf;
+	struct frame_debug_info dbg;
+	struct rkispp_monitor monitor;
 	atomic_t refcnt;
 	u32 module_ens;
 	u32 irq_ends;

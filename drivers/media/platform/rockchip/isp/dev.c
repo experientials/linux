@@ -153,7 +153,7 @@ static int __isp_pipeline_s_isp_clk(struct rkisp_pipeline *p)
 	if (rkisp_clk_dbg)
 		return 0;
 
-	if (dev->isp_inp & (INP_RAWRD0 | INP_RAWRD1 | INP_RAWRD2)) {
+	if (dev->isp_inp & (INP_RAWRD0 | INP_RAWRD1 | INP_RAWRD2 | INP_CIF)) {
 		for (i = 0; i < hw_dev->num_clk_rate_tbl; i++) {
 			if (w <= hw_dev->clk_rate_tbl[i].refer_data)
 				break;
@@ -208,7 +208,7 @@ static int __isp_pipeline_s_isp_clk(struct rkisp_pipeline *p)
 end:
 	/* set isp clock rate */
 	clk_set_rate(hw_dev->clks[0], hw_dev->clk_rate_tbl[i].clk_rate * 1000000UL);
-	dev_info(hw_dev->dev, "set isp clk = %luHz\n", clk_get_rate(hw_dev->clks[0]));
+	dev_dbg(hw_dev->dev, "set isp clk = %luHz\n", clk_get_rate(hw_dev->clks[0]));
 
 	return 0;
 }
@@ -751,6 +751,8 @@ static int rkisp_plat_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto err_unreg_media_dev;
 
+	rkisp_proc_init(isp_dev);
+
 	mutex_lock(&rkisp_dev_mutex);
 	list_add_tail(&isp_dev->list, &rkisp_device_list);
 	mutex_unlock(&rkisp_dev_mutex);
@@ -771,6 +773,7 @@ static int rkisp_plat_remove(struct platform_device *pdev)
 
 	pm_runtime_disable(&pdev->dev);
 
+	rkisp_proc_cleanup(isp_dev);
 	media_device_unregister(&isp_dev->media_dev);
 	v4l2_device_unregister(&isp_dev->v4l2_dev);
 	rkisp_unregister_luma_vdev(&isp_dev->luma_vdev);

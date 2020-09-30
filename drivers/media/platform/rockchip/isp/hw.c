@@ -36,16 +36,6 @@ struct isp_irqs_data {
 	irqreturn_t (*irq_hdl)(int irq, void *ctx);
 };
 
-struct isp_match_data {
-	const char * const *clks;
-	int num_clks;
-	enum rkisp_isp_ver isp_ver;
-	const struct isp_clk_info  *clk_rate_tbl;
-	int num_clk_rate_tbl;
-	struct isp_irqs_data *irqs;
-	int num_irqs;
-};
-
 /* using default value if reg no write for multi device */
 static void default_sw_reg_flag(struct rkisp_device *dev)
 {
@@ -488,11 +478,13 @@ void rkisp_soft_reset(struct rkisp_hw_dev *dev)
 		reset_control_assert(dev->reset);
 		udelay(10);
 		reset_control_deassert(dev->reset);
-	} else {
-		writel(CIF_ISP_CTRL_ISP_MODE_BAYER_ITU601, base + CIF_ISP_CTRL);
-		writel(0xffff, base + CIF_IRCL);
 		udelay(10);
 	}
+	/* reset for Dehaze */
+	writel(CIF_ISP_CTRL_ISP_MODE_BAYER_ITU601, base + CIF_ISP_CTRL);
+	writel(0xffff, base + CIF_IRCL);
+	udelay(10);
+
 	if (domain) {
 #ifdef CONFIG_IOMMU_API
 		domain->ops->detach_dev(domain, dev->dev);
@@ -542,8 +534,7 @@ static void disable_sys_clk(struct rkisp_hw_dev *dev)
 			disable_irq(dev->mipi_irq);
 	}
 
-	if (!dev->is_thunderboot)
-		isp_config_clk(dev, false);
+	isp_config_clk(dev, false);
 
 	for (i = dev->num_clks - 1; i >= 0; i--)
 		if (!IS_ERR(dev->clks[i]))
@@ -562,10 +553,8 @@ static int enable_sys_clk(struct rkisp_hw_dev *dev)
 		}
 	}
 
-	if (!dev->is_thunderboot) {
-		rkisp_soft_reset(dev);
-		isp_config_clk(dev, true);
-	}
+	rkisp_soft_reset(dev);
+	isp_config_clk(dev, true);
 
 	if (dev->isp_ver == ISP_V12 || dev->isp_ver == ISP_V13) {
 		/* disable csi_rx interrupt */

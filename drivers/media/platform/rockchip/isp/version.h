@@ -24,6 +24,25 @@
  * 3. adjust hurry priority to middle
  * 4. mi lum burst to 16 for dmatx
  * 5. add cru reset for rv1126
+ *
+ * v0.1.4:
+ * 1. add more clk rate for rv1126
+ * 2. support hal to control hdrtmo on/off
+ * 3. switch hdr frame mode for read back
+ *
+ * v0.1.5:
+ * 1. add proc fs
+ * 2. add iq part information to procfs
+ * 3. fix stream failure in thunderboot mode
+ *
+ * v0.1.6:
+ * 1. raw length 256 align
+ * 2. soft reset for Dehaze
+ *
+ * v0.1.7:
+ * 1. fix rawaf is disabled in config function
+ * 2. clear csi rdbk fifo when first open
+ * 3. vb2 support cache hints
  */
 
 #define RKISP_DRIVER_VERSION RKISP_API_VERSION

@@ -25,6 +25,7 @@
 #include <linux/io.h>
 #include <linux/mfd/syscon.h>
 #include "dev.h"
+#include "procfs.h"
 
 #define RKCIF_VERNO_LEN		10
 
@@ -292,8 +293,17 @@ static int rkcif_pipeline_set_stream(struct rkcif_pipeline *p, bool on)
 		    (!on && atomic_dec_return(&p->stream_cnt) > 0))
 			return 0;
 
-		if (on)
+		if (on) {
 			rockchip_set_system_status(SYS_STATUS_CIF0);
+			cif_dev->irq_stats.csi_overflow_cnt = 0;
+			cif_dev->irq_stats.csi_bwidth_lack_cnt = 0;
+			cif_dev->irq_stats.dvp_bus_err_cnt = 0;
+			cif_dev->irq_stats.dvp_line_err_cnt = 0;
+			cif_dev->irq_stats.dvp_overflow_cnt = 0;
+			cif_dev->irq_stats.dvp_pix_err_cnt = 0;
+			cif_dev->irq_stats.all_err_cnt = 0;
+			cif_dev->irq_stats.all_frm_end_cnt = 0;
+		}
 
 		/* phy -> sensor */
 		for (i = 0; i < p->num_subdevs; i++) {
@@ -325,6 +335,18 @@ static int rkcif_pipeline_set_stream(struct rkcif_pipeline *p, bool on)
 		}
 
 		if ((on && can_be_set) || !on) {
+			if (on) {
+				cif_dev->irq_stats.csi_overflow_cnt = 0;
+				cif_dev->irq_stats.csi_bwidth_lack_cnt = 0;
+				cif_dev->irq_stats.dvp_bus_err_cnt = 0;
+				cif_dev->irq_stats.dvp_line_err_cnt = 0;
+				cif_dev->irq_stats.dvp_overflow_cnt = 0;
+				cif_dev->irq_stats.dvp_pix_err_cnt = 0;
+				cif_dev->irq_stats.all_err_cnt = 0;
+				cif_dev->irq_stats.all_frm_end_cnt = 0;
+				cif_dev->is_start_hdr = true;
+			}
+
 			/* phy -> sensor */
 			for (i = 0; i < p->num_subdevs; i++) {
 				ret = v4l2_subdev_call(p->subdevs[i], video, s_stream, on);
@@ -695,6 +717,29 @@ int rkcif_attach_hw(struct rkcif_device *cif_dev)
 	return 0;
 }
 
+static int rkcif_detach_hw(struct rkcif_device *cif_dev)
+{
+	struct rkcif_hw *hw = cif_dev->hw_dev;
+	int i;
+
+	for (i = 0; i < hw->dev_num; i++) {
+		if (hw->cif_dev[i] == cif_dev) {
+			if ((i + 1) < hw->dev_num) {
+				hw->cif_dev[i] = hw->cif_dev[i + 1];
+				hw->cif_dev[i + 1] = NULL;
+			} else {
+				hw->cif_dev[i] = NULL;
+			}
+
+			hw->dev_num--;
+			dev_info(cif_dev->dev, "detach to cif hw node\n");
+			break;
+		}
+	}
+
+	return 0;
+}
+
 int rkcif_plat_init(struct rkcif_device *cif_dev, struct device_node *node, int inf_id)
 {
 	struct device *dev = cif_dev->dev;
@@ -705,9 +750,11 @@ int rkcif_plat_init(struct rkcif_device *cif_dev, struct device_node *node, int 
 	cif_dev->inf_id = inf_id;
 
 	mutex_init(&cif_dev->stream_lock);
+	spin_lock_init(&cif_dev->hdr_lock);
 	atomic_set(&cif_dev->pipe.power_cnt, 0);
 	atomic_set(&cif_dev->pipe.stream_cnt, 0);
 	atomic_set(&cif_dev->fh_cnt, 0);
+	cif_dev->is_start_hdr = false;
 	cif_dev->pipe.open = rkcif_pipeline_open;
 	cif_dev->pipe.close = rkcif_pipeline_close;
 	cif_dev->pipe.set_stream = rkcif_pipeline_set_stream;
@@ -853,8 +900,13 @@ static int rkcif_plat_probe(struct platform_device *pdev)
 	}
 
 	ret = rkcif_plat_init(cif_dev, node, data->inf_id);
-	if (ret)
+	if (ret) {
+		rkcif_detach_hw(cif_dev);
 		return ret;
+	}
+
+	if (rkcif_proc_init(cif_dev))
+		dev_warn(dev, "dev:%s create proc failed\n", dev_name(dev));
 
 	rkcif_soft_reset(cif_dev, true);
 	pm_runtime_enable(&pdev->dev);
@@ -866,7 +918,11 @@ static int rkcif_plat_remove(struct platform_device *pdev)
 {
 	struct rkcif_device *cif_dev = platform_get_drvdata(pdev);
 
-	return rkcif_plat_uninit(cif_dev);
+	rkcif_plat_uninit(cif_dev);
+	rkcif_detach_hw(cif_dev);
+	rkcif_proc_cleanup(cif_dev);
+
+	return 0;
 }
 
 static int __maybe_unused rkcif_runtime_suspend(struct device *dev)

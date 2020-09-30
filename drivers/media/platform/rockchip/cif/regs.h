@@ -281,10 +281,16 @@ enum cif_reg_index {
 /* CIF INTSTAT */
 #define INTSTAT_CLS			(0x3FF)
 #define FRAME_END			(0x01 << 0)
+#define LINE_ERR			(0x1 << 2)
+#define PIX_ERR				(0x1 << 3)
+#define IFIFO_OVERFLOW			(0x1 << 4)
+#define DFIFO_OVERFLOW			(0x1 << 5)
+#define BUS_ERR				(0x1 << 6)
 #define PST_INF_FRAME_END		(0x01 << 9)
 #define FRAME_END_CLR			(0x01 << 0)
 #define PST_INF_FRAME_END_CLR		(0x01 << 9)
 #define INTSTAT_ERR			(0xFC)
+#define DVP_ALL_OVERFLOW		(IFIFO_OVERFLOW | DFIFO_OVERFLOW)
 
 /* FRAME STATUS */
 #define FRAME_STAT_CLS			0x00
@@ -464,7 +470,9 @@ enum cif_reg_index {
 #define CSI_FIFO_OVERFLOW	(CSI_DMA_Y_FIFO_OVERFLOW |	\
 				 CSI_DMA_UV_FIFO_OVERFLOW |	\
 				 CSI_CONFIG_FIFO_OVERFLOW |	\
-				 CSI_RX_FIFO_OVERFLOW)
+				 CSI_RX_FIFO_OVERFLOW |	\
+				 CSI_DMA_LVDS_ID2_FIFO_OVERFLOW |	\
+				 CSI_DMA_LVDS_ID3_FIFO_OVERFLOW)
 /* CIF_MIPI_LVDS_CTRL */
 #define CIF_MIPI_LVDS_SW_DMA_IDLE		(0x1 << 16)
 #define CIF_MIPI_LVDS_SW_PRESS_VALUE(val)	(((val) & 0x3) << 13)
@@ -480,6 +488,14 @@ enum cif_reg_index {
 #define CIF_MIPI_LVDS_SW_WATER_LINE_25		(0x2 << 1)
 #define CIF_MIPI_LVDS_SW_WATER_LINE_00		(0x3 << 1)
 #define CIF_MIPI_LVDS_SW_WATER_LINE_ENABLE	(0x1 << 0)
+#define CIF_MIPI_LVDS_SW_DMA_IDLE_RK1808	(0x1 << 24)
+#define CIF_MIPI_LVDS_SW_HURRY_VALUE_RK1808(val)	(((val) & 0x3) << 17)
+#define CIF_MIPI_LVDS_SW_HURRY_ENABLE_RK1808	(0x1 << 16)
+#define CIF_MIPI_LVDS_SW_WATER_LINE_75_RK1808	(0x0 << 0)
+#define CIF_MIPI_LVDS_SW_WATER_LINE_50_RK1808	(0x1 << 0)
+#define CIF_MIPI_LVDS_SW_WATER_LINE_25_RK1808	(0x2 << 0)
+#define CIF_MIPI_LVDS_SW_WATER_LINE_00_RK1808	(0x3 << 0)
+#define CIF_MIPI_LVDS_SW_WATER_LINE_ENABLE_RK1808	(0x1 << 4)
 
 /* CSI Host Registers Define */
 #define CSIHOST_N_LANES		0x04

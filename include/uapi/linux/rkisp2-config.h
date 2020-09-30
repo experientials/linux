@@ -10,7 +10,7 @@
 #include <linux/types.h>
 #include <linux/v4l2-controls.h>
 
-#define RKISP_API_VERSION		KERNEL_VERSION(0, 1, 0x3)
+#define RKISP_API_VERSION		KERNEL_VERSION(0, 1, 0x7)
 
 #define RKISP_CMD_TRIGGER_READ_BACK \
 	_IOW('V', BASE_VIDIOC_PRIVATE + 0, struct isp2x_csi_trigger)
@@ -151,11 +151,31 @@
 
 #define ISP2X_THUNDERBOOT_VIDEO_BUF_NUM	30
 
+/* trigger event mode
+ * T_TRY: trigger maybe with retry
+ * T_TRY_YES: trigger to retry
+ * T_TRY_NO: trigger no to retry
+ *
+ * T_START_X1: isp read one frame
+ * T_START_X2: isp read hdr two frame
+ * T_START_X3: isp read hdr three frame
+ */
+enum isp2x_trigger_mode {
+	T_TRY = BIT(0),
+	T_TRY_YES = BIT(1),
+	T_TRY_NO = BIT(2),
+
+	T_START_X1 = BIT(4),
+	T_START_X2 = BIT(5),
+	T_START_X3 = BIT(6),
+};
+
 struct isp2x_csi_trigger {
 	/* timestamp in ns */
 	u64 frame_timestamp;
 	u32 frame_id;
 	int times;
+	enum isp2x_trigger_mode mode;
 } __attribute__ ((packed));
 
 enum isp2x_csi_memory {

@@ -18,6 +18,11 @@
  *  2. support HDR/Linear quick switch
  * V0.0X01.0X04
  * 1. support enum format info by aiq
+ * V0.0X01.0X05
+ * 1. fixed 10bit hdr2/hdr3 frame rate issue
+ * V0.0X01.0X06
+ * 1. support DOL3 10bit 20fps 1485Mbps
+ * 2. fixed linkfreq error
  */
 
 #define DEBUG
@@ -40,7 +45,7 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/rk-preisp.h>
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x04)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x06)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -96,7 +101,7 @@
 #define IMX415_RHS2_REG_L		0x3064
 #define IMX415_RHS2_DEFAULT		0x004D
 
-#define	IMX415_EXPOSURE_MIN		8
+#define	IMX415_EXPOSURE_MIN		4
 #define	IMX415_EXPOSURE_STEP		1
 #define IMX415_VTS_MAX			0x7fff
 
@@ -345,7 +350,7 @@ static __maybe_unused const struct regval imx415_linear_12bit_3864x2192_891M_reg
 };
 
 static __maybe_unused const struct regval imx415_hdr2_12bit_3864x2192_1782M_regs[] = {
-	{0x3024, 0xE4},
+	{0x3024, 0xCA},
 	{0x3025, 0x08},
 	{0x3028, 0x26},
 	{0x3029, 0x02},
@@ -492,19 +497,20 @@ static __maybe_unused const struct regval imx415_global_10bit_3864x2192_regs[] =
 	{REG_NULL, 0x00},
 };
 
-static __maybe_unused const struct regval imx415_hdr3_10bit_3864x2192_1782M_regs[] = {
-	{0x3024, 0xEA},
-	{0x3025, 0x07},
-	{0x3028, 0xCA},
-	{0x3029, 0x01},
+static __maybe_unused const struct regval imx415_hdr3_10bit_3864x2192_1485M_regs[] = {
+	{0x3024, 0xBD},
+	{0x3025, 0x06},
+	{0x3028, 0x1A},
+	{0x3029, 0x02},
 	{0x302C, 0x01},
 	{0x302D, 0x02},
-	{0x3050, 0x3E},
-	{0x3051, 0x01},
+	{0x3033, 0x08},
+	{0x3050, 0x90},
+	{0x3051, 0x15},
 	{0x3054, 0x0D},
-	{0x3058, 0x9E},
-	{0x3060, 0x91},
-	{0x3064, 0xC2},
+	{0x3058, 0xA4},
+	{0x3060, 0x97},
+	{0x3064, 0xB6},
 	{0x30CF, 0x03},
 	{0x3118, 0xA0},
 	{0x3260, 0x00},
@@ -523,8 +529,41 @@ static __maybe_unused const struct regval imx415_hdr3_10bit_3864x2192_1782M_regs
 	{REG_NULL, 0x00},
 };
 
+static __maybe_unused const struct regval imx415_hdr3_10bit_3864x2192_1782M_regs[] = {
+	{0x3024, 0xEA},
+	{0x3025, 0x07},
+	{0x3028, 0xCA},
+	{0x3029, 0x01},
+	{0x302C, 0x01},
+	{0x302D, 0x02},
+	{0x3033, 0x04},
+	{0x3050, 0x3E},
+	{0x3051, 0x01},
+	{0x3054, 0x0D},
+	{0x3058, 0x9E},
+	{0x3060, 0x91},
+	{0x3064, 0xC2},
+	{0x30CF, 0x03},
+	{0x3118, 0xC0},
+	{0x3260, 0x00},
+	{0x400C, 0x01},
+	{0x4018, 0xB7},
+	{0x401A, 0x67},
+	{0x401C, 0x6F},
+	{0x401E, 0xDF},
+	{0x401F, 0x01},
+	{0x4020, 0x6F},
+	{0x4022, 0xCF},
+	{0x4024, 0x6F},
+	{0x4026, 0xB7},
+	{0x4028, 0x5F},
+	{0x4074, 0x00},
+	{REG_NULL, 0x00},
+};
+
 static __maybe_unused const struct regval imx415_hdr2_10bit_3864x2192_1485M_regs[] = {
 	{0x3024, 0xFC},
+	{0x3025, 0x08},
 	{0x3028, 0x1A},
 	{0x3029, 0x02},
 	{0x302C, 0x01},
@@ -533,7 +572,9 @@ static __maybe_unused const struct regval imx415_hdr2_10bit_3864x2192_1485M_regs
 	{0x3050, 0xA8},
 	{0x3051, 0x0D},
 	{0x3054, 0x09},
+	{0x3058, 0x3E},
 	{0x3060, 0x4D},
+	{0x3064, 0x4a},
 	{0x30CF, 0x01},
 	{0x3118, 0xA0},
 	{0x3260, 0x00},
@@ -554,6 +595,7 @@ static __maybe_unused const struct regval imx415_hdr2_10bit_3864x2192_1485M_regs
 
 static __maybe_unused const struct regval imx415_linear_10bit_3864x2192_891M_regs[] = {
 	{0x3024, 0xCA},
+	{0x3025, 0x08},
 	{0x3028, 0x4C},
 	{0x3029, 0x04},
 	{0x302C, 0x00},
@@ -562,7 +604,9 @@ static __maybe_unused const struct regval imx415_linear_10bit_3864x2192_891M_reg
 	{0x3050, 0x08},
 	{0x3051, 0x00},
 	{0x3054, 0x19},
+	{0x3058, 0x3E},
 	{0x3060, 0x25},
+	{0x3064, 0x4a},
 	{0x30CF, 0x00},
 	{0x3118, 0xC0},
 	{0x3260, 0x01},
@@ -599,6 +643,98 @@ static const struct imx415_mode supported_modes[] = {
 	 * VMAX >= (PIX_VWIDTH / 2) + 46 = height + 46
 	 */
 	{
+		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
+		.width = 3864,
+		.height = 2192,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 300000,
+		},
+		.exp_def = 0x08ca - 0x08,
+		.hts_def = 0x044c * IMX415_4LANES * 2,
+		.vts_def = 0x08ca,
+		.global_reg_list = imx415_global_10bit_3864x2192_regs,
+		.reg_list = imx415_linear_10bit_3864x2192_891M_regs,
+		.hdr_mode = NO_HDR,
+		.mipi_freq_idx = 0,
+		.bpp = 10,
+	},
+	{
+		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
+		.width = 3864,
+		.height = 2192,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 300000,
+		},
+		.exp_def = 0x08fc * 2 - 0x0da8,
+		.hts_def = 0x0226 * IMX415_4LANES * 2,
+		/*
+		 * IMX415 HDR mode T-line is half of Linear mode,
+		 * make vts double to workaround.
+		 */
+		.vts_def = 0x08fc * 2,
+		.global_reg_list = imx415_global_10bit_3864x2192_regs,
+		.reg_list = imx415_hdr2_10bit_3864x2192_1485M_regs,
+		.hdr_mode = HDR_X2,
+		.mipi_freq_idx = 1,
+		.bpp = 10,
+		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
+		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
+		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
+		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
+	},
+	{
+		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
+		.width = 3864,
+		.height = 2192,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 200000,
+		},
+		.exp_def = 0x13e,
+		.hts_def = 0x021A * IMX415_4LANES * 2,
+		/*
+		 * IMX415 HDR mode T-line is half of Linear mode,
+		 * make vts double to workaround.
+		 */
+		.vts_def = 0x06BD * 4,
+		.global_reg_list = imx415_global_10bit_3864x2192_regs,
+		.reg_list = imx415_hdr3_10bit_3864x2192_1485M_regs,
+		.hdr_mode = HDR_X3,
+		.mipi_freq_idx = 1,
+		.bpp = 10,
+		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_2,
+		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr0
+		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
+		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_2,//S->csi wr2
+	},
+	{
+		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
+		.width = 3864,
+		.height = 2192,
+		.max_fps = {
+			.numerator = 10000,
+			.denominator = 200000,
+		},
+		.exp_def = 0x13e,
+		.hts_def = 0x01ca * IMX415_4LANES * 2,
+		/*
+		 * IMX415 HDR mode T-line is half of Linear mode,
+		 * make vts double to workaround.
+		 */
+		.vts_def = 0x07ea * 4,
+		.global_reg_list = imx415_global_10bit_3864x2192_regs,
+		.reg_list = imx415_hdr3_10bit_3864x2192_1782M_regs,
+		.hdr_mode = HDR_X3,
+		.mipi_freq_idx = 2,
+		.bpp = 10,
+		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_2,
+		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr0
+		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
+		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_2,//S->csi wr2
+	},
+	{
 		/* 1H period = (1100 clock) = (1100 * 1 / 74.25MHz) */
 		.bus_fmt = MEDIA_BUS_FMT_SGBRG12_1X12,
 		.width = 3864,
@@ -613,7 +749,7 @@ static const struct imx415_mode supported_modes[] = {
 		.global_reg_list = imx415_global_12bit_3864x2192_regs,
 		.reg_list = imx415_linear_12bit_3864x2192_891M_regs,
 		.hdr_mode = NO_HDR,
-		.mipi_freq_idx = 1,
+		.mipi_freq_idx = 0,
 		.bpp = 12,
 	},
 	{
@@ -624,17 +760,17 @@ static const struct imx415_mode supported_modes[] = {
 			.numerator = 10000,
 			.denominator = 300000,
 		},
-		.exp_def = 0x08e4 * 2 - 0x0d90,
+		.exp_def = 0x08CA * 2 - 0x0d90,
 		.hts_def = 0x0226 * IMX415_4LANES * 2,
 		/*
 		 * IMX415 HDR mode T-line is half of Linear mode,
 		 * make vts double(that is FSC) to workaround.
 		 */
-		.vts_def = 0x08e4 * 2,
+		.vts_def = 0x08CA * 2,
 		.global_reg_list = imx415_global_12bit_3864x2192_regs,
 		.reg_list = imx415_hdr2_12bit_3864x2192_1782M_regs,
 		.hdr_mode = HDR_X2,
-		.mipi_freq_idx = 0,
+		.mipi_freq_idx = 2,
 		.bpp = 12,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
 		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
@@ -659,86 +795,19 @@ static const struct imx415_mode supported_modes[] = {
 		.global_reg_list = imx415_global_12bit_3864x2192_regs,
 		.reg_list = imx415_hdr3_12bit_3864x2192_1782M_regs,
 		.hdr_mode = HDR_X3,
-		.mipi_freq_idx = 0,
+		.mipi_freq_idx = 2,
 		.bpp = 12,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_2,
 		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr0
 		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
 		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_2,//S->csi wr2
 	},
-	{
-		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
-		.width = 3864,
-		.height = 2192,
-		.max_fps = {
-			.numerator = 10000,
-			.denominator = 300000,
-		},
-		.exp_def = 0x08fc - 0x08,
-		.hts_def = 0x044c * IMX415_4LANES * 2,
-		.vts_def = 0x08fc,
-		.global_reg_list = imx415_global_10bit_3864x2192_regs,
-		.reg_list = imx415_linear_10bit_3864x2192_891M_regs,
-		.hdr_mode = NO_HDR,
-		.mipi_freq_idx = 1,
-		.bpp = 10,
-	},
-	{
-		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
-		.width = 3864,
-		.height = 2192,
-		.max_fps = {
-			.numerator = 10000,
-			.denominator = 300000,
-		},
-		.exp_def = 0x08fc * 2 - 0x0da8,
-		.hts_def = 0x0226 * IMX415_4LANES * 2,
-		/*
-		 * IMX415 HDR mode T-line is half of Linear mode,
-		 * make vts double to workaround.
-		 */
-		.vts_def = 0x08fc * 2,
-		.global_reg_list = imx415_global_10bit_3864x2192_regs,
-		.reg_list = imx415_hdr2_10bit_3864x2192_1485M_regs,
-		.hdr_mode = HDR_X2,
-		.mipi_freq_idx = 2,
-		.bpp = 10,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
-	},
-	{
-		.bus_fmt = MEDIA_BUS_FMT_SGBRG10_1X10,
-		.width = 3864,
-		.height = 2192,
-		.max_fps = {
-			.numerator = 10000,
-			.denominator = 200000,
-		},
-		.exp_def = 0x13e,
-		.hts_def = 0x01ca * IMX415_4LANES * 2,
-		/*
-		 * IMX415 HDR mode T-line is half of Linear mode,
-		 * make vts double to workaround.
-		 */
-		.vts_def = 0x07ea * 4,
-		.global_reg_list = imx415_global_10bit_3864x2192_regs,
-		.reg_list = imx415_hdr3_10bit_3864x2192_1782M_regs,
-		.hdr_mode = HDR_X3,
-		.mipi_freq_idx = 0,
-		.bpp = 10,
-		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD1] = V4L2_MBUS_CSI2_CHANNEL_0,//L->csi wr0
-		.vc[PAD2] = V4L2_MBUS_CSI2_CHANNEL_1,
-		.vc[PAD3] = V4L2_MBUS_CSI2_CHANNEL_1,//M->csi wr2
-	},
 };
 
 static const s64 link_freq_items[] = {
-	MIPI_FREQ_891M,
 	MIPI_FREQ_446M,
 	MIPI_FREQ_743M,
+	MIPI_FREQ_891M,
 };
 
 /* Write registers up to 4 at a time */
@@ -861,6 +930,7 @@ static int imx415_set_fmt(struct v4l2_subdev *sd,
 	struct imx415 *imx415 = to_imx415(sd);
 	const struct imx415_mode *mode;
 	s64 h_blank, vblank_def, vblank_min;
+	u64 pixel_rate = 0;
 
 	mutex_lock(&imx415->mutex);
 
@@ -887,6 +957,10 @@ static int imx415_set_fmt(struct v4l2_subdev *sd,
 		__v4l2_ctrl_modify_range(imx415->vblank, vblank_min,
 					 IMX415_VTS_MAX - mode->height,
 					 1, vblank_def);
+		__v4l2_ctrl_s_ctrl(imx415->link_freq, mode->mipi_freq_idx);
+		pixel_rate = (u32)link_freq_items[mode->mipi_freq_idx] / mode->bpp * 2 * IMX415_4LANES;
+		__v4l2_ctrl_s_ctrl_int64(imx415->pixel_rate,
+					 pixel_rate);
 	}
 
 	mutex_unlock(&imx415->mutex);
@@ -1386,6 +1460,8 @@ static long imx415_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	struct rkmodule_hdr_cfg *hdr;
 	u32 i, h, w;
 	long ret = 0;
+	const struct imx415_mode *mode;
+	u64 pixel_rate = 0;
 
 	switch (cmd) {
 	case PREISP_CMD_SET_HDRAE_EXP:
@@ -1420,6 +1496,7 @@ static long imx415_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 				hdr->hdr_mode, w, h);
 			ret = -EINVAL;
 		} else {
+			mode = imx415->cur_mode;
 			if (imx415->streaming) {
 				ret = imx415_write_reg(imx415->client, IMX415_GROUP_HOLD_REG,
 					IMX415_REG_VALUE_08BIT, IMX415_GROUP_HOLD_START);
@@ -1431,12 +1508,16 @@ static long imx415_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 				if (ret)
 					return ret;
 			}
-			w = imx415->cur_mode->hts_def - imx415->cur_mode->width;
-			h = imx415->cur_mode->vts_def - imx415->cur_mode->height;
+			w = mode->hts_def - imx415->cur_mode->width;
+			h = mode->vts_def - mode->height;
 			__v4l2_ctrl_modify_range(imx415->hblank, w, w, 1, w);
 			__v4l2_ctrl_modify_range(imx415->vblank, h,
-				IMX415_VTS_MAX - imx415->cur_mode->height,
+				IMX415_VTS_MAX - mode->height,
 				1, h);
+			__v4l2_ctrl_s_ctrl(imx415->link_freq, mode->mipi_freq_idx);
+			pixel_rate = (u32)link_freq_items[mode->mipi_freq_idx] / mode->bpp * 2 * IMX415_4LANES;
+			__v4l2_ctrl_s_ctrl_int64(imx415->pixel_rate,
+						 pixel_rate);
 		}
 		break;
 	default:
@@ -1541,6 +1622,9 @@ static int __imx415_start_stream(struct imx415 *imx415)
 		return ret;
 
 	/* In case these controls are set before streaming */
+	ret = __v4l2_ctrl_handler_setup(&imx415->ctrl_handler);
+	if (ret)
+		return ret;
 	if (imx415->has_init_exp && imx415->cur_mode->hdr_mode != NO_HDR) {
 		ret = imx415_ioctl(&imx415->subdev, PREISP_CMD_SET_HDRAE_EXP,
 			&imx415->init_hdrae_exp);
@@ -1549,12 +1633,6 @@ static int __imx415_start_stream(struct imx415 *imx415)
 				"init exp fail in hdr mode\n");
 			return ret;
 		}
-	} else {
-		mutex_unlock(&imx415->mutex);
-		ret = v4l2_ctrl_handler_setup(&imx415->ctrl_handler);
-		mutex_lock(&imx415->mutex);
-		if (ret)
-			return ret;
 	}
 	return imx415_write_reg(imx415->client, IMX415_REG_CTRL_MODE,
 				IMX415_REG_VALUE_08BIT, 0);
@@ -1853,12 +1931,14 @@ static int imx415_set_ctrl(struct v4l2_ctrl *ctrl)
 	/* Propagate change of current control to all related controls */
 	switch (ctrl->id) {
 	case V4L2_CID_VBLANK:
-		/* Update max exposure while meeting expected vblanking */
-		max = imx415->cur_mode->height + ctrl->val - 4;
-		__v4l2_ctrl_modify_range(imx415->exposure,
+		if (imx415->cur_mode->hdr_mode == NO_HDR) {
+			/* Update max exposure while meeting expected vblanking */
+			max = imx415->cur_mode->height + ctrl->val - 8;
+			__v4l2_ctrl_modify_range(imx415->exposure,
 					 imx415->exposure->minimum, max,
 					 imx415->exposure->step,
 					 imx415->exposure->default_value);
+		}
 		break;
 	}
 
@@ -1905,7 +1985,7 @@ static int imx415_set_ctrl(struct v4l2_ctrl *ctrl)
 			imx415->cur_vts = vts;
 			vts /= 2;
 		} else if (imx415->cur_mode->hdr_mode == HDR_X3) {
-			vts = (vts + 23) / 24 * 24;
+			vts = (vts + 11) / 12 * 12;
 			imx415->cur_vts = vts;
 			vts /= 4;
 		} else {
@@ -1920,8 +2000,8 @@ static int imx415_set_ctrl(struct v4l2_ctrl *ctrl)
 		ret |= imx415_write_reg(imx415->client, IMX415_VTS_REG_H,
 				       IMX415_REG_VALUE_08BIT,
 				       IMX415_FETCH_VTS_H(vts));
-		dev_dbg(&client->dev, "set vblank 0x%x\n",
-			ctrl->val);
+		dev_dbg(&client->dev, "set vblank 0x%x vts %d\n",
+			ctrl->val, vts);
 		break;
 	case V4L2_CID_HFLIP:
 		ret = imx415_read_reg(imx415->client, IMX415_FLIP_REG,
@@ -2003,7 +2083,7 @@ static int imx415_initialize_controls(struct imx415 *imx415)
 				1, vblank_def);
 	imx415->cur_vts = mode->vts_def;
 
-	exposure_max = mode->vts_def - 4;
+	exposure_max = mode->vts_def - 8;
 	imx415->exposure = v4l2_ctrl_new_std(handler, &imx415_ctrl_ops,
 				V4L2_CID_EXPOSURE, IMX415_EXPOSURE_MIN,
 				exposure_max, IMX415_EXPOSURE_STEP,

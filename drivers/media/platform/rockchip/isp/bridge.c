@@ -53,14 +53,18 @@ static int frame_end(struct rkisp_bridge_device *dev, bool en)
 	struct rkisp_hw_dev *hw = dev->ispdev->hw_dev;
 	struct v4l2_subdev *sd = v4l2_get_subdev_hostdata(&dev->sd);
 	unsigned long lock_flags = 0;
-	u64 ns = 0;
+	u64 ns = ktime_get_ns();
 
+	rkisp_dmarx_get_frame(dev->ispdev, &dev->dbg.id, NULL, true);
+	dev->dbg.interval = ns - dev->dbg.timestamp;
+	dev->dbg.timestamp = ns;
 	if (hw->cur_buf && hw->nxt_buf) {
 		if (!en) {
 			spin_lock_irqsave(&hw->buf_lock, lock_flags);
 			list_add_tail(&hw->cur_buf->list, &hw->list);
 			spin_unlock_irqrestore(&hw->buf_lock, lock_flags);
 		} else {
+			ns = 0;
 			rkisp_dmarx_get_frame(dev->ispdev,
 				&hw->cur_buf->frame_id, &ns, true);
 			hw->cur_buf->frame_id++;
@@ -733,8 +737,8 @@ void rkisp_bridge_isr(u32 *mis_val, struct rkisp_device *dev)
 
 	/* dmarx isr is unreliable, MI frame end to replace it */
 	if (*mis_val & (MI_MP_FRAME | MI_MPFBC_FRAME) &&
-	    IS_HDR_RDBK(dev->hdr.op_mode)) {
-		switch (dev->hdr.op_mode) {
+	    IS_HDR_RDBK(dev->csi_dev.rd_mode)) {
+		switch (dev->csi_dev.rd_mode) {
 		case HDR_RDBK_FRAME3://for rd1 rd0 rd2
 			val |= RAW1_RD_FRAME;
 			/* FALLTHROUGH */
