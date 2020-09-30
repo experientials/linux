@@ -1026,8 +1026,8 @@ static struct usb_function_instance *uvc_alloc_inst(void)
 	cd->wOcularFocalLength		= cpu_to_le16(0);
 	cd->bControlSize		= 3;
 	cd->bmControls[0]		= 2;
-	cd->bmControls[1]		= 0;
-	cd->bmControls[2]		= 0;
+	cd->bmControls[1]		= 0x2a;
+	cd->bmControls[2]		= 2;
 
 	pd = &opts->uvc_processing;
 	pd->bLength			= UVC_DT_PROCESSING_UNIT_SIZE(2);
@@ -1037,8 +1037,8 @@ static struct usb_function_instance *uvc_alloc_inst(void)
 	pd->bSourceID			= 1;
 	pd->wMaxMultiplier		= cpu_to_le16(16*1024);
 	pd->bControlSize		= 2;
-	pd->bmControls[0]		= 1;
-	pd->bmControls[1]		= 0;
+	pd->bmControls[0]		= 0x1b;
+	pd->bmControls[1]		= 0x16;
 	pd->iProcessing			= 0;
 
 	od = &opts->uvc_output_terminal;
