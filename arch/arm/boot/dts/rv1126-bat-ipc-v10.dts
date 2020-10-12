@@ -5,17 +5,13 @@
 
 /dts-v1/;
 #include "rv1126.dtsi"
-#include "rv1126-ipc.dtsi"
+#include "rv1126-bat-ipc.dtsi"
 #include "rv1126-thunder-boot-emmc.dtsi"
 #include <dt-bindings/input/input.h>
 
 / {
 	model = "Rockchip RV1126 BAT IPC V10 Board";
 	compatible = "rockchip,rv1126-bat-ipc-v10", "rockchip,rv1126";
-
-	chosen {
-		bootargs = "loglevel=0 initcall_nr_threads=-1 initcall_debug=0 printk.devkmsg=on root=/dev/rd0 console=ttyFIQ0 snd_aloop.index=7 driver_async_probe=dwmmc_rockchip";
-	};
 
 	adc-keys {
 		compatible = "adc-keys";
@@ -61,8 +57,21 @@
 		};
 	};
 
-	/delete-node/ vdd-npu;
-	/delete-node/ vdd-vepu;
+	leds {
+		compatible = "pwm-leds";
+		blue {
+			label = "blue";
+			pwms = <&pwm3 0 50000 0>;
+			max-brightness = <255>;
+		};
+
+		red {
+			label = "red";
+			pwms = <&pwm2 0 50000 0>;
+			max-brightness = <255>;
+			linux,default-trigger = "heartbeat";
+		};
+	};
 
 	vcc1v2_dvdd: vcc1v8_dovdd: vcc2v8_avdd: vcc-camera {
 		compatible = "regulator-fixed";
@@ -78,15 +87,6 @@
 		regulator-boot-on;
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <1800000>;
-	};
-
-	vcc_3v3: vcc-3v3 {
-		compatible = "regulator-fixed";
-		regulator-name = "vcc_3v3";
-		regulator-always-on;
-		regulator-boot-on;
-		regulator-min-microvolt = <3300000>;
-		regulator-max-microvolt = <3300000>;
 	};
 
 	vccio_flash: vccio-flash {
@@ -107,19 +107,6 @@
 		gpios = <&gpio0 RK_PA4 GPIO_ACTIVE_HIGH>;
 		states = <3300000 1
 			  1800000 0>;
-	};
-
-	vdd_arm: vdd-arm {
-		compatible = "pwm-regulator";
-		pwms = <&pwm0 0 5000 1>;
-		regulator-name = "vdd_arm";
-		regulator-min-microvolt = <720000>;
-		regulator-max-microvolt = <1000000>;
-		regulator-init-microvolt = <824000>;
-		regulator-always-on;
-		regulator-boot-on;
-		regulator-settling-time-up-us = <250>;
-		pwm-supply = <&vcc_3v3>;
 	};
 
 	vdd_npu_vepu: vdd-npu-vepu {
@@ -172,7 +159,7 @@
 
 			csidphy0_out: endpoint@0 {
 				reg = <0>;
-				remote-endpoint = <&mipi_csi2_input>;
+				remote-endpoint = <&isp_in>;
 			};
 		};
 	};
@@ -226,25 +213,23 @@
 &i2c1 {
 	status = "okay";
 
-	ov2718: ov2718@10 {
-		compatible = "ovti,ov2718";
-		status = "okay";
-		reg = <0x10>;
+	sc210iot: sc210iot@32 {
+		compatible = "smartsens,sc210iot";
+		reg = <0x32>;
 		clocks = <&cru CLK_MIPICSI_OUT>;
 		clock-names = "xvclk";
 		power-domains = <&power RV1126_PD_VI>;
-		pinctrl-names = "rockchip,camera_default";
-		pinctrl-0 = <&mipicsi_clk0>;
 		avdd-supply = <&vcc2v8_avdd>;
 		dovdd-supply = <&vcc1v8_dovdd>;
 		dvdd-supply = <&vcc1v2_dvdd>;
-		pwd-gpios = <&gpio1 RK_PD4 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&gpio1 RK_PD4 GPIO_ACTIVE_HIGH>;
 		reset-gpios = <&gpio1 RK_PD5 GPIO_ACTIVE_LOW>;
 		rockchip,camera-module-index = <1>;
 		rockchip,camera-module-facing = "front";
-		rockchip,camera-module-name = "YT-RV1109-3-V1";
-		rockchip,camera-module-lens-name = "M43-4IR-2MP-F2";
+		rockchip,camera-module-name = "YT-SC210-V2";
+		rockchip,camera-module-lens-name = "M12-30IRC-2MP-F18";
 		ir-cut = <&cam_ircut0>;
+
 		port {
 			ucam_out0: endpoint {
 				remote-endpoint = <&mipi_in_ucam0>;
@@ -264,6 +249,10 @@
 		reg = <0x18>;
 		clocks = <&cru MCLK_I2S0_TX_OUT2IO>;
 		clock-names = "mclk";
+		adc-pga-gain = <6>;  /* 18dB */
+		adc-volume = <0xbf>;  /* 0dB */
+		dac-volume = <0xbf>;  /* 0dB */
+		aec-mode = "dac left, adc right";
 		pinctrl-names = "default";
 		pinctrl-0 = <&i2s0m0_mclk &spk_ctl>;
 		assigned-clocks = <&cru MCLK_I2S0_TX_OUT2IO>;
@@ -290,39 +279,6 @@
 
 &npu {
 	npu-supply = <&vdd_npu_vepu>;
-};
-
-&mipi_csi2 {
-	status = "okay";
-
-	ports {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		port@0 {
-			reg = <0>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			mipi_csi2_input: endpoint@1 {
-				reg = <1>;
-				remote-endpoint = <&csidphy0_out>;
-				data-lanes = <1 2>;
-			};
-		};
-
-		port@1 {
-			reg = <1>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			mipi_csi2_output: endpoint@0 {
-				reg = <0>;
-				remote-endpoint = <&cif_mipi_in>;
-				data-lanes = <1 2>;
-			};
-		};
-	};
 };
 
 &pinctrl {
@@ -364,32 +320,22 @@
 	vccio7-supply = <&vcc_3v3>;
 };
 
-&rkcif {
+&pwm1 {
 	status = "okay";
+	pinctrl-names = "active";
+	pinctrl-0 = <&pwm1m0_pins_pull_down>;
 };
 
-&rkcif_mipi_lvds {
+&pwm2 {
 	status = "okay";
-
-	port {
-		/* MIPI CSI-2 endpoint */
-		cif_mipi_in: endpoint {
-			remote-endpoint = <&mipi_csi2_output>;
-			data-lanes = <1 2>;
-		};
-	};
+	pinctrl-names = "active";
+	pinctrl-0 = <&pwm2m1_pins_pull_down>;
 };
 
-&rkcif_mipi_lvds_sditf {
+&pwm3 {
 	status = "okay";
-
-	port {
-		/* MIPI CSI-2 endpoint */
-		mipi_lvds_sditf: endpoint {
-			remote-endpoint = <&isp_in>;
-			data-lanes = <1 2>;
-		};
-	};
+	pinctrl-names = "active";
+	pinctrl-0 = <&pwm3m1_pins_pull_down>;
 };
 
 &rkisp_thunderboot {
@@ -397,8 +343,6 @@
 };
 
 &rkisp_vir0 {
-	status = "okay";
-
 	ports {
 		port@0 {
 			reg = <0>;
@@ -407,27 +351,14 @@
 
 			isp_in: endpoint@0 {
 				reg = <0>;
-				remote-endpoint = <&mipi_lvds_sditf>;
+				remote-endpoint = <&csidphy0_out>;
 			};
 		};
 	};
 };
 
-&rkispp {
-	status = "okay";
-};
-
-&rkispp_vir0 {
-	status = "okay";
-};
-
-&rkispp_mmu {
-	status = "okay";
-};
-
 &rkvenc {
 	venc-supply = <&vdd_npu_vepu>;
-	status = "okay";
 };
 
 &rkvenc_mmu {

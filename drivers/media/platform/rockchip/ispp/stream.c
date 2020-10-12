@@ -114,7 +114,19 @@ static const struct capture_fmt scl_fmts[] = {
 		.bpp = { 8 },
 		.cplanes = 1,
 		.mplanes = 1,
-		.wr_fmt = FMT_YUV420,
+		.wr_fmt = FMT_YUV422,
+	}, {
+		.fourcc = V4L2_PIX_FMT_YUYV,
+		.bpp = { 16 },
+		.cplanes = 1,
+		.mplanes = 1,
+		.wr_fmt = FMT_YC_SWAP | FMT_YUYV | FMT_YUV422,
+	}, {
+		.fourcc = V4L2_PIX_FMT_UYVY,
+		.bpp = { 16 },
+		.cplanes = 1,
+		.mplanes = 1,
+		.wr_fmt = FMT_YUYV | FMT_YUV422,
 	}
 };
 
@@ -672,7 +684,7 @@ static int nr_init_buf(struct rkispp_device *dev, u32 size)
 		get_list_buf(&vdev->nr.list_wr, false);
 
 	buf = &vdev->nr.buf.tmp_yuv;
-	buf->size = size >> 4;
+	buf->size = size >> 2;
 	ret = rkispp_allow_buffer(dev, buf);
 	if (ret)
 		goto err;
@@ -742,6 +754,7 @@ static int config_nr_shp(struct rkispp_device *dev)
 	} else {
 		/* tnr need to set same format with nr in the fbc mode */
 		rkispp_set_bits(dev, RKISPP_TNR_CTRL, FMT_RD_MASK, fmt);
+		rkispp_write(dev, RKISPP_CTRL_TNR_SIZE, height << 16 | width);
 		if (dev->inp == INP_ISP) {
 			if (dev->isp_mode & ISP_ISPP_QUICK)
 				rkispp_set_bits(dev, RKISPP_CTRL_QUICK,
@@ -1245,7 +1258,7 @@ static int limit_check_scl(struct rkispp_stream *stream,
 		return ret;
 
 	if (stream->id == STREAM_S0) {
-		if (*h == sdev->out_fmt.height || (forcc == V4L2_PIX_FMT_NV16))
+		if (*h == sdev->out_fmt.height || (forcc != V4L2_PIX_FMT_NV12))
 			max_width = 3264;
 		else
 			max_width = 2080;
@@ -2324,8 +2337,13 @@ static void nr_work_event(struct rkispp_device *dev,
 		if (!is_fec_en && stream->streaming && !stream->is_cfg)
 			secure_config_mb(stream);
 
-		if (!dev->hw_dev->is_single)
+		if (!dev->hw_dev->is_single) {
+			if (vdev->nr.cur_rd && vdev->nr.cur_rd->is_isp) {
+				rkispp_update_regs(dev, RKISPP_CTRL, RKISPP_TNR_CTRL);
+				writel(TNR_FORCE_UPD, base + RKISPP_CTRL_UPDATE);
+			}
 			rkispp_update_regs(dev, RKISPP_NR, RKISPP_ORB_MAX_FEATURE);
+		}
 		writel(OTHER_FORCE_UPD, base + RKISPP_CTRL_UPDATE);
 
 		v4l2_dbg(3, rkispp_debug, &dev->v4l2_dev,
