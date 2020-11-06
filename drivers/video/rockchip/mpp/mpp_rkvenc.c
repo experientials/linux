@@ -20,10 +20,13 @@
 #include <linux/types.h>
 #include <linux/of_platform.h>
 #include <linux/slab.h>
+#include <linux/seq_file.h>
 #include <linux/uaccess.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/proc_fs.h>
+#include <linux/nospec.h>
+#include <linux/workqueue.h>
 #include <soc/rockchip/pm_domains.h>
 #include <soc/rockchip/rockchip_ipa.h>
 #include <soc/rockchip/rockchip_opp_select.h>
@@ -38,6 +41,9 @@
 #include "mpp_common.h"
 
 #define RKVENC_DRIVER_NAME			"mpp_rkvenc"
+
+#define IOMMU_GET_BUS_ID(x)			(((x) >> 6) & 0x1f)
+#define IOMMU_PAGE_SIZE				SZ_4K
 
 #define	RKVENC_SESSION_MAX_BUFFERS		40
 /* The maximum registers number of all the version */
@@ -160,6 +166,17 @@ struct rkvenc_task {
 	struct mpp_request r_reqs[MPP_MAX_MSG_NUM];
 };
 
+struct rkvenc_session_priv {
+	struct rw_semaphore rw_sem;
+	/* codec info from user */
+	struct {
+		/* show mode */
+		u32 flag;
+		/* item data */
+		u64 val;
+	} codec_info[ENC_INFO_BUTT];
+};
+
 struct rkvenc_dev {
 	struct mpp_dev mpp;
 
@@ -184,6 +201,12 @@ struct rkvenc_dev {
 	struct thermal_cooling_device *devfreq_cooling;
 	struct monitor_dev_info *mdev_info;
 #endif
+	/* for iommu pagefault handle */
+	struct work_struct iommu_work;
+	struct workqueue_struct *iommu_wq;
+	struct page *aux_page;
+	unsigned long aux_iova;
+	unsigned long fault_iova;
 };
 
 struct link_table_elem {
@@ -475,6 +498,9 @@ static int rkvenc_isr(struct mpp_dev *mpp)
 {
 	struct rkvenc_task *task = NULL;
 	struct mpp_task *mpp_task = mpp->cur_task;
+	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
+
+	mpp_debug_enter();
 
 	/* FIXME use a spin lock here */
 	if (!mpp_task) {
@@ -495,7 +521,14 @@ static int rkvenc_isr(struct mpp_dev *mpp)
 			mpp_task_dump_reg(mpp, mpp_task);
 	}
 
+	/* unmap reserve buffer */
+	if (enc->aux_iova != -1) {
+		iommu_unmap(mpp->iommu_info->domain, enc->aux_iova, IOMMU_PAGE_SIZE);
+		enc->aux_iova = -1;
+	}
+
 	mpp_task_finish(mpp_task->session, mpp_task);
+
 	mpp_debug_leave();
 
 	return IRQ_HANDLED;
@@ -599,6 +632,76 @@ static int rkvenc_free_task(struct mpp_session *session,
 	return 0;
 }
 
+static int rkvenc_control(struct mpp_session *session, struct mpp_request *req)
+{
+	switch (req->cmd) {
+	case MPP_CMD_SEND_CODEC_INFO: {
+		int i;
+		int cnt;
+		struct codec_info_elem elem;
+		struct rkvenc_session_priv *priv;
+
+		if (!session || !session->priv) {
+			mpp_err("session info null\n");
+			return -EINVAL;
+		}
+		priv = session->priv;
+
+		cnt = req->size / sizeof(elem);
+		mpp_debug(DEBUG_IOCTL, "codec info count %d\n", cnt);
+		for (i = 0; i < cnt; i++) {
+			if (copy_from_user(&elem, req->data + i * sizeof(elem), sizeof(elem))) {
+				mpp_err("copy_from_user failed\n");
+				continue;
+			}
+			if (elem.type > ENC_INFO_BASE && elem.type < ENC_INFO_BUTT &&
+			    elem.flag > ENC_INFO_FLAG_NULL && elem.flag < ENC_INFO_FLAG_BUTT) {
+				elem.type = array_index_nospec(elem.type, ENC_INFO_BUTT);
+				priv->codec_info[elem.type].flag = elem.flag;
+				priv->codec_info[elem.type].val = elem.data;
+			} else {
+				mpp_err("codec info invalid, type %d, flag %d\n",
+					elem.type, elem.flag);
+			}
+		}
+	} break;
+	default: {
+		mpp_err("unknown mpp ioctl cmd %x\n", req->cmd);
+	} break;
+	}
+
+	return 0;
+}
+
+static int rkvenc_free_session(struct mpp_session *session)
+{
+	if (session && session->priv) {
+		kfree(session->priv);
+		session->priv = NULL;
+	}
+
+	return 0;
+}
+
+static int rkvenc_init_session(struct mpp_session *session)
+{
+	struct rkvenc_session_priv *priv;
+
+	if (!session) {
+		mpp_err("session is null\n");
+		return -EINVAL;
+	}
+
+	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+
+	init_rwsem(&priv->rw_sem);
+	 session->priv = priv;
+
+	return 0;
+}
+
 #ifdef CONFIG_PROC_FS
 static int rkvenc_procfs_remove(struct mpp_dev *mpp)
 {
@@ -608,6 +711,71 @@ static int rkvenc_procfs_remove(struct mpp_dev *mpp)
 		proc_remove(enc->procfs);
 		enc->procfs = NULL;
 	}
+
+	return 0;
+}
+
+static int rkvenc_dump_session(struct mpp_session *session, struct seq_file *seq)
+{
+	int i;
+	struct rkvenc_session_priv *priv = session->priv;
+
+	down_read(&priv->rw_sem);
+	/* item name */
+	seq_puts(seq, "------------------------------------------------------");
+	seq_puts(seq, "------------------------------------------------------\n");
+	seq_printf(seq, "|%8s|", (const char *)"session");
+	seq_printf(seq, "%8s|", (const char *)"device");
+	for (i = ENC_INFO_BASE; i < ENC_INFO_BUTT; i++) {
+		bool show = priv->codec_info[i].flag;
+
+		if (show)
+			seq_printf(seq, "%8s|", enc_info_item_name[i]);
+	}
+	seq_puts(seq, "\n");
+	/* item data*/
+	seq_printf(seq, "|%p|", session);
+	seq_printf(seq, "%8s|", mpp_device_name[session->device_type]);
+	for (i = ENC_INFO_BASE; i < ENC_INFO_BUTT; i++) {
+		u32 flag = priv->codec_info[i].flag;
+
+		if (!flag)
+			continue;
+		if (flag == ENC_INFO_FLAG_NUMBER) {
+			u32 data = priv->codec_info[i].val;
+
+			seq_printf(seq, "%8d|", data);
+		} else if (flag == ENC_INFO_FLAG_STRING) {
+			const char *name = (const char *)&priv->codec_info[i].val;
+
+			seq_printf(seq, "%8s|", name);
+		} else {
+			seq_printf(seq, "%8s|", (const char *)"null");
+		}
+	}
+	seq_puts(seq, "\n");
+	up_read(&priv->rw_sem);
+
+	return 0;
+}
+
+static int rkvenc_show_session_info(struct seq_file *seq, void *offset)
+{
+	struct mpp_session *session = NULL, *n;
+	struct mpp_dev *mpp = seq->private;
+
+	mutex_lock(&mpp->srv->session_lock);
+	list_for_each_entry_safe(session, n,
+				 &mpp->srv->session_list,
+				 session_link) {
+		if (session->device_type != MPP_DEVICE_RKVENC)
+			continue;
+		if (!session->priv)
+			continue;
+		if (mpp->dev_ops->dump_session)
+			mpp->dev_ops->dump_session(session, seq);
+	}
+	mutex_unlock(&mpp->srv->session_lock);
 
 	return 0;
 }
@@ -622,12 +790,16 @@ static int rkvenc_procfs_init(struct mpp_dev *mpp)
 		enc->procfs = NULL;
 		return -EIO;
 	}
+	/* for debug */
 	mpp_procfs_create_u32("aclk", 0644,
 			      enc->procfs, &enc->aclk_info.debug_rate_hz);
 	mpp_procfs_create_u32("clk_core", 0644,
 			      enc->procfs, &enc->core_clk_info.debug_rate_hz);
 	mpp_procfs_create_u32("session_buffers", 0644,
 			      enc->procfs, &mpp->session_max_buffers);
+	/* for show session info */
+	proc_create_single_data("session_info", 0444,
+				enc->procfs, rkvenc_show_session_info, mpp);
 
 	return 0;
 }
@@ -638,6 +810,11 @@ static inline int rkvenc_procfs_remove(struct mpp_dev *mpp)
 }
 
 static inline int rkvenc_procfs_init(struct mpp_dev *mpp)
+{
+	return 0;
+}
+
+static inline int rkvenc_dump_session(struct mpp_session *session, struct seq_file *seq)
 {
 	return 0;
 }
@@ -879,21 +1056,52 @@ static int rkvenc_devfreq_remove(struct mpp_dev *mpp)
 }
 #endif
 
+static void rkvenc_iommu_handle_work(struct work_struct *work_s)
+{
+	int ret = 0;
+	struct rkvenc_dev *enc = container_of(work_s, struct rkvenc_dev, iommu_work);
+	struct mpp_dev *mpp = &enc->mpp;
+	unsigned long page_iova = 0;
+
+	mpp_debug_enter();
+
+	/* avoid another page fault occur after page fault */
+	down_write(&mpp->iommu_info->rw_sem);
+
+	if (enc->aux_iova != -1) {
+		iommu_unmap(mpp->iommu_info->domain, enc->aux_iova, IOMMU_PAGE_SIZE);
+		enc->aux_iova = -1;
+	}
+
+	page_iova = round_down(enc->fault_iova, SZ_4K);
+	ret = iommu_map(mpp->iommu_info->domain, page_iova,
+			page_to_phys(enc->aux_page), IOMMU_PAGE_SIZE,
+			IOMMU_READ | IOMMU_WRITE);
+	if (ret)
+		mpp_err("iommu_map iova %lx error.\n", page_iova);
+	else
+		enc->aux_iova = page_iova;
+
+	rk_iommu_unmask_irq(mpp->dev);
+	up_write(&mpp->iommu_info->rw_sem);
+
+	mpp_debug_leave();
+}
+
 static int rkvenc_iommu_fault_handle(struct iommu_domain *iommu,
 				     struct device *iommu_dev,
 				     unsigned long iova, int status, void *arg)
 {
 	struct mpp_dev *mpp = (struct mpp_dev *)arg;
+	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
 
 	mpp_debug_enter();
-
-	down_write(&mpp->iommu_info->rw_sem);
-
-	if (mpp->hw_ops->reset)
-		mpp->hw_ops->reset(mpp);
-
-	up_write(&mpp->iommu_info->rw_sem);
-
+	mpp_debug(DEBUG_IOMMU, "IOMMU_GET_BUS_ID(status)=%d\n", IOMMU_GET_BUS_ID(status));
+	if (IOMMU_GET_BUS_ID(status)) {
+		enc->fault_iova = iova;
+		rk_iommu_mask_irq(mpp->dev);
+		queue_work(enc->iommu_wq, &enc->iommu_work);
+	}
 	mpp_debug_leave();
 
 	return 0;
@@ -935,22 +1143,52 @@ static int rkvenc_init(struct mpp_dev *mpp)
 	if (!enc->rst_core)
 		mpp_err("No core reset resource define\n");
 
-	/* iommu pagefault handle */
-	mpp->iommu_info->hdl = rkvenc_iommu_fault_handle;
-
 #ifdef CONFIG_PM_DEVFREQ
 	ret = rkvenc_devfreq_init(mpp);
 	if (ret)
 		mpp_err("failed to add venc devfreq\n");
 #endif
+
+	/* for mmu pagefault */
+	enc->aux_page = alloc_page(GFP_KERNEL);
+	if (!enc->aux_page) {
+		dev_err(mpp->dev, "allocate a page for auxiliary usage\n");
+		return -ENOMEM;
+	}
+	enc->aux_iova = -1;
+
+	enc->iommu_wq = create_singlethread_workqueue("iommu_wq");
+	if (!enc->iommu_wq) {
+		mpp_err("failed to create workqueue\n");
+		return -ENOMEM;
+	}
+	INIT_WORK(&enc->iommu_work, rkvenc_iommu_handle_work);
+
+	mpp->iommu_info->hdl = rkvenc_iommu_fault_handle;
+
 	return ret;
 }
 
 static int rkvenc_exit(struct mpp_dev *mpp)
 {
+	struct rkvenc_dev *enc = to_rkvenc_dev(mpp);
+
 #ifdef CONFIG_PM_DEVFREQ
 	rkvenc_devfreq_remove(mpp);
 #endif
+
+	if (enc->aux_page)
+		__free_page(enc->aux_page);
+
+	if (enc->aux_iova != -1) {
+		iommu_unmap(mpp->iommu_info->domain, enc->aux_iova, IOMMU_PAGE_SIZE);
+		enc->aux_iova = -1;
+	}
+
+	if (enc->iommu_wq) {
+		destroy_workqueue(enc->iommu_wq);
+		enc->iommu_wq = NULL;
+	}
 
 	return 0;
 }
@@ -1106,6 +1344,10 @@ static struct mpp_dev_ops rkvenc_dev_ops = {
 	.finish = rkvenc_finish,
 	.result = rkvenc_result,
 	.free_task = rkvenc_free_task,
+	.ioctl = rkvenc_control,
+	.init_session = rkvenc_init_session,
+	.free_session = rkvenc_free_session,
+	.dump_session = rkvenc_dump_session,
 };
 
 static const struct mpp_dev_var rkvenc_v1_data = {

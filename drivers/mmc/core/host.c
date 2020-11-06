@@ -27,6 +27,7 @@
 #include <linux/mmc/slot-gpio.h>
 
 #include "core.h"
+#include "crypto.h"
 #include "host.h"
 #include "slot-gpio.h"
 #include "pwrseq.h"
@@ -341,6 +342,13 @@ int mmc_of_parse(struct mmc_host *host)
 	if (device_property_read_bool(dev, "supports-emmc"))
 		host->restrict_caps |= RESTRICT_CARD_TYPE_EMMC;
 
+#ifdef CONFIG_SDIO_KEEPALIVE
+	host->support_chip_alive =
+		device_property_read_bool(dev, "supports-chip-alive");
+	host->logic_remove_card =
+		device_property_read_bool(dev, "logic-remove-card");
+#endif
+
 	host->dsr_req = !device_property_read_u32(dev, "dsr", &host->dsr);
 	if (host->dsr_req && (host->dsr & ~0xffff)) {
 		dev_err(host->parent,
@@ -495,6 +503,7 @@ EXPORT_SYMBOL(mmc_remove_host);
  */
 void mmc_free_host(struct mmc_host *host)
 {
+	mmc_crypto_free_host(host);
 	mmc_pwrseq_free(host);
 	put_device(&host->class_dev);
 }

@@ -64,6 +64,7 @@ struct rkcif_hw {
 	int				irq;
 	void __iomem			*base_addr;
 	void __iomem			*csi_base;
+	struct regmap			*grf;
 	struct clk			*clks[RKCIF_MAX_BUS_CLK];
 	int				clk_size;
 	bool				iommu_en;
@@ -81,5 +82,7 @@ struct rkcif_hw {
 };
 
 void rkcif_hw_soft_reset(struct rkcif_hw *cif_hw, bool is_rst_iommu);
+void rkcif_disable_sys_clk(struct rkcif_hw *cif_hw);
+int rkcif_enable_sys_clk(struct rkcif_hw *cif_hw);
 
 #endif

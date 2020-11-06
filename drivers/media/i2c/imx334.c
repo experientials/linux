@@ -4,6 +4,10 @@
  *
  * Copyright (C) 2020 Rockchip Electronics Co., Ltd.
  * V0.0X01.0X03 add enum_frame_interval function.
+ * V0.0X01.0X04
+ *	1.add parse mclk pinctrl.
+ *	2.add set flip ctrl.
+ * V0.0X01.0X05 add quick stream on/off
  */
 
 #include <linux/clk.h>
@@ -32,7 +36,7 @@
 #include <linux/mfd/syscon.h>
 #include <linux/rk-preisp.h>
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x03)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x05)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -105,6 +109,9 @@
 #define IMX334_FETCH_VTS_M(VAL)		(((VAL) >> 8) & 0xFF)
 #define IMX334_FETCH_VTS_L(VAL)		((VAL) & 0xFF)
 
+#define IMX334_VREVERSE_REG	0x304f
+#define IMX334_HREVERSE_REG	0x304e
+
 #define REG_DELAY			0xFFFE
 #define REG_NULL			0xFFFF
 
@@ -113,6 +120,8 @@
 #define IMX334_REG_VALUE_24BIT		3
 
 #define OF_CAMERA_HDR_MODE		"rockchip,camera-hdr-mode"
+#define OF_CAMERA_PINCTRL_STATE_DEFAULT	"rockchip,camera_default"
+#define OF_CAMERA_PINCTRL_STATE_SLEEP	"rockchip,camera_sleep"
 
 #define IMX334_NAME			"imx334"
 
@@ -1015,6 +1024,7 @@ static long imx334_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	u32 i, h, w;
 	s64 dst_pixel_rate = 0;
 	const struct imx334_mode *mode;
+	u32 stream = 0;
 
 	switch (cmd) {
 	case PREISP_CMD_SET_HDRAE_EXP:
@@ -1075,6 +1085,17 @@ static long imx334_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 			}
 		}
 		break;
+	case RKMODULE_SET_QUICK_STREAM:
+
+		stream = *((u32 *)arg);
+
+		if (stream)
+			ret = imx334_write_reg(imx334->client, IMX334_REG_CTRL_MODE,
+				IMX334_REG_VALUE_08BIT, 0);
+		else
+			ret = imx334_write_reg(imx334->client, IMX334_REG_CTRL_MODE,
+				IMX334_REG_VALUE_08BIT, 1);
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -1093,6 +1114,7 @@ static long imx334_compat_ioctl32(struct v4l2_subdev *sd,
 	struct rkmodule_hdr_cfg *hdr;
 	struct preisp_hdrae_exp_s *hdrae;
 	long ret;
+	u32 stream = 0;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
@@ -1144,17 +1166,22 @@ static long imx334_compat_ioctl32(struct v4l2_subdev *sd,
 		kfree(hdr);
 		break;
 	case PREISP_CMD_SET_HDRAE_EXP:
-			hdrae = kzalloc(sizeof(*hdrae), GFP_KERNEL);
-			if (!hdrae) {
-				ret = -ENOMEM;
-				return ret;
-			}
+		hdrae = kzalloc(sizeof(*hdrae), GFP_KERNEL);
+		if (!hdrae) {
+			ret = -ENOMEM;
+			return ret;
+		}
 
-			ret = copy_from_user(hdrae, up, sizeof(*hdrae));
-			if (!ret)
-				ret = imx334_ioctl(sd, cmd, hdrae);
-			kfree(hdrae);
-			break;
+		ret = copy_from_user(hdrae, up, sizeof(*hdrae));
+		if (!ret)
+			ret = imx334_ioctl(sd, cmd, hdrae);
+		kfree(hdrae);
+		break;
+	case RKMODULE_SET_QUICK_STREAM:
+		ret = copy_from_user(&stream, up, sizeof(u32));
+		if (!ret)
+			ret = imx334_ioctl(sd, cmd, &stream);
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 		break;
@@ -1283,6 +1310,13 @@ static int __imx334_power_on(struct imx334 *imx334)
 	u32 delay_us;
 	s64 vclk_freq;
 	struct device *dev = &imx334->client->dev;
+
+	if (!IS_ERR_OR_NULL(imx334->pins_default)) {
+		ret = pinctrl_select_state(imx334->pinctrl,
+					   imx334->pins_default);
+		if (ret < 0)
+			dev_err(dev, "could not set pins\n");
+	}
 
 	if (imx334->cur_mode->vclk_freq == IMX334_XVCLK_FREQ_37)
 		vclk_freq = IMX334_XVCLK_FREQ_37;
@@ -1467,6 +1501,7 @@ static int imx334_set_ctrl(struct v4l2_ctrl *ctrl)
 	int ret = 0;
 	u32 shr0 = 0;
 	u32 vts = 0;
+	u32 flip = 0;
 
 	/* Propagate change of current control to all related controls */
 	switch (ctrl->id) {
@@ -1534,6 +1569,28 @@ static int imx334_set_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_TEST_PATTERN:
 		ret = imx334_enable_test_pattern(imx334, ctrl->val);
 		break;
+	case V4L2_CID_HFLIP:
+		ret = imx334_write_reg(imx334->client, IMX334_HREVERSE_REG,
+				       IMX334_REG_VALUE_08BIT, !!ctrl->val);
+		break;
+	case V4L2_CID_VFLIP:
+		flip = ctrl->val;
+		if (flip) {
+			ret = imx334_write_reg(imx334->client, IMX334_VREVERSE_REG,
+				IMX334_REG_VALUE_08BIT, !!flip);
+			ret |= imx334_write_reg(imx334->client, 0x3080,
+				IMX334_REG_VALUE_08BIT, 0xfe);
+			ret |= imx334_write_reg(imx334->client, 0x309b,
+				IMX334_REG_VALUE_08BIT, 0xfe);
+		} else {
+			ret = imx334_write_reg(imx334->client, IMX334_VREVERSE_REG,
+				IMX334_REG_VALUE_08BIT, !!flip);
+			ret |= imx334_write_reg(imx334->client, 0x3080,
+				IMX334_REG_VALUE_08BIT, 0x02);
+			ret |= imx334_write_reg(imx334->client, 0x309b,
+				IMX334_REG_VALUE_08BIT, 0x02);
+		}
+		break;
 	default:
 		dev_warn(&client->dev, "%s Unhandled id:0x%x, val:0x%x\n",
 			 __func__, ctrl->id, ctrl->val);
@@ -1560,7 +1617,7 @@ static int imx334_initialize_controls(struct imx334 *imx334)
 
 	handler = &imx334->ctrl_handler;
 	mode = imx334->cur_mode;
-	ret = v4l2_ctrl_handler_init(handler, 8);
+	ret = v4l2_ctrl_handler_init(handler, 9);
 	if (ret)
 		return ret;
 	handler->lock = &imx334->mutex;
@@ -1613,6 +1670,10 @@ static int imx334_initialize_controls(struct imx334 *imx334)
 				V4L2_CID_TEST_PATTERN,
 				ARRAY_SIZE(imx334_test_pattern_menu) - 1,
 				0, 0, imx334_test_pattern_menu);
+
+	v4l2_ctrl_new_std(handler, &imx334_ctrl_ops, V4L2_CID_HFLIP, 0, 1, 1, 0);
+	v4l2_ctrl_new_std(handler, &imx334_ctrl_ops, V4L2_CID_VFLIP, 0, 1, 1, 0);
+
 	if (handler->error) {
 		ret = handler->error;
 		dev_err(&imx334->client->dev,
@@ -1724,6 +1785,23 @@ static int imx334_probe(struct i2c_client *client,
 	imx334->pwdn_gpio = devm_gpiod_get(dev, "pwdn", GPIOD_OUT_LOW);
 	if (IS_ERR(imx334->pwdn_gpio))
 		dev_warn(dev, "Failed to get pwdn-gpios\n");
+
+	imx334->pinctrl = devm_pinctrl_get(dev);
+	if (!IS_ERR(imx334->pinctrl)) {
+		imx334->pins_default =
+			pinctrl_lookup_state(imx334->pinctrl,
+					     OF_CAMERA_PINCTRL_STATE_DEFAULT);
+		if (IS_ERR(imx334->pins_default))
+			dev_info(dev, "could not get default pinstate\n");
+
+		imx334->pins_sleep =
+			pinctrl_lookup_state(imx334->pinctrl,
+					     OF_CAMERA_PINCTRL_STATE_SLEEP);
+		if (IS_ERR(imx334->pins_sleep))
+			dev_info(dev, "could not get sleep pinstate\n");
+	} else {
+		dev_info(dev, "no pinctrl\n");
+	}
 
 	ret = imx334_configure_regulators(imx334);
 	if (ret) {

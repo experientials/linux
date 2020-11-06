@@ -73,6 +73,11 @@
 		};
 	};
 
+	pir {
+		compatible = "aschip,pir";
+		pulse-gpios = <&gpio2 RK_PD6 GPIO_ACTIVE_LOW>;
+	};
+
 	vcc1v2_dvdd: vcc1v8_dovdd: vcc2v8_avdd: vcc-camera {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc_camera";
@@ -130,7 +135,6 @@
 		wifi_chip_type = "ap6203";
 		WIFI,poweren_gpio = <&gpio0 RK_PA6 GPIO_ACTIVE_LOW>;
 		WIFI,host_wake_irq = <&gpio0 RK_PB0 GPIO_ACTIVE_HIGH>;
-		keep_wifi_power_on;
 		status = "okay";
 	};
 };
@@ -274,7 +278,7 @@
 };
 
 &isp_reserved {
-	size = <0x05c00000>;
+	size = <0x02400000>;
 };
 
 &npu {
@@ -339,7 +343,7 @@
 };
 
 &rkisp_thunderboot {
-	reg = <0x10000000 (72 * 0x00100000)>;
+	reg = <0x10000000 (36 * 0x00100000)>;
 };
 
 &rkisp_vir0 {
@@ -394,6 +398,8 @@
 	keep-power-in-suspend;
 	rockchip,default-sample-phase = <90>;
 	supports-sdio;
+	supports-chip-alive;
+	logic-remove-card;
 	status = "okay";
 };
 

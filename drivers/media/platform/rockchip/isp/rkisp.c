@@ -503,6 +503,10 @@ static int rkisp_config_isp(struct rkisp_device *dev)
 	u32 signal = 0;
 	u32 acq_mult = 0;
 	u32 acq_prop = 0;
+	bool is_direct = true;
+
+	if (atomic_read(&dev->hw_dev->refcnt) > 1)
+		is_direct = false;
 
 	sensor = dev->active_sensor;
 	in_fmt = &dev->isp_sdev.in_fmt;
@@ -591,21 +595,21 @@ static int rkisp_config_isp(struct rkisp_device *dev)
 	rkisp_write(dev, CIF_ISP_ACQ_NR_FRAMES, 0, true);
 
 	/* Acquisition Size */
-	rkisp_write(dev, CIF_ISP_ACQ_H_OFFS, acq_mult * in_crop->left, false);
-	rkisp_write(dev, CIF_ISP_ACQ_V_OFFS, in_crop->top, false);
-	rkisp_write(dev, CIF_ISP_ACQ_H_SIZE, acq_mult * in_crop->width, false);
+	rkisp_write(dev, CIF_ISP_ACQ_H_OFFS, acq_mult * in_crop->left, is_direct);
+	rkisp_write(dev, CIF_ISP_ACQ_V_OFFS, in_crop->top, is_direct);
+	rkisp_write(dev, CIF_ISP_ACQ_H_SIZE, acq_mult * in_crop->width, is_direct);
 
 	/* ISP Out Area differ with ACQ is only FIFO, so don't crop in this */
 	rkisp_write(dev, CIF_ISP_OUT_H_OFFS, 0, true);
 	rkisp_write(dev, CIF_ISP_OUT_V_OFFS, 0, true);
-	rkisp_write(dev, CIF_ISP_OUT_H_SIZE, in_crop->width, false);
+	rkisp_write(dev, CIF_ISP_OUT_H_SIZE, in_crop->width, is_direct);
 
 	if (dev->cap_dev.stream[RKISP_STREAM_SP].interlaced) {
-		rkisp_write(dev, CIF_ISP_ACQ_V_SIZE, in_crop->height / 2, false);
-		rkisp_write(dev, CIF_ISP_OUT_V_SIZE, in_crop->height / 2, false);
+		rkisp_write(dev, CIF_ISP_ACQ_V_SIZE, in_crop->height / 2, is_direct);
+		rkisp_write(dev, CIF_ISP_OUT_V_SIZE, in_crop->height / 2, is_direct);
 	} else {
-		rkisp_write(dev, CIF_ISP_ACQ_V_SIZE, in_crop->height, false);
-		rkisp_write(dev, CIF_ISP_OUT_V_SIZE, in_crop->height, false);
+		rkisp_write(dev, CIF_ISP_ACQ_V_SIZE, in_crop->height, is_direct);
+		rkisp_write(dev, CIF_ISP_OUT_V_SIZE, in_crop->height, is_direct);
 	}
 
 	/* interrupt mask */
@@ -1619,8 +1623,11 @@ static int rkisp_isp_sd_s_power(struct v4l2_subdev *sd, int on)
 			kfifo_reset(&isp_dev->csi_dev.rdbk_kfifo);
 		ret = pm_runtime_get_sync(isp_dev->dev);
 	} else {
-		ret = pm_runtime_put(isp_dev->dev);
+		ret = pm_runtime_put_sync(isp_dev->dev);
 	}
+
+	if (ret < 0)
+		v4l2_err(sd, "%s on:%d failed:%d\n", __func__, on, ret);
 	return ret;
 }
 
@@ -1803,6 +1810,8 @@ static long rkisp_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	struct rkisp_device *isp_dev = sd_to_isp_dev(sd);
 	struct rkisp_thunderboot_resmem *resmem;
 	struct rkisp_thunderboot_resmem_head *head;
+	struct rkisp_ldchbuf_info *ldchbuf;
+	struct rkisp_ldchbuf_size *ldchsize;
 	void *resmem_va;
 	long ret = 0;
 
@@ -1853,6 +1862,14 @@ static long rkisp_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		isp_dev->resmem_pa = 0;
 		isp_dev->resmem_size = 0;
 		break;
+	case RKISP_CMD_GET_LDCHBUF_INFO:
+		ldchbuf = (struct rkisp_ldchbuf_info *)arg;
+		rkisp_params_get_ldchbuf_inf(&isp_dev->params_vdev, ldchbuf);
+		break;
+	case RKISP_CMD_SET_LDCHBUF_SIZE:
+		ldchsize = (struct rkisp_ldchbuf_size *)arg;
+		rkisp_params_set_ldchbuf_size(&isp_dev->params_vdev, ldchsize);
+		break;
 	default:
 		ret = -ENOIOCTLCMD;
 	}
@@ -1867,6 +1884,8 @@ static long rkisp_compat_ioctl32(struct v4l2_subdev *sd,
 	void __user *up = compat_ptr(arg);
 	struct isp2x_csi_trigger trigger;
 	struct rkisp_thunderboot_resmem resmem;
+	struct rkisp_ldchbuf_info ldchbuf;
+	struct rkisp_ldchbuf_size ldchsize;
 	long ret = 0;
 	int mode;
 
@@ -1891,6 +1910,16 @@ static long rkisp_compat_ioctl32(struct v4l2_subdev *sd,
 		break;
 	case RKISP_CMD_FREE_SHARED_BUF:
 		ret = rkisp_ioctl(sd, cmd, NULL);
+		break;
+	case RKISP_CMD_GET_LDCHBUF_INFO:
+		ret = rkisp_ioctl(sd, cmd, &ldchbuf);
+		if (!ret)
+			ret = copy_to_user(up, &ldchbuf, sizeof(ldchbuf));
+		break;
+	case RKISP_CMD_SET_LDCHBUF_SIZE:
+		ret = copy_from_user(&ldchsize, up, sizeof(ldchsize));
+		if (!ret)
+			ret = rkisp_ioctl(sd, cmd, &ldchsize);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;

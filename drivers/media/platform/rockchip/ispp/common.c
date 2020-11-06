@@ -87,8 +87,18 @@ int rkispp_allow_buffer(struct rkispp_device *dev,
 	buf->dma_addr = *((dma_addr_t *)g_ops->cookie(mem_priv));
 	if (!attrs)
 		buf->vaddr = g_ops->vaddr(mem_priv);
-	if (buf->is_need_dbuf)
+	if (buf->is_need_dbuf) {
 		buf->dbuf = g_ops->get_dmabuf(mem_priv, O_RDWR);
+		if (buf->is_need_dmafd) {
+			buf->dma_fd = dma_buf_fd(buf->dbuf, O_CLOEXEC);
+			if (buf->dma_fd < 0) {
+				dma_buf_put(buf->dbuf);
+				ret = buf->dma_fd;
+				goto err;
+			}
+			get_dma_buf(buf->dbuf);
+		}
+	}
 	v4l2_dbg(1, rkispp_debug, &dev->v4l2_dev,
 		 "%s buf:0x%x~0x%x size:%d\n", __func__,
 		 (u32)buf->dma_addr, (u32)buf->dma_addr + buf->size, buf->size);
@@ -114,6 +124,7 @@ void rkispp_free_buffer(struct rkispp_device *dev,
 		buf->mem_priv = NULL;
 		buf->is_need_dbuf = false;
 		buf->is_need_vaddr = false;
+		buf->is_need_dmafd = false;
 	}
 }
 
@@ -185,6 +196,7 @@ static int rkispp_init_pool(struct rkispp_hw_dev *hw, struct rkisp_ispp_buf *dbu
 	int i, ret = 0;
 	void *mem;
 
+	INIT_LIST_HEAD(&hw->list);
 	/* init dma buf pool */
 	for (i = 0; i < RKISPP_BUF_POOL_MAX; i++) {
 		pool = &hw->pool[i];
@@ -230,8 +242,7 @@ static void rkispp_queue_dmabuf(struct rkispp_hw_dev *hw, struct rkisp_ispp_buf 
 	spin_lock_irqsave(&hw->buf_lock, lock_flags);
 	if (!dbufs)
 		hw->is_idle = true;
-	if (dbufs && list_empty(list) &&
-	    (hw->is_idle || hw->is_single)) {
+	if (dbufs && list_empty(list) && hw->is_idle) {
 		/* ispp idle or handle same device */
 		buf = dbufs;
 	} else if (hw->is_idle && !list_empty(list)) {
@@ -297,4 +308,42 @@ void rkispp_soft_reset(struct rkispp_device *ispp)
 	udelay(10);
 	if (domain)
 		iommu_attach_device(domain, hw->dev);
+}
+
+int rkispp_alloc_common_dummy_buf(struct rkispp_device *dev)
+{
+	struct rkispp_hw_dev *hw = dev->hw_dev;
+	struct rkispp_subdev *sdev = &dev->ispp_sdev;
+	struct rkispp_dummy_buffer *dummy_buf = &hw->dummy_buf;
+	u32 w = hw->max_in.w ? hw->max_in.w : sdev->out_fmt.width;
+	u32 h =  hw->max_in.h ? hw->max_in.h : sdev->out_fmt.height;
+	u32 size =  w * h * 2;
+	int ret = 0;
+
+	mutex_lock(&hw->dev_lock);
+	if (dummy_buf->mem_priv) {
+		if (dummy_buf->size >= size)
+			goto end;
+		rkispp_free_buffer(dev, &dev->hw_dev->dummy_buf);
+	}
+	dummy_buf->size = w * h * 2;
+	ret = rkispp_allow_buffer(dev, dummy_buf);
+	if (ret < 0)
+		v4l2_err(&dev->v4l2_dev,
+			 "failed to alloc common dummy buf:%d\n", ret);
+	else
+		v4l2_dbg(1, rkispp_debug, &dev->v4l2_dev,
+			 "alloc common dummy buf:0x%x size:%d\n",
+			 (u32)dummy_buf->dma_addr, dummy_buf->size);
+
+end:
+	mutex_unlock(&hw->dev_lock);
+	return ret;
+}
+
+void rkispp_free_common_dummy_buf(struct rkispp_device *dev)
+{
+	mutex_lock(&dev->hw_dev->dev_lock);
+	rkispp_free_buffer(dev, &dev->hw_dev->dummy_buf);
+	mutex_unlock(&dev->hw_dev->dev_lock);
 }

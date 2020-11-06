@@ -216,20 +216,20 @@ static const struct reg_sequence gc2093_1080p_liner_settings[] = {
 	{0x00c7, 0xe1},
 	{0x001b, 0x73},
 	{0x0028, 0x0d},
-	{0x0029, 0x40},
+	{0x0029, 0x24},
 	{0x002b, 0x04},
 	{0x002e, 0x23},
 	{0x0037, 0x03},
-	{0x0038, 0x88},
-	{0x0044, 0x20},
-	{0x004b, 0x14},
-	{0x0055, 0x20},
-	{0x0068, 0x20},
-	{0x0069, 0x20},
+	{0x0043, 0x04},
+	{0x0044, 0x38},
+	{0x004a, 0x01},
+	{0x004b, 0x28},
+	{0x0055, 0x38},
+	{0x006b, 0x44},
 	{0x0077, 0x00},
 	{0x0078, 0x20},
 	{0x007c, 0xa1},
-	{0x00d3, 0xdc},
+	{0x00d3, 0xd4},
 	{0x00e6, 0x50},
 	/* Gain */
 	{0x00b6, 0xc0},
@@ -237,18 +237,30 @@ static const struct reg_sequence gc2093_1080p_liner_settings[] = {
 	/* Isp */
 	{0x0102, 0x89},
 	{0x0104, 0x01},
+	{0x010f, 0x00},
 	{0x0158, 0x00},
+	/* Darksun*/
+	{0x0123, 0x08},
+	{0x0123, 0x00},
+	{0x0120, 0x01},
+	{0x0121, 0x00},
+	{0x0122, 0x10},
+	{0x0124, 0x03},
+	{0x0125, 0xff},
+	{0x0126, 0x3c},
+	{0x001a, 0x8c},
+	{0x00c6, 0xe0},
 	/* Blk */
-	{0x0026, 0x20},
+	{0x0026, 0x30},
 	{0x0142, 0x00},
 	{0x0149, 0x1e},
 	{0x014a, 0x07},
 	{0x014b, 0x80},
-	{0x0155, 0x07},
-	{0x0414, 0x7e},
-	{0x0415, 0x7e},
-	{0x0416, 0x7e},
-	{0x0417, 0x7e},
+	{0x0155, 0x00},
+	{0x0414, 0x78},
+	{0x0415, 0x78},
+	{0x0416, 0x78},
+	{0x0417, 0x78},
 	/* Window */
 	{0x0192, 0x02},
 	{0x0194, 0x03},
@@ -758,6 +770,7 @@ static long gc2093_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	struct rkmodule_hdr_cfg *hdr_cfg;
 	long ret = 0;
 	u32 i, h, w;
+	u32 stream = 0;
 
 	switch (cmd) {
 	case PREISP_CMD_SET_HDRAE_EXP:
@@ -769,6 +782,11 @@ static long gc2093_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		}
 
 		ret = gc2093_set_gain(gc2093, hdrae_exp->short_gain_reg);
+
+		// Optimize blooming effect
+		if (hdrae_exp->short_exp_reg < 4)
+			gc2093_write_reg(gc2093, 0x0032, 0xfd);
+
 		ret |= gc2093_write_reg(gc2093, GC2093_REG_EXP_LONG_H,
 					(hdrae_exp->middle_exp_reg >> 8) & 0x3f);
 		ret |= gc2093_write_reg(gc2093, GC2093_REG_EXP_LONG_L,
@@ -812,6 +830,17 @@ static long gc2093_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		break;
 	case RKMODULE_GET_MODULE_INFO:
 		gc2093_get_module_inf(gc2093, (struct rkmodule_inf *)arg);
+		break;
+	case RKMODULE_SET_QUICK_STREAM:
+
+		stream = *((u32 *)arg);
+
+		if (stream)
+			ret = gc2093_write_reg(gc2093, GC2093_REG_CTRL_MODE,
+				GC2093_MODE_STREAMING);
+		else
+			ret = gc2093_write_reg(gc2093, GC2093_REG_CTRL_MODE,
+				GC2093_MODE_SW_STANDBY);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -864,6 +893,7 @@ static long gc2093_compat_ioctl32(struct v4l2_subdev *sd,
 	struct rkmodule_hdr_cfg *hdr;
 	struct preisp_hdrae_exp_s *hdrae;
 	long ret = 0;
+	u32 stream = 0;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
@@ -913,6 +943,11 @@ static long gc2093_compat_ioctl32(struct v4l2_subdev *sd,
 		if (!ret)
 			ret = gc2093_ioctl(sd, cmd, hdrae);
 		kfree(hdrae);
+		break;
+	case RKMODULE_SET_QUICK_STREAM:
+		ret = copy_from_user(&stream, up, sizeof(u32));
+		if (!ret)
+			ret = gc2093_ioctl(sd, cmd, &stream);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;

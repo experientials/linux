@@ -68,8 +68,10 @@ struct rkispp_dummy_buffer {
 	u64 timestamp;
 	u32 size;
 	u32 id;
+	int dma_fd;
 	bool is_need_vaddr;
 	bool is_need_dbuf;
+	bool is_need_dmafd;
 };
 
 static inline struct rkispp_vdev_node *vdev_to_node(struct video_device *vdev)
@@ -112,4 +114,6 @@ void rkispp_free_buffer(struct rkispp_device *dev,
 int rkispp_attach_hw(struct rkispp_device *ispp);
 int rkispp_event_handle(struct rkispp_device *ispp, u32 cmd, void *arg);
 void rkispp_soft_reset(struct rkispp_device *ispp);
+int rkispp_alloc_common_dummy_buf(struct rkispp_device *dev);
+void rkispp_free_common_dummy_buf(struct rkispp_device *dev);
 #endif

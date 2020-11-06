@@ -1078,6 +1078,15 @@ config VIDEO_OV13858
 	  This is a Video4Linux2 sensor driver for the OmniVision
 	  OV13858 camera.
 
+config VIDEO_PREISP_DUMMY_SENSOR
+	tristate "Preisp dummy sensor support"
+	depends on VIDEO_V4L2 && I2C && VIDEO_V4L2_SUBDEV_API
+	---help---
+	  Support for the preisp dummy sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called pisp_dmy.
+
 config VIDEO_VS6624
 	tristate "ST VS6624 sensor support"
 	depends on VIDEO_V4L2 && I2C
@@ -1475,6 +1484,17 @@ config VIDEO_SC132GS
 	  To compile this driver as a module, choose M here: the
 	  module will be called sc132gs.
 
+config VIDEO_SC200AI
+	tristate "smartsens,sc200ai sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	---help---
+	  Support for the smartsens,sc200ai sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called sc200ai.
+
 config VIDEO_SC210IOT
 	tristate "SmartSens SC210iot sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
@@ -1486,6 +1506,17 @@ config VIDEO_SC210IOT
 	  To compile this driver as a module, choose M here: the
 	  module will be called sc210iot.
 
+config VIDEO_SC2239
+	tristate "SmartSens SC2239 sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  Support for the SmartSens SC2239 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called sc2239.
+
 config VIDEO_SC2310
 	tristate "SmartSens SC2310 sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
@@ -1496,6 +1527,17 @@ config VIDEO_SC2310
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called sc2310.
+
+config VIDEO_SC4238
+	tristate "SmartSens SC4238 sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  Support for the SmartSens SC4238 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called sc4238.
 
 comment "Flash devices"
 
@@ -1615,6 +1657,12 @@ config VIDEO_I2C
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called video-i2c
+
+config VIDEO_HALL_DC_MOTOR
+	tristate "Hall dc-motor driver for camera iris"
+	depends on PWM && VIDEO_V4L2
+	help
+	  This a driver used pwm to drive motor
 
 config VIDEO_RK_IRCUT
 	tristate "Rockchip IR-CUT control device"

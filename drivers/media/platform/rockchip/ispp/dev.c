@@ -305,7 +305,8 @@ static int __maybe_unused rkispp_runtime_suspend(struct device *dev)
 
 	if (atomic_dec_return(&ispp_dev->hw_dev->power_cnt))
 		return 0;
-	return pm_runtime_put(ispp_dev->hw_dev->dev);
+	rkispp_free_common_dummy_buf(ispp_dev);
+	return pm_runtime_put_sync(ispp_dev->hw_dev->dev);
 }
 
 static int __maybe_unused rkispp_runtime_resume(struct device *dev)

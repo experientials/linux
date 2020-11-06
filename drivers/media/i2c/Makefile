@@ -59,6 +59,7 @@ obj-$(CONFIG_VIDEO_CS3308) += cs3308.o
 obj-$(CONFIG_VIDEO_CS5345) += cs5345.o
 obj-$(CONFIG_VIDEO_CS53L32A) += cs53l32a.o
 obj-$(CONFIG_VIDEO_M52790) += m52790.o
+obj-$(CONFIG_VIDEO_HALL_DC_MOTOR) += hall-dc-motor.o
 obj-$(CONFIG_VIDEO_RK_IRCUT) += rk_ircut.o
 obj-$(CONFIG_VIDEO_TLV320AIC23B) += tlv320aic23b.o
 obj-$(CONFIG_VIDEO_UDA1342) += uda1342.o
@@ -157,7 +158,12 @@ obj-$(CONFIG_VIDEO_BF3925)	+= bf3925.o
 obj-$(CONFIG_VIDEO_JX_H65)	+= jx_h65.o
 obj-$(CONFIG_VIDEO_SC031GS)	+= sc031gs.o
 obj-$(CONFIG_VIDEO_SC132GS)	+= sc132gs.o
+obj-$(CONFIG_VIDEO_SC200AI)	+= sc200ai.o
 obj-$(CONFIG_VIDEO_SC210IOT)	+= sc210iot.o
+obj-$(CONFIG_VIDEO_SC2239)	+= sc2239.o
 obj-$(CONFIG_VIDEO_SC2310)	+= sc2310.o
+obj-$(CONFIG_VIDEO_SC4238)	+= sc4238.o
+
+obj-$(CONFIG_VIDEO_PREISP_DUMMY_SENSOR)	+= preisp-dummy.o
 
 obj-$(CONFIG_SDR_MAX2175) += max2175.o

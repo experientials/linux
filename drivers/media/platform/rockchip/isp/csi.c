@@ -133,10 +133,6 @@ static int rkisp_csi_s_stream(struct v4l2_subdev *sd, int on)
 	struct rkisp_device *dev = csi->ispdev;
 
 	memset(csi->tx_first, 0, sizeof(csi->tx_first));
-	csi->frame_cnt = -1;
-	csi->frame_cnt_x1 = -1;
-	csi->frame_cnt_x2 = -1;
-	csi->frame_cnt_x3 = -1;
 
 	if (!IS_HDR_RDBK(dev->hdr.op_mode))
 		return 0;
@@ -326,6 +322,7 @@ static int csi_config(struct rkisp_csi_device *csi)
 
 		/* hdr merge */
 		switch (dev->hdr.op_mode) {
+		case HDR_RDBK_FRAME1:
 		case HDR_RDBK_FRAME2:
 		case HDR_FRAMEX2_DDR:
 		case HDR_LINEX2_DDR:
@@ -343,7 +340,6 @@ static int csi_config(struct rkisp_csi_device *csi)
 			val = 0;
 		}
 		rkisp_write(dev, ISP_HDRMGE_BASE, val, false);
-		rkisp_write(dev, ISP_HDRTMO_BASE, val, false);
 
 		v4l2_dbg(1, rkisp_debug, &dev->v4l2_dev,
 			 "CSI2RX_IDS 0x%08x 0x%08x\n",
@@ -426,8 +422,7 @@ int rkisp_csi_config_patch(struct rkisp_device *dev)
 			}
 
 			/* normal read back mode */
-			if (dev->hdr.op_mode == HDR_NORMAL &&
-			    (dev->isp_inp & INP_RAWRD2 || !dev->hw_dev->is_single))
+			if (dev->hdr.op_mode == HDR_NORMAL)
 				dev->hdr.op_mode = HDR_RDBK_FRAME1;
 		} else {
 			switch (dev->isp_inp & 0x7) {
@@ -442,7 +437,8 @@ int rkisp_csi_config_patch(struct rkisp_device *dev)
 			}
 		}
 
-		if (dev->hdr.op_mode == HDR_RDBK_FRAME2)
+		if (dev->hdr.op_mode == HDR_RDBK_FRAME2 ||
+		    dev->hdr.op_mode == HDR_RDBK_FRAME1)
 			val = SW_HDRMGE_EN | SW_HDRMGE_MODE_FRAMEX2;
 		else if (dev->hdr.op_mode == HDR_RDBK_FRAME3)
 			val = SW_HDRMGE_EN | SW_HDRMGE_MODE_FRAMEX3;
@@ -451,7 +447,6 @@ int rkisp_csi_config_patch(struct rkisp_device *dev)
 			rkisp_write(dev, CSI2RX_CTRL0,
 				    SW_IBUF_OP_MODE(dev->hdr.op_mode), true);
 		rkisp_write(dev, ISP_HDRMGE_BASE, val, false);
-		rkisp_write(dev, ISP_HDRTMO_BASE, val & SW_HDRMGE_EN, false);
 		rkisp_write(dev, CSI2RX_MASK_STAT, 0x7FFFFF7F, true);
 	}
 
@@ -460,6 +455,10 @@ int rkisp_csi_config_patch(struct rkisp_device *dev)
 		rkisp_set_bits(dev, CTRL_SWS_CFG,
 			       0, SW_MPIP_DROP_FRM_DIS, true);
 	}
+	dev->csi_dev.frame_cnt = -1;
+	dev->csi_dev.frame_cnt_x1 = -1;
+	dev->csi_dev.frame_cnt_x2 = -1;
+	dev->csi_dev.frame_cnt_x3 = -1;
 	return ret;
 }
 
@@ -475,6 +474,7 @@ void rkisp_trigger_read_back(struct rkisp_csi_device *csi, u8 dma2frm, u32 mode)
 	u32 val, cur_frame_id, tmp;
 	bool is_upd = false;
 
+	hw->cur_dev_id = dev->dev_id;
 	rkisp_dmarx_get_frame(dev, &cur_frame_id, NULL, true);
 	if (dma2frm > 2)
 		dma2frm = 2;
@@ -491,6 +491,7 @@ void rkisp_trigger_read_back(struct rkisp_csi_device *csi, u8 dma2frm, u32 mode)
 	val = 0;
 	if (mode & T_START_X1) {
 		csi->rd_mode = HDR_RDBK_FRAME1;
+		val = SW_HDRMGE_EN | SW_HDRMGE_MODE_FRAMEX2;
 	} else if (mode & T_START_X2) {
 		csi->rd_mode = HDR_RDBK_FRAME2;
 		val = SW_HDRMGE_EN | SW_HDRMGE_MODE_FRAMEX2;
@@ -502,19 +503,15 @@ void rkisp_trigger_read_back(struct rkisp_csi_device *csi, u8 dma2frm, u32 mode)
 	tmp = rkisp_read(dev, ISP_HDRMGE_BASE, false) & 0xf;
 	if (val != tmp) {
 		rkisp_write(dev, ISP_HDRMGE_BASE, val, false);
+		dev->skip_frame = 2;
 		is_upd = true;
 	}
 
 	if (!hw->is_single) {
 		rkisp_update_regs(dev, CTRL_VI_ISP_PATH, SUPER_IMP_COLOR_CR);
-		rkisp_update_regs(dev, ISP_ACQ_PROP, CSI2RX_VERSION);
+		rkisp_update_regs(dev, ISP_ACQ_PROP, ISP_LSC_CTRL);
 		rkisp_update_regs(dev, ISP_LSC_XGRAD_01, ISP_RAWAWB_RAM_DATA);
-
-		val = rkisp_read(dev, ISP_LSC_CTRL, false);
-		if (val & ISP_LSC_EN) {
-			val = ISP_LSC_LUT_EN | ISP_LSC_EN;
-			rkisp_set_bits(dev, ISP_LSC_CTRL, val, val, true);
-		}
+		rkisp_params_cfgsram(params_vdev);
 		is_upd = true;
 	}
 	if (is_upd) {
@@ -530,8 +527,11 @@ void rkisp_trigger_read_back(struct rkisp_csi_device *csi, u8 dma2frm, u32 mode)
 		 cur_frame_id, dma2frm + 1);
 	val = rkisp_read(dev, CSI2RX_CTRL0, true);
 	val &= ~SW_IBUF_OP_MODE(0xf);
-	val |= SW_CSI2RX_EN | SW_DMA_2FRM_MODE(dma2frm) |
-		SW_IBUF_OP_MODE(csi->rd_mode);
+	if (csi->rd_mode == HDR_RDBK_FRAME1)
+		val |= SW_IBUF_OP_MODE(HDR_RDBK_FRAME2);
+	else
+		val |= SW_IBUF_OP_MODE(csi->rd_mode);
+	val |= SW_CSI2RX_EN | SW_DMA_2FRM_MODE(dma2frm);
 	rkisp_write(dev, CSI2RX_CTRL0, val, true);
 }
 

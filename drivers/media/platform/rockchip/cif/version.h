@@ -47,6 +47,8 @@
  *4. support rk1808 mipi interface in kernel-4.19
  *v0.1.8
  *1. add proc interface
+ *2. add reset mechanism to resume when csi crc err
+ *3. support bt1120 single path
  */
 
 #define RKCIF_DRIVER_VERSION RKCIF_API_VERSION
