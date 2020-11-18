@@ -1093,44 +1093,60 @@ void RGA_MSG_2_RGA2_MSG(struct rga_req *req_rga, struct rga2_req *req)
     format_name_convert(&req->dst.format, req_rga->dst.format);
     format_name_convert(&req->src1.format, req_rga->pat.format);
 
-    if(req_rga->rotate_mode == 1) {
+    switch (req_rga->rotate_mode & 0x0F) {
+    case 1:
         if(req_rga->sina == 0 && req_rga->cosa == 65536) {
             /* rotate 0 */
             req->rotate_mode = 0;
-        }
-        else if (req_rga->sina == 65536 && req_rga->cosa == 0) {
+        } else if (req_rga->sina == 65536 && req_rga->cosa == 0) {
             /* rotate 90 */
             req->rotate_mode = 1;
             req->dst.x_offset = req_rga->dst.x_offset - req_rga->dst.act_h + 1;
             req->dst.act_w = req_rga->dst.act_h;
             req->dst.act_h = req_rga->dst.act_w;
-        }
-        else if (req_rga->sina == 0 && req_rga->cosa == -65536) {
+        } else if (req_rga->sina == 0 && req_rga->cosa == -65536) {
             /* rotate 180 */
             req->rotate_mode = 2;
             req->dst.x_offset = req_rga->dst.x_offset - req_rga->dst.act_w + 1;
             req->dst.y_offset = req_rga->dst.y_offset - req_rga->dst.act_h + 1;
-        }
-        else if (req_rga->sina == -65536 && req_rga->cosa == 0) {
+        } else if (req_rga->sina == -65536 && req_rga->cosa == 0) {
             /* totate 270 */
             req->rotate_mode = 3;
             req->dst.y_offset = req_rga->dst.y_offset - req_rga->dst.act_w + 1;
             req->dst.act_w = req_rga->dst.act_h;
             req->dst.act_h = req_rga->dst.act_w;
         }
-    }
-    else if (req_rga->rotate_mode == 2)
-    {
+        break;
+    case 2:
         //x_mirror
         req->rotate_mode |= (1 << 4);
-    }
-    else if (req_rga->rotate_mode == 3)
-    {
+        break;
+    case 3:
         //y_mirror
         req->rotate_mode |= (2 << 4);
-    }
-    else {
+        break;
+    case 4:
+        //x_mirror+y_mirror
+        req->rotate_mode |= (3 << 4);
+        break;
+    default:
         req->rotate_mode = 0;
+        break;
+    }
+
+    switch ((req_rga->rotate_mode & 0xF0) >> 4) {
+    case 2:
+        //x_mirror
+        req->rotate_mode |= (1 << 4);
+        break;
+    case 3:
+        //y_mirror
+        req->rotate_mode |= (2 << 4);
+        break;
+    case 4:
+        //x_mirror+y_mirror
+        req->rotate_mode |= (3 << 4);
+        break;
     }
 
     if((req->dst.act_w > 2048) && (req->src.act_h < req->dst.act_h))
@@ -1155,10 +1171,7 @@ void RGA_MSG_2_RGA2_MSG(struct rga_req *req_rga, struct rga2_req *req)
     memcpy(&req->gr_color, &req_rga->gr_color, sizeof(req_rga->gr_color));
 
     req->palette_mode = req_rga->palette_mode;
-    if ((req_rga->yuv2rgb_mode & 0x3) != 0)
-        req->yuv2rgb_mode = req_rga->yuv2rgb_mode + 1;
-    else
-        req->yuv2rgb_mode = req_rga->yuv2rgb_mode;
+    req->yuv2rgb_mode = req_rga->yuv2rgb_mode;
     req->endian_mode = req_rga->endian_mode;
     req->rgb2yuv_mode = 0;
 
@@ -1379,10 +1392,7 @@ void RGA_MSG_2_RGA2_MSG_32(struct rga_req_32 *req_rga, struct rga2_req *req)
     req->bg_color = req_rga->bg_color;
     memcpy(&req->gr_color, &req_rga->gr_color, sizeof(req_rga->gr_color));
     req->palette_mode = req_rga->palette_mode;
-    if ((req_rga->yuv2rgb_mode & 0x3) != 0)
-        req->yuv2rgb_mode = req_rga->yuv2rgb_mode + 1;
-    else
-        req->yuv2rgb_mode = req_rga->yuv2rgb_mode;
+    req->yuv2rgb_mode = req_rga->yuv2rgb_mode;
     req->endian_mode = req_rga->endian_mode;
     req->rgb2yuv_mode = 0;
     req->fading_alpha_value = 0;

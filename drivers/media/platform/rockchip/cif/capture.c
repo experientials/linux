@@ -1686,13 +1686,15 @@ static void rkcif_do_cru_reset(struct rkcif_device *dev)
 
 	unsigned int val, i;
 
+	if (dev->luma_vdev.enable)
+		rkcif_stop_luma(&dev->luma_vdev);
+
 	if (dev->hdr.mode != NO_HDR) {
 		if (dev->chip_id == CHIP_RK1808_CIF) {
 			val = rkcif_read_register(dev, CIF_REG_MIPI_WATER_LINE);
 			val |= CIF_MIPI_LVDS_SW_DMA_IDLE_RK1808;
 			rkcif_write_register(dev, CIF_REG_MIPI_WATER_LINE, val);
 		} else {
-			rkcif_stop_luma(&dev->luma_vdev);
 			val = rkcif_read_register(dev, CIF_REG_MIPI_LVDS_CTRL);
 			val |= CIF_MIPI_LVDS_SW_DMA_IDLE;
 			rkcif_write_register(dev, CIF_REG_MIPI_LVDS_CTRL, val);
@@ -2303,7 +2305,12 @@ static int rkcif_start_streaming(struct vb2_queue *queue, unsigned int count)
 			goto stop_stream;
 	}
 
-	if (dev->hdr.mode == HDR_X2) {
+	if (dev->hdr.mode == NO_HDR) {
+		if (dev->stream[RKCIF_STREAM_MIPI_ID0].state == RKCIF_STATE_STREAMING) {
+			rkcif_start_luma(&dev->luma_vdev,
+					dev->stream[RKCIF_STREAM_MIPI_ID0].cif_fmt_in);
+		}
+	} else if (dev->hdr.mode == HDR_X2) {
 		if (dev->stream[RKCIF_STREAM_MIPI_ID0].state == RKCIF_STATE_STREAMING &&
 		    dev->stream[RKCIF_STREAM_MIPI_ID1].state == RKCIF_STATE_STREAMING) {
 			rkcif_start_luma(&dev->luma_vdev,
@@ -2779,8 +2786,8 @@ static int rkcif_s_crop(struct file *file, void *fh, const struct v4l2_crop *a)
 
 	if (stream->crop_mask & CROP_SRC_SENSOR) {
 		sensor_crop = stream->crop[CROP_SRC_SENSOR];
-		if (sensor_crop.left + rect->left  + rect->width > sensor_crop.width ||
-		    sensor_crop.top + rect->top + rect->height > sensor_crop.height) {
+		if (rect->left + rect->width > sensor_crop.width ||
+		    rect->top + rect->height > sensor_crop.height) {
 			v4l2_err(&dev->v4l2_dev, "crop size is bigger than sensor input:left:%d, top:%d, width:%d, height:%d\n",
 				 sensor_crop.left, sensor_crop.top, sensor_crop.width, sensor_crop.height);
 			return -EINVAL;
@@ -3793,7 +3800,7 @@ static void rkcif_update_stream(struct rkcif_device *cif_dev,
 
 	if (cif_dev->chip_id == CHIP_RV1126_CIF ||
 	    cif_dev->chip_id == CHIP_RV1126_CIF_LITE)
-		rkcif_luma_isr(&cif_dev->luma_vdev, mipi_id);
+		rkcif_luma_isr(&cif_dev->luma_vdev, mipi_id, stream->frame_idx);
 
 	if (active_buf) {
 		vb_done = &active_buf->vb;

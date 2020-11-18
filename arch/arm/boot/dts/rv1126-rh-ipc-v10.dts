@@ -10,8 +10,8 @@
 #include <dt-bindings/input/input.h>
 
 / {
-	model = "Rockchip RV1126 BAT IPC V10 Board";
-	compatible = "rockchip,rv1126-bat-ipc-v10", "rockchip,rv1126";
+	model = "Rockchip RV1126 RH Battery IPC V10 Board";
+	compatible = "rockchip,rv1126-rh-ipc-v10", "rockchip,rv1126";
 
 	adc-keys {
 		compatible = "adc-keys";
@@ -82,7 +82,7 @@
 
 		red {
 			label = "red";
-			pwms = <&pwm2 0 50000 0>;
+			pwms = <&pwm4 0 50000 0>;
 			max-brightness = <255>;
 			linux,default-trigger = "heartbeat";
 		};
@@ -119,22 +119,25 @@
 		vin-supply = <&vcc_1v8>;
 	};
 
-	vccio_sd: vccio-sd {
-		compatible = "regulator-gpio";
-		regulator-name = "vccio_sd";
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <3300000>;
-		gpios = <&gpio0 RK_PA4 GPIO_ACTIVE_HIGH>;
-		states = <3300000 1
-			  1800000 0>;
-	};
-
-	vdd_npu_vepu: vdd-npu-vepu {
+	vdd_npu: vdd-npu {
 		compatible = "pwm-regulator";
 		pwms = <&pwm1 0 5000 1>;
-		regulator-name = "vdd_npu_vepu";
+		regulator-name = "vdd_npu";
+		regulator-min-microvolt = <718000>;
+		regulator-max-microvolt = <975000>;
+		regulator-init-microvolt = <813000>;
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-settling-time-up-us = <250>;
+		pwm-supply = <&vcc_3v3>;
+	};
+
+	vdd_vepu: vdd-vepu {
+		compatible = "pwm-regulator";
+		pwms = <&pwm2 0 5000 1>;
+		regulator-name = "vdd_vepu";
 		regulator-min-microvolt = <720000>;
-		regulator-max-microvolt = <1000000>;
+		regulator-max-microvolt = <880000>;
 		regulator-init-microvolt = <824000>;
 		regulator-always-on;
 		regulator-boot-on;
@@ -149,7 +152,7 @@
 		pinctrl-0 = <&wifi_wake_host>;
 		wifi_chip_type = "ap6203";
 		WIFI,poweren_gpio = <&gpio0 RK_PA6 GPIO_ACTIVE_LOW>;
-		WIFI,host_wake_irq = <&gpio0 RK_PB0 GPIO_ACTIVE_HIGH>;
+		WIFI,host_wake_irq = <&gpio1 RK_PD1 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
 };
@@ -214,13 +217,9 @@
 		virtual_power = <0>;
 	};
 
-	pcf8563: pcf8563@51 {
-		compatible = "pcf8563";
+	hym8563: hym8563@51 {
+		compatible = "haoyu,hym8563";
 		reg = <0x51>;
-		interrupt-parent = <&gpio0>;
-		interrupts = <2 IRQ_TYPE_EDGE_FALLING>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&rtc_int>;
 		#clock-cells = <0>;
 		clock-frequency = <32768>;
 		clock-output-names = "xin32k";
@@ -283,11 +282,11 @@
 	status = "okay";
 	#sound-dai-cells = <0>;
 	rockchip,clk-trcm = <1>;
-	rockchip,i2s-rx-route = <3 0 1 2>;
+	rockchip,i2s-rx-route = <0 1 2 3>;
 	pinctrl-0 = <&i2s0m0_sclk_tx
 		     &i2s0m0_lrck_tx
 		     &i2s0m0_sdo0
-		     &i2s0m0_sdo1_sdi3>;
+		     &i2s0m0_sdi0>;
 };
 
 &isp_reserved {
@@ -295,7 +294,7 @@
 };
 
 &npu {
-	npu-supply = <&vdd_npu_vepu>;
+	npu-supply = <&vdd_npu>;
 };
 
 &pinctrl {
@@ -341,9 +340,9 @@
 &pmu_io_domains {
 	status = "okay";
 
-	pmuio0-supply = <&vcc_1v8>;
+	pmuio0-supply = <&vcc_3v3>;
 	pmuio1-supply = <&vcc_3v3>;
-	vccio2-supply = <&vccio_sd>;
+	vccio2-supply = <&vcc_3v3>;
 	vccio3-supply = <&vcc_1v8>;
 	vccio4-supply = <&vcc_1v8>;
 	vccio5-supply = <&vcc_3v3>;
@@ -359,13 +358,19 @@
 &pwm2 {
 	status = "okay";
 	pinctrl-names = "active";
-	pinctrl-0 = <&pwm2m1_pins_pull_down>;
+	pinctrl-0 = <&pwm2m0_pins_pull_down>;
 };
 
 &pwm3 {
 	status = "okay";
 	pinctrl-names = "active";
 	pinctrl-0 = <&pwm3m1_pins_pull_down>;
+};
+
+&pwm4 {
+	status = "okay";
+	pinctrl-names = "active";
+	pinctrl-0 = <&pwm4m1_pins_pull_down>;
 };
 
 &rkisp_thunderboot {
@@ -388,7 +393,7 @@
 };
 
 &rkvenc {
-	venc-supply = <&vdd_npu_vepu>;
+	venc-supply = <&vdd_vepu>;
 };
 
 &rkvenc_mmu {
@@ -426,20 +431,6 @@
 	supports-sdio;
 	supports-chip-alive;
 	logic-remove-card;
-	status = "okay";
-};
-
-&sdmmc {
-	bus-width = <4>;
-	cap-mmc-highspeed;
-	cap-sd-highspeed;
-	card-detect-delay = <200>;
-	rockchip,default-sample-phase = <90>;
-	supports-sd;
-	sd-uhs-sdr12;
-	sd-uhs-sdr25;
-	sd-uhs-sdr104;
-	vqmmc-supply = <&vccio_sd>;
 	status = "okay";
 };
 
