@@ -14,6 +14,7 @@
 #include <linux/of.h>
 #include <linux/of_graph.h>
 #include <linux/platform_device.h>
+#include <linux/uvcinfo.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
@@ -520,11 +521,15 @@ static const struct media_entity_operations csi2_entity_ops = {
 void rkcif_csi2_event_inc_sof(void)
 {
 	if (g_csi2_dev) {
-		struct v4l2_event event = {
-			.type = V4L2_EVENT_FRAME_SYNC,
-			.u.frame_sync.frame_sequence =
-				atomic_inc_return(&g_csi2_dev->frm_sync_seq) - 1,
-		};
+		u32 sequence;
+		struct v4l2_event event = { 0 };
+
+		sequence = atomic_inc_return(&g_csi2_dev->frm_sync_seq) - 1;
+		event.type = V4L2_EVENT_FRAME_SYNC;
+		event.u.frame_sync.frame_sequence = sequence;
+
+		cif_frame_uvcinfo(1, sequence, 0);
+
 		v4l2_event_queue(g_csi2_dev->sd.devnode, &event);
 	}
 }

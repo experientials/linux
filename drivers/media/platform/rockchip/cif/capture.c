@@ -8,6 +8,7 @@
 #include <linux/delay.h>
 #include <linux/pm_runtime.h>
 #include <linux/reset.h>
+#include <linux/uvcinfo.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-fh.h>
@@ -3444,6 +3445,7 @@ static void rkcif_vb_done_oneframe(struct rkcif_stream *stream,
 	if (stream->cifdev->hdr.mode == NO_HDR)
 		vb_done->vb2_buf.timestamp = ktime_get_ns();
 
+	cif_vb2_uvcinfo(stream->id, vb_done->sequence, vb_done->vb2_buf.timestamp);
 	vb2_buffer_done(&vb_done->vb2_buf, VB2_BUF_STATE_DONE);
 }
 
@@ -4233,6 +4235,9 @@ void rkcif_irq_pingpong(struct rkcif_device *cif_dev)
 		mipi_id = rkcif_csi_g_mipi_id(&cif_dev->v4l2_dev, intstat);
 		if (mipi_id < 0)
 			return;
+
+		/* trace cif frame time */
+		cif_frame_uvcinfo(0, rkcif_csi2_get_sof(), mipi_id);
 
 		for (i = 0; i < RKCIF_MAX_STREAM_MIPI; i++) {
 			mipi_id = rkcif_csi_g_mipi_id(&cif_dev->v4l2_dev,
