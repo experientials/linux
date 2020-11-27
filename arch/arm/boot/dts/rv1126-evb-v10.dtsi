@@ -915,7 +915,6 @@
 		rockchip,camera-module-facing = "front";
 		rockchip,camera-module-name = "CMK-OT1607-FV1";
 		rockchip,camera-module-lens-name = "M12-40IRC-4MP-F16";
-		ir-cut = <&cam_ircut0>;
 		port {
 			ucam_out0: endpoint {
 				remote-endpoint = <&mipi_in_ucam0>;
@@ -1336,7 +1335,7 @@
 &usbdrd_dwc3 {
 	status = "okay";
         snps,tx-fifo-resize;
-	extcon = <&u2phy0>;
+	dr_mode = "peripheral";
 };
 
 &vdpu {
