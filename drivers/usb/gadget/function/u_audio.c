@@ -13,6 +13,7 @@
  */
 
 #include <linux/module.h>
+#include <linux/usb/audio.h>
 #include <sound/control.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
@@ -416,7 +417,7 @@ static struct snd_kcontrol *u_audio_get_ctl(struct g_audio *audio_dev,
 
 	memset(&elem_id, 0, sizeof(elem_id));
 	elem_id.iface = SNDRV_CTL_ELEM_IFACE_PCM;
-	strcpy(elem_id.name, name);
+	strlcpy(elem_id.name, name, sizeof(elem_id.name));
 	return snd_ctl_find_id(audio_dev->uac->card, &elem_id);
 }
 
@@ -444,6 +445,44 @@ int u_audio_set_capture_srate(struct g_audio *audio_dev, int srate)
 }
 EXPORT_SYMBOL_GPL(u_audio_set_capture_srate);
 
+static void u_audio_set_playback_pktsize(struct g_audio *audio_dev, int srate)
+{
+	struct uac_params *params = &audio_dev->params;
+	struct snd_uac_chip *uac = audio_dev->uac;
+	struct usb_gadget *gadget = audio_dev->gadget;
+	const struct usb_endpoint_descriptor *ep_desc;
+	struct uac_rtd_params *prm;
+	unsigned int factor;
+
+	prm = &uac->p_prm;
+	/* set srate before starting playback, epin is not configured */
+	if (!prm->ep_enabled)
+		return;
+
+	ep_desc = audio_dev->in_ep->desc;
+
+	/* pre-calculate the playback endpoint's interval */
+	if (gadget->speed == USB_SPEED_FULL)
+		factor = 1000;
+	else
+		factor = 8000;
+
+	/* pre-compute some values for iso_complete() */
+	uac->p_framesize = params->p_ssize *
+			    num_channels(params->p_chmask);
+	uac->p_interval = factor / (1 << (ep_desc->bInterval - 1));
+	uac->p_pktsize = min_t(unsigned int,
+				uac->p_framesize *
+				(params->p_srate_active / uac->p_interval),
+				prm->max_psize);
+
+	if (uac->p_pktsize < prm->max_psize)
+		uac->p_pktsize_residue = uac->p_framesize *
+			(params->p_srate_active % uac->p_interval);
+	else
+		uac->p_pktsize_residue = 0;
+}
+
 int u_audio_set_playback_srate(struct g_audio *audio_dev, int srate)
 {
 	struct snd_kcontrol *ctl = u_audio_get_ctl(audio_dev, "Playback Rate");
@@ -456,6 +495,7 @@ int u_audio_set_playback_srate(struct g_audio *audio_dev, int srate)
 			schedule_work(&audio_dev->work);
 
 			params->p_srate_active = srate;
+			u_audio_set_playback_pktsize(audio_dev, srate);
 			snd_ctl_notify(audio_dev->uac->card,
 					SNDRV_CTL_EVENT_MASK_VALUE, &ctl->id);
 			return 0;
@@ -536,8 +576,6 @@ int u_audio_start_playback(struct g_audio *audio_dev)
 	struct usb_ep *ep;
 	struct uac_rtd_params *prm;
 	struct uac_params *params = &audio_dev->params;
-	unsigned int factor, rate;
-	const struct usb_endpoint_descriptor *ep_desc;
 	int req_len, i;
 
 	audio_dev->usb_state[SET_INTERFACE_IN] = true;
@@ -549,32 +587,12 @@ int u_audio_start_playback(struct g_audio *audio_dev)
 	prm = &uac->p_prm;
 	config_ep_by_speed(gadget, &audio_dev->func, ep);
 
-	ep_desc = ep->desc;
-
-	/* pre-calculate the playback endpoint's interval */
-	if (gadget->speed == USB_SPEED_FULL)
-		factor = 1000;
-	else
-		factor = 8000;
-
-	/* pre-compute some values for iso_complete() */
-	uac->p_framesize = params->p_ssize *
-			    num_channels(params->p_chmask);
-	rate = params->p_srate_active * uac->p_framesize;
-	uac->p_interval = factor / (1 << (ep_desc->bInterval - 1));
-	uac->p_pktsize = min_t(unsigned int, rate / uac->p_interval,
-				prm->max_psize);
-
-	if (uac->p_pktsize < prm->max_psize)
-		uac->p_pktsize_residue = rate % uac->p_interval;
-	else
-		uac->p_pktsize_residue = 0;
-
-	req_len = uac->p_pktsize;
-	uac->p_residue = 0;
-
 	prm->ep_enabled = true;
 	usb_ep_enable(ep);
+
+	u_audio_set_playback_pktsize(audio_dev, params->p_srate_active);
+	req_len = uac->p_pktsize;
+	uac->p_residue = 0;
 
 	for (i = 0; i < params->req_number; i++) {
 		if (!prm->ureq[i].req) {
@@ -612,6 +630,46 @@ void u_audio_stop_playback(struct g_audio *audio_dev)
 }
 EXPORT_SYMBOL_GPL(u_audio_stop_playback);
 
+int u_audio_fu_set_cmd(struct usb_audio_control *con, u8 cmd, int value)
+{
+	struct g_audio *audio_dev = (struct g_audio *)con->context;
+	struct uac_params *params = &audio_dev->params;
+
+	switch (cmd) {
+	case UAC_SET_CUR:
+		if (!strncmp(con->name, "Capture Mute", 12)) {
+			params->c_mute = value;
+			audio_dev->usb_state[SET_MUTE_OUT] = true;
+		} else if (!strncmp(con->name, "Capture Volume", 14)) {
+			params->c_volume = value;
+			audio_dev->usb_state[SET_VOLUME_OUT] = true;
+		} else if (!strncmp(con->name, "Playback Mute", 13)) {
+			params->p_mute = value;
+			audio_dev->usb_state[SET_MUTE_IN] = true;
+		} else if (!strncmp(con->name, "Playback Volume", 15)) {
+			params->p_volume = value;
+			audio_dev->usb_state[SET_VOLUME_IN] = true;
+		}
+		break;
+	case UAC_SET_RES:
+		/* fall through */
+	default:
+		return 0;
+	}
+
+	con->data[cmd] = value;
+	schedule_work(&audio_dev->work);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(u_audio_fu_set_cmd);
+
+int u_audio_fu_get_cmd(struct usb_audio_control *con, u8 cmd)
+{
+	return con->data[cmd];
+}
+EXPORT_SYMBOL_GPL(u_audio_fu_get_cmd);
+
 static void g_audio_work(struct work_struct *data)
 {
 	struct g_audio *audio = container_of(data, struct g_audio, work);
@@ -619,10 +677,11 @@ static void g_audio_work(struct work_struct *data)
 	struct usb_gadget *gadget = audio->gadget;
 	struct device *dev = &gadget->dev;
 	char *uac_event[4]  = { NULL, NULL, NULL, NULL };
-	char srate_str[19];
+	char str[19];
+	signed short volume;
 	int i;
 
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < SET_USB_STATE_MAX; i++) {
 		if (!audio->usb_state[i])
 			continue;
 
@@ -642,16 +701,44 @@ static void g_audio_work(struct work_struct *data)
 		case SET_SAMPLE_RATE_OUT:
 			uac_event[0] = "USB_STATE=SET_SAMPLE_RATE";
 			uac_event[1] = "STREAM_DIRECTION=OUT";
-			snprintf(srate_str, sizeof(srate_str), "SAMPLE_RATE=%d",
+			snprintf(str, sizeof(str), "SAMPLE_RATE=%d",
 						params->c_srate_active);
-			uac_event[2] = srate_str;
+			uac_event[2] = str;
 			break;
 		case SET_SAMPLE_RATE_IN:
 			uac_event[0] = "USB_STATE=SET_SAMPLE_RATE";
 			uac_event[1] = "STREAM_DIRECTION=IN";
-			snprintf(srate_str, sizeof(srate_str), "SAMPLE_RATE=%d",
+			snprintf(str, sizeof(str), "SAMPLE_RATE=%d",
 						params->p_srate_active);
-			uac_event[2] = srate_str;
+			uac_event[2] = str;
+			break;
+		case SET_MUTE_OUT:
+			uac_event[0] = "USB_STATE=SET_MUTE";
+			uac_event[1] = "STREAM_DIRECTION=OUT";
+			snprintf(str, sizeof(str), "MUTE=%d", params->c_mute);
+			uac_event[2] = str;
+			break;
+		case SET_MUTE_IN:
+			uac_event[0] = "USB_STATE=SET_MUTE";
+			uac_event[1] = "STREAM_DIRECTION=IN";
+			snprintf(str, sizeof(str), "MUTE=%d", params->p_mute);
+			uac_event[2] = str;
+			break;
+		case SET_VOLUME_OUT:
+			uac_event[0] = "USB_STATE=SET_VOLUME";
+			uac_event[1] = "STREAM_DIRECTION=OUT";
+			volume = (signed short)params->c_volume;
+			volume /= UAC_VOLUME_RES;
+			snprintf(str, sizeof(str), "VOLUME=%d%%", volume + 50);
+			uac_event[2] = str;
+			break;
+		case SET_VOLUME_IN:
+			uac_event[0] = "USB_STATE=SET_VOLUME";
+			uac_event[1] = "STREAM_DIRECTION=IN";
+			volume = (signed short)params->p_volume;
+			volume /= UAC_VOLUME_RES;
+			snprintf(str, sizeof(str), "VOLUME=%d%%", volume + 50);
+			uac_event[2] = str;
 			break;
 		default:
 			break;
