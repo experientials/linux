@@ -9,13 +9,21 @@
 #include <linux/types.h>
 #include <linux/v4l2-controls.h>
 
-#define ISPP_API_VERSION		KERNEL_VERSION(1, 2, 1)
+#define ISPP_API_VERSION		KERNEL_VERSION(1, 2, 2)
 
-#define ISPP_MODULE_TNR			BIT(0)//2TO1
-#define ISPP_MODULE_NR			BIT(1)
-#define ISPP_MODULE_SHP			BIT(2)
-#define ISPP_MODULE_FEC			BIT(3)//CALIBRATION
-#define ISPP_MODULE_ORB			BIT(4)
+
+#define ISPP_ID_TNR			(0)
+#define ISPP_ID_NR			(1)
+#define ISPP_ID_SHP			(2)
+#define ISPP_ID_FEC			(3)
+#define ISPP_ID_ORB			(4)
+#define ISPP_ID_MAX			(5)
+
+#define ISPP_MODULE_TNR			BIT(ISPP_ID_TNR)//2TO1
+#define ISPP_MODULE_NR			BIT(ISPP_ID_NR)
+#define ISPP_MODULE_SHP			BIT(ISPP_ID_SHP)
+#define ISPP_MODULE_FEC			BIT(ISPP_ID_FEC)//CALIBRATION
+#define ISPP_MODULE_ORB			BIT(ISPP_ID_ORB)
 //extra function
 #define ISPP_MODULE_TNR_3TO1		(BIT(16) | ISPP_MODULE_TNR)
 #define ISPP_MODULE_FEC_ST		(BIT(17) | ISPP_MODULE_FEC)//STABILIZATION
@@ -79,6 +87,22 @@
 
 #define RKISPP_CMD_SET_FECBUF_SIZE	\
 	_IOW('V', BASE_VIDIOC_PRIVATE + 1, struct rkispp_fecbuf_size)
+
+#define RKISPP_CMD_FEC_IN_OUT \
+	_IOW('V', BASE_VIDIOC_PRIVATE + 10, struct rkispp_fec_in_out)
+
+struct rkispp_fec_in_out {
+	int width;
+	int height;
+	int in_fourcc;
+	int out_fourcc;
+	int in_pic_fd;
+	int out_pic_fd;
+	int mesh_xint_fd;
+	int mesh_xfra_fd;
+	int mesh_yint_fd;
+	int mesh_yfra_fd;
+};
 
 struct rkispp_tnr_config {
 	u8 opty_en;

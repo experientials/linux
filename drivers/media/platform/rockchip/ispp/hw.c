@@ -15,6 +15,7 @@
 
 #include "common.h"
 #include "dev.h"
+#include "fec.h"
 #include "hw.h"
 #include "regs.h"
 
@@ -53,7 +54,7 @@ static void default_sw_reg_flag(struct rkispp_device *dev)
 	u32 i, *flag;
 
 	for (i = 0; i < ARRAY_SIZE(reg); i++) {
-		flag = dev->sw_base_addr + reg[i] + ISPP_SW_REG_SIZE;
+		flag = dev->sw_base_addr + reg[i] + RKISP_ISPP_SW_REG_SIZE;
 		*flag = 0xffffffff;
 	}
 }
@@ -126,6 +127,11 @@ static irqreturn_t irq_hdl(int irq, void *ctx)
 	mis_val = readl(base + RKISPP_CTRL_INT_STA);
 	writel(mis_val, base + RKISPP_CTRL_INT_CLR);
 	spin_unlock(&hw_dev->irq_lock);
+
+	if (IS_ENABLED(CONFIG_VIDEO_ROCKCHIP_ISPP_FEC) && mis_val & FEC_INT) {
+		mis_val &= ~FEC_INT;
+		rkispp_fec_irq(hw_dev);
+	}
 
 	if (mis_val)
 		ispp->irq_hdl(mis_val, ispp);
@@ -277,14 +283,15 @@ static int rkispp_hw_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&hw_dev->list);
 	hw_dev->is_idle = true;
 	hw_dev->is_single = true;
+	hw_dev->is_fec_ext = false;
 	if (!is_iommu_enable(dev)) {
 		ret = of_reserved_mem_device_init(dev);
 		if (ret)
 			dev_warn(dev, "No reserved memory region assign to ispp\n");
 	}
 
+	rkispp_register_fec(hw_dev);
 	pm_runtime_enable(&pdev->dev);
-
 	return platform_driver_register(&rkispp_plat_drv);
 err:
 	return ret;
@@ -296,6 +303,7 @@ static int rkispp_hw_remove(struct platform_device *pdev)
 
 	pm_runtime_disable(&pdev->dev);
 	mutex_destroy(&hw_dev->dev_lock);
+	rkispp_unregister_fec(hw_dev);
 	return 0;
 }
 
@@ -329,8 +337,8 @@ static int __maybe_unused rkispp_runtime_resume(struct device *dev)
 	for (i = 0; i < hw_dev->dev_num; i++) {
 		void *buf = hw_dev->ispp[i]->sw_base_addr;
 
-		memset(buf, 0, ISPP_SW_MAX_SIZE);
-		memcpy_fromio(buf, base, ISPP_SW_REG_SIZE);
+		memset(buf, 0, RKISP_ISPP_SW_MAX_SIZE);
+		memcpy_fromio(buf, base, RKISP_ISPP_SW_REG_SIZE);
 		default_sw_reg_flag(hw_dev->ispp[i]);
 	}
 	hw_dev->is_idle = true;
