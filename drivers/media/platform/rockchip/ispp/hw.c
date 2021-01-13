@@ -12,6 +12,8 @@
 #include <linux/of_reserved_mem.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/pm_runtime.h>
+#include <media/videobuf2-dma-contig.h>
+#include <media/videobuf2-dma-sg.h>
 
 #include "common.h"
 #include "dev.h"
@@ -106,7 +108,9 @@ static int enable_sys_clk(struct rkispp_hw_dev *dev)
 		i++;
 	if (i > dev->clk_rate_tbl_num - 1)
 		i = dev->clk_rate_tbl_num - 1;
-	clk_set_rate(dev->clks[0], dev->clk_rate_tbl[i].clk_rate * 1000000UL);
+	dev->core_clk_max = dev->clk_rate_tbl[i].clk_rate * 1000000;
+	dev->core_clk_min = dev->clk_rate_tbl[0].clk_rate * 1000000;
+	clk_set_rate(dev->clks[0], dev->core_clk_min);
 	dev_dbg(dev->dev, "set ispp clk:%luHz\n", clk_get_rate(dev->clks[0]));
 	return 0;
 err:
@@ -147,6 +151,9 @@ static const char * const rv1126_ispp_clks[] = {
 
 static const struct ispp_clk_info rv1126_ispp_clk_rate[] = {
 	{
+		.clk_rate = 20,
+		.refer_data = 0,
+	}, {
 		.clk_rate = 250,
 		.refer_data = 1920 //width
 	}, {
@@ -284,11 +291,21 @@ static int rkispp_hw_probe(struct platform_device *pdev)
 	hw_dev->is_idle = true;
 	hw_dev->is_single = true;
 	hw_dev->is_fec_ext = false;
-	if (!is_iommu_enable(dev)) {
-		ret = of_reserved_mem_device_init(dev);
-		if (ret)
-			dev_warn(dev, "No reserved memory region assign to ispp\n");
+	hw_dev->is_dma_contig = true;
+	hw_dev->is_mmu = is_iommu_enable(dev);
+	ret = of_reserved_mem_device_init(dev);
+	if (ret) {
+		if (!hw_dev->is_mmu)
+			dev_warn(dev, "No reserved memory region. default cma area!\n");
+		else
+			hw_dev->is_dma_contig = false;
 	}
+	if (!hw_dev->is_mmu)
+		hw_dev->mem_ops = &vb2_dma_contig_memops;
+	else if (!hw_dev->is_dma_contig)
+		hw_dev->mem_ops = &vb2_dma_sg_memops;
+	else
+		hw_dev->mem_ops = &vb2_rdma_sg_memops;
 
 	rkispp_register_fec(hw_dev);
 	pm_runtime_enable(&pdev->dev);

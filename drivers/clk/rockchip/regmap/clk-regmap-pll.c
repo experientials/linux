@@ -92,7 +92,7 @@ clk_regmap_pll_recalc_rate(struct clk_hw *hw, unsigned long prate)
 	do_div(foutvco, refdiv);
 
 	if (!dsmpd) {
-		u64 frac_rate = prate * frac;
+		u64 frac_rate = (u64)prate * frac;
 
 		do_div(frac_rate, refdiv);
 		foutvco += frac_rate >> 24;
@@ -152,6 +152,9 @@ static long clk_pll_round_rate(unsigned long fin, unsigned long fout,
 				break;
 		}
 
+		if (_postdiv2 > 7)
+			return -EINVAL;
+
 		fout *= _postdiv1 * _postdiv2;
 	} else {
 		_postdiv1 = 1;
@@ -201,7 +204,7 @@ static long clk_pll_round_rate(unsigned long fin, unsigned long fout,
 	do_div(foutvco, _refdiv);
 
 	if (!_dsmpd) {
-		u64 frac_rate = fin * _frac;
+		u64 frac_rate = (u64)fin * _frac;
 
 		do_div(frac_rate, _refdiv);
 		foutvco += frac_rate >> 24;

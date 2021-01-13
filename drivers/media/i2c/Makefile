@@ -163,6 +163,8 @@ obj-$(CONFIG_VIDEO_GC5025)	+= gc5025.o
 obj-$(CONFIG_VIDEO_GC5035)	+= gc5035.o
 obj-$(CONFIG_VIDEO_GC8034)	+= gc8034.o
 obj-$(CONFIG_VIDEO_BF3925)	+= bf3925.o
+obj-$(CONFIG_VIDEO_JX_F37)	+= jx_f37.o
+obj-$(CONFIG_VIDEO_JX_H62)	+= jx_h62.o
 obj-$(CONFIG_VIDEO_JX_H65)	+= jx_h65.o
 obj-$(CONFIG_VIDEO_SC031GS)	+= sc031gs.o
 obj-$(CONFIG_VIDEO_SC132GS)	+= sc132gs.o
@@ -172,6 +174,8 @@ obj-$(CONFIG_VIDEO_SC2232)	+= sc2232.o
 obj-$(CONFIG_VIDEO_SC2239)	+= sc2239.o
 obj-$(CONFIG_VIDEO_SC2310)	+= sc2310.o
 obj-$(CONFIG_VIDEO_SC4238)	+= sc4238.o
+obj-$(CONFIG_VIDEO_SC430CS)	+= sc430cs.o
+obj-$(CONFIG_VIDEO_SC500AI)	+= sc500ai.o
 
 obj-$(CONFIG_VIDEO_PREISP_DUMMY_SENSOR)	+= preisp-dummy.o
 

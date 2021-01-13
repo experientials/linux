@@ -41,6 +41,8 @@ struct rkispp_hw_dev {
 	int clks_num;
 	int dev_num;
 	int cur_dev_id;
+	unsigned long core_clk_min;
+	unsigned long core_clk_max;
 	enum rkispp_ver	ispp_ver;
 	/* lock for irq */
 	spinlock_t irq_lock;
@@ -48,9 +50,12 @@ struct rkispp_hw_dev {
 	struct mutex dev_lock;
 	spinlock_t buf_lock;
 	atomic_t refcnt;
+	const struct vb2_mem_ops *mem_ops;
+	struct rkisp_ispp_reg *reg_buf;
+	bool is_mmu;
 	bool is_idle;
 	bool is_single;
 	bool is_fec_ext;
-	struct rkisp_ispp_reg *reg_buf;
+	bool is_dma_contig;
 };
 #endif

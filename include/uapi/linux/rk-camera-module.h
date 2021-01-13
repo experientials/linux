@@ -9,7 +9,10 @@
 
 #include <linux/types.h>
 
-#define RKMODULE_API_VERSION		KERNEL_VERSION(0, 1, 0x1)
+#define RKMODULE_API_VERSION		KERNEL_VERSION(0, 1, 0x2)
+
+/* using for rv1109 and rv1126 */
+#define RKMODULE_EXTEND_LINE		24
 
 #define RKMODULE_NAME_LEN		32
 #define RKMODULE_LSCDATA_LEN		441
@@ -51,6 +54,9 @@
 
 #define RKMODULE_SET_QUICK_STREAM	\
 	_IOW('V', BASE_VIDIOC_PRIVATE + 10, __u32)
+
+#define RKMODULE_GET_BT656_INTF_TYPE	\
+	_IOR('V', BASE_VIDIOC_PRIVATE + 11, __u32)
 
 /**
  * struct rkmodule_base_inf - module base information
@@ -312,5 +318,14 @@ struct rkmodule_nr_switch_threshold {
 	__u32 down_thres;
 	__u32 div_coeff;
 } __attribute__ ((packed));
+
+/**
+ * enum rkmodule_bt656_intf_type
+ * to support sony bt656 raw
+ */
+enum rkmodule_bt656_intf_type {
+	BT656_STD_RAW = 0,
+	BT656_SONY_RAW,
+};
 
 #endif /* _UAPI_RKMODULE_CAMERA_H */

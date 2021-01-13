@@ -6,11 +6,13 @@
 
 #include <linux/platform_device.h>
 #include <media/v4l2-subdev.h>
+#include <media/videobuf2-v4l2.h>
 #include <linux/rkisp1-config.h>
 #include <linux/rkispp-config.h>
 
-#define RKISPP_BUF_MAX 5
-#define RKISP_ISPP_BUF_MAX (RKISPP_BUF_MAX + (2 * (DEV_MAX - 1)))
+#define RKISP_BUF_MAX 3
+#define RKISPP_BUF_MAX 2
+#define RKISP_ISPP_BUF_MAX (RKISP_BUF_MAX + RKISPP_BUF_MAX + (2 * (DEV_MAX - 1)))
 
 #define RKISP_ISPP_REGBUF_NUM		RKISPP_BUF_POOL_MAX
 #define RKISP_ISP_SW_REG_SIZE		0x6000
@@ -116,5 +118,7 @@ static inline void rkisp_get_bridge_sd(struct platform_device *dev,
 	*sd = NULL;
 }
 #endif
+
+extern const struct vb2_mem_ops vb2_rdma_sg_memops;
 
 #endif
