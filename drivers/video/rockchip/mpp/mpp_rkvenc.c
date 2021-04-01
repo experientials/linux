@@ -236,7 +236,7 @@ static const u16 trans_tbl_h264e[] = {
 static const u16 trans_tbl_h265e[] = {
 	70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
 	80, 81, 82, 83, 84, 85, 86, 124, 125,
-	126, 127, 128, 129, 130, 131
+	126, 127, 128, 129, 130, 131, 95, 96
 };
 
 static struct mpp_trans_info trans_rk_rkvenc[] = {
@@ -346,6 +346,7 @@ static void *rkvenc_alloc_task(struct mpp_session *session,
 	ret = rkvenc_extract_task_msg(task, msgs);
 	if (ret)
 		goto fail;
+	task->fmt = RKVENC_GET_FORMAT(task->reg[RKVENC_ENC_PIC_INDEX]);
 	/* process fd in register */
 	if (!(msgs->flags & MPP_FLAGS_REG_FD_NO_TRANS)) {
 		ret = mpp_translate_reg_address(session,
@@ -383,8 +384,11 @@ static int rkvenc_write_req_l2(struct mpp_dev *mpp,
 	int i;
 
 	for (i = start_idx; i < end_idx; i++) {
-		mpp_write_relaxed(mpp, RKVENC_L2_ADDR_BASE, i * sizeof(u32));
-		mpp_write_relaxed(mpp, RKVENC_L2_WRITE_BASE, regs[i]);
+		int reg = i * sizeof(u32);
+
+		mpp_debug(DEBUG_SET_REG_L2, "reg[%03d]: %04x: 0x%08x\n", i, reg, regs[i]);
+		writel_relaxed(reg, mpp->reg_base + RKVENC_L2_ADDR_BASE);
+		writel_relaxed(regs[i], mpp->reg_base + RKVENC_L2_WRITE_BASE);
 	}
 
 	return 0;
@@ -397,8 +401,11 @@ static int rkvenc_read_req_l2(struct mpp_dev *mpp,
 	int i;
 
 	for (i = start_idx; i < end_idx; i++) {
-		mpp_write_relaxed(mpp, RKVENC_L2_ADDR_BASE, i * sizeof(u32));
-		regs[i] = mpp_read_relaxed(mpp, RKVENC_L2_READ_BASE);
+		int reg = i * sizeof(u32);
+
+		writel_relaxed(reg, mpp->reg_base + RKVENC_L2_ADDR_BASE);
+		regs[i] = readl_relaxed(mpp->reg_base + RKVENC_L2_READ_BASE);
+		mpp_debug(DEBUG_GET_REG_L2, "reg[%03d]: %04x: 0x%08x\n", i, reg, regs[i]);
 	}
 
 	return 0;
@@ -485,6 +492,7 @@ static int rkvenc_irq(struct mpp_dev *mpp)
 	if (!mpp->irq_status)
 		return IRQ_NONE;
 
+	mpp_write(mpp, RKVENC_INT_MSK_BASE, 0x100);
 	mpp_write(mpp, RKVENC_INT_CLR_BASE, 0xffffffff);
 	udelay(5);
 	mpp_write(mpp, RKVENC_INT_STATUS_BASE, 0);
@@ -517,8 +525,11 @@ static int rkvenc_isr(struct mpp_dev *mpp)
 	if (task->irq_status & RKVENC_INT_ERROR_BITS) {
 		atomic_inc(&mpp->reset_request);
 		/* dump register */
-		if (mpp_debug_unlikely(DEBUG_DUMP_ERR_REG))
-			mpp_task_dump_reg(mpp, mpp_task);
+		if (mpp_debug_unlikely(DEBUG_DUMP_ERR_REG)) {
+			mpp_debug(DEBUG_DUMP_ERR_REG, "irq_status: %08x\n",
+				  task->irq_status);
+			mpp_task_dump_hw_reg(mpp, mpp_task);
+		}
 	}
 
 	/* unmap reserve buffer */
@@ -1353,9 +1364,8 @@ static int rkvenc_set_freq(struct mpp_dev *mpp,
 		mutex_unlock(&enc->devfreq->lock);
 		return 0;
 	}
-#else
-	mpp_clk_set_rate(&enc->core_clk_info, task->clk_mode);
 #endif
+	mpp_clk_set_rate(&enc->core_clk_info, task->clk_mode);
 
 	return 0;
 }

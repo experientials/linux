@@ -778,19 +778,27 @@ static int rkisp_config_path(struct rkisp_device *dev)
 	struct rkisp_sensor_info *sensor = dev->active_sensor;
 	u32 dpcl = readl(dev->base_addr + CIF_VI_DPCL);
 
-	if (sensor &&
-	    (sensor->mbus.type == V4L2_MBUS_BT656 ||
-	     sensor->mbus.type == V4L2_MBUS_PARALLEL)) {
+	/* isp input interface selects */
+	if ((sensor && sensor->mbus.type == V4L2_MBUS_CSI2) ||
+	    dev->isp_inp & (INP_RAWRD0 | INP_RAWRD1 | INP_RAWRD2 | INP_CIF)) {
+		/* mipi sensor->isp or isp read from ddr */
+		dpcl |= CIF_VI_DPCL_IF_SEL_MIPI;
+	} else if (sensor &&
+		   (sensor->mbus.type == V4L2_MBUS_BT656 ||
+		    sensor->mbus.type == V4L2_MBUS_PARALLEL)) {
+		/* dvp sensor->isp */
 		ret = rkisp_config_dvp(dev);
 		dpcl |= CIF_VI_DPCL_IF_SEL_PARALLEL;
-	} else if ((sensor && sensor->mbus.type == V4L2_MBUS_CSI2) ||
-		   dev->isp_inp & (INP_RAWRD0 | INP_RAWRD1 | INP_RAWRD2 | INP_CIF)) {
-		dpcl |= CIF_VI_DPCL_IF_SEL_MIPI;
 	} else if (dev->isp_inp == INP_DMARX_ISP) {
+		/* read from ddr, no sensor connect, debug only */
 		dpcl |= CIF_VI_DPCL_DMA_SW_ISP;
 	} else if (sensor && sensor->mbus.type == V4L2_MBUS_CCP2) {
+		/* lvds sensor->isp */
 		ret = rkisp_config_lvds(dev);
 		dpcl |= VI_DPCL_IF_SEL_LVDS;
+	} else {
+		v4l2_err(&dev->v4l2_dev, "Invalid input\n");
+		ret = -EINVAL;
 	}
 
 	writel(dpcl, dev->base_addr + CIF_VI_DPCL);
@@ -940,6 +948,9 @@ static int rkisp_isp_stop(struct rkisp_device *dev)
 		writel(val & (~CIF_MIPI_CTRL_OUTPUT_ENA), base + CIF_MIPI_CTRL);
 		udelay(20);
 	}
+	/* stop lsc to avoid lsclut error */
+	if (dev->isp_ver == ISP_V20 || dev->isp_ver == ISP_V21)
+		writel(0, base + ISP_LSC_CTRL);
 	/* stop ISP */
 	val = readl(base + CIF_ISP_CTRL);
 	val &= ~(CIF_ISP_CTRL_ISP_INFORM_ENABLE | CIF_ISP_CTRL_ISP_ENABLE);
@@ -1747,9 +1758,6 @@ static int rkisp_subdev_link_setup(struct media_entity *entity,
 		}
 	} else if (!strcmp(remote->entity->name, SP_VDEV_NAME)) {
 		stream = &dev->cap_dev.stream[RKISP_STREAM_SP];
-		if (flags & MEDIA_LNK_FL_ENABLED &&
-		    dev->br_dev.linked)
-			goto err;
 	} else if (!strcmp(remote->entity->name, MP_VDEV_NAME)) {
 		stream = &dev->cap_dev.stream[RKISP_STREAM_MP];
 		if (flags & MEDIA_LNK_FL_ENABLED &&
@@ -1757,8 +1765,7 @@ static int rkisp_subdev_link_setup(struct media_entity *entity,
 			goto err;
 	} else if (!strcmp(remote->entity->name, BRIDGE_DEV_NAME)) {
 		if (flags & MEDIA_LNK_FL_ENABLED &&
-		    (dev->cap_dev.stream[RKISP_STREAM_SP].linked ||
-		     dev->cap_dev.stream[RKISP_STREAM_MP].linked))
+		    dev->cap_dev.stream[RKISP_STREAM_MP].linked)
 			goto err;
 		dev->br_dev.linked = flags & MEDIA_LNK_FL_ENABLED;
 	} else if (!strcmp(remote->entity->name, "rockchip-mipi-dphy-rx")) {
@@ -1859,6 +1866,8 @@ static long rkisp_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	struct rkisp_thunderboot_resmem_head *head;
 	struct rkisp_ldchbuf_info *ldchbuf;
 	struct rkisp_ldchbuf_size *ldchsize;
+	struct rkisp_thunderboot_shmem *shmem;
+	struct isp2x_buf_idxfd *idxfd;
 	void *resmem_va;
 	long ret = 0;
 
@@ -1888,10 +1897,17 @@ static long rkisp_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		}
 
 		rkisp_chk_tb_over(isp_dev);
+		dma_sync_single_for_cpu(isp_dev->dev, isp_dev->resmem_addr,
+					sizeof(struct rkisp_thunderboot_resmem_head),
+					DMA_FROM_DEVICE);
+
 		resmem_va = phys_to_virt(isp_dev->resmem_pa);
 		head = (struct rkisp_thunderboot_resmem_head *)resmem_va;
 		if (head->complete != RKISP_TB_OK) {
 			resmem->resmem_size = 0;
+			dma_unmap_single(isp_dev->dev, isp_dev->resmem_pa,
+					 sizeof(struct rkisp_thunderboot_resmem_head),
+					 DMA_FROM_DEVICE);
 			free_reserved_area(phys_to_virt(isp_dev->resmem_pa),
 					   phys_to_virt(isp_dev->resmem_pa) + isp_dev->resmem_size,
 					   -1, "rkisp_thunderboot");
@@ -1901,10 +1917,14 @@ static long rkisp_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		}
 		break;
 	case RKISP_CMD_FREE_SHARED_BUF:
-		if (isp_dev->resmem_pa && isp_dev->resmem_size)
+		if (isp_dev->resmem_pa && isp_dev->resmem_size) {
+			dma_unmap_single(isp_dev->dev, isp_dev->resmem_pa,
+					 sizeof(struct rkisp_thunderboot_resmem_head),
+					 DMA_FROM_DEVICE);
 			free_reserved_area(phys_to_virt(isp_dev->resmem_pa),
 					   phys_to_virt(isp_dev->resmem_pa) + isp_dev->resmem_size,
 					   -1, "rkisp_thunderboot");
+		}
 
 		isp_dev->resmem_pa = 0;
 		isp_dev->resmem_size = 0;
@@ -1916,6 +1936,14 @@ static long rkisp_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 	case RKISP_CMD_SET_LDCHBUF_SIZE:
 		ldchsize = (struct rkisp_ldchbuf_size *)arg;
 		rkisp_params_set_ldchbuf_size(&isp_dev->params_vdev, ldchsize);
+		break;
+	case RKISP_CMD_GET_SHM_BUFFD:
+		shmem = (struct rkisp_thunderboot_shmem *)arg;
+		ret = rkisp_tb_shm_ioctl(shmem);
+		break;
+	case RKISP_CMD_GET_FBCBUF_FD:
+		idxfd = (struct isp2x_buf_idxfd *)arg;
+		ret = rkisp_bridge_get_fbcbuf_fd(isp_dev, idxfd);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -1933,6 +1961,8 @@ static long rkisp_compat_ioctl32(struct v4l2_subdev *sd,
 	struct rkisp_thunderboot_resmem resmem;
 	struct rkisp_ldchbuf_info ldchbuf;
 	struct rkisp_ldchbuf_size ldchsize;
+	struct rkisp_thunderboot_shmem shmem;
+	struct isp2x_buf_idxfd idxfd;
 	long ret = 0;
 	int mode;
 
@@ -1967,6 +1997,19 @@ static long rkisp_compat_ioctl32(struct v4l2_subdev *sd,
 		ret = copy_from_user(&ldchsize, up, sizeof(ldchsize));
 		if (!ret)
 			ret = rkisp_ioctl(sd, cmd, &ldchsize);
+		break;
+	case RKISP_CMD_GET_SHM_BUFFD:
+		ret = copy_from_user(&shmem, up, sizeof(shmem));
+		if (!ret) {
+			ret = rkisp_ioctl(sd, cmd, &shmem);
+			if (!ret)
+				ret = copy_to_user(up, &shmem, sizeof(shmem));
+		}
+		break;
+	case RKISP_CMD_GET_FBCBUF_FD:
+		ret = rkisp_ioctl(sd, cmd, &idxfd);
+		if (!ret)
+			ret = copy_to_user(up, &idxfd, sizeof(idxfd));
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -2086,13 +2129,34 @@ void rkisp_unregister_isp_subdev(struct rkisp_device *isp_dev)
 	media_entity_cleanup(&sd->entity);
 }
 
+#define shm_head_poll_timeout(isp_dev, cond, sleep_us, timeout_us)	\
+({ \
+	u64 __timeout_us = (timeout_us); \
+	unsigned long __sleep_us = (sleep_us); \
+	ktime_t __timeout = ktime_add_us(ktime_get(), __timeout_us); \
+	might_sleep_if((__sleep_us) != 0); \
+	for (;;) { \
+		dma_sync_single_for_cpu(isp_dev->dev, isp_dev->resmem_addr, \
+			sizeof(struct rkisp_thunderboot_resmem_head), \
+			DMA_FROM_DEVICE); \
+		if (cond) \
+			break; \
+		if (__timeout_us && \
+		    ktime_compare(ktime_get(), __timeout) > 0) { \
+			break; \
+		} \
+		if (__sleep_us) \
+			usleep_range((__sleep_us >> 2) + 1, __sleep_us); \
+	} \
+	(cond) ? 0 : -ETIMEDOUT; \
+})
+
 #ifdef CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP
 void rkisp_chk_tb_over(struct rkisp_device *isp_dev)
 {
 	struct rkisp_thunderboot_resmem_head *head;
 	enum rkisp_tb_state tb_state;
 	void *resmem_va;
-	u32 i;
 
 	if (!isp_dev->resmem_pa || !isp_dev->resmem_size) {
 		v4l2_info(&isp_dev->v4l2_dev,
@@ -2103,17 +2167,11 @@ void rkisp_chk_tb_over(struct rkisp_device *isp_dev)
 	resmem_va = phys_to_virt(isp_dev->resmem_pa);
 	head = (struct rkisp_thunderboot_resmem_head *)resmem_va;
 	if (isp_dev->hw_dev->is_thunderboot) {
-		if ((!head->complete)) {
-			for (i = 0; i < 100; i++) {
-				usleep_range(5000, 6000);
-				if (head->complete)
-					break;
-			}
-
-			if (!head->complete)
-				v4l2_info(&isp_dev->v4l2_dev,
-					  "wait thunderboot over timeout\n");
-		}
+		shm_head_poll_timeout(isp_dev, !!head->enable, 2000, 200 * USEC_PER_MSEC);
+		shm_head_poll_timeout(isp_dev, !!head->complete, 5000, 500 * USEC_PER_MSEC);
+		if (head->complete != RKISP_TB_OK)
+			v4l2_info(&isp_dev->v4l2_dev,
+				  "wait thunderboot over timeout\n");
 
 		v4l2_info(&isp_dev->v4l2_dev,
 			  "thunderboot info: %d, %d, %d, %d, %d, %d, 0x%x\n",
@@ -2268,6 +2326,11 @@ void rkisp_isp_isr(unsigned int isp_mis,
 	/* start edge of v_sync */
 	if (isp_mis & CIF_ISP_V_START) {
 		rkisp_set_state(dev, ISP_FRAME_VS);
+		/* last vsync to config next buf */
+		if (!dev->csi_dev.filt_state[CSI_F_VS])
+			rkisp_bridge_update_mi(dev);
+		else
+			dev->csi_dev.filt_state[CSI_F_VS]--;
 		if (IS_HDR_RDBK(dev->hdr.op_mode)) {
 			rkisp_stats_rdbk_enable(&dev->stats_vdev, true);
 			goto vs_skip;

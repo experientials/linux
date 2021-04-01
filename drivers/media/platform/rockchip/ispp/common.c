@@ -3,7 +3,6 @@
 
 #include <media/videobuf2-dma-contig.h>
 #include <linux/delay.h>
-#include <linux/iommu.h>
 #include <linux/of_platform.h>
 #include "dev.h"
 #include "regs.h"
@@ -138,6 +137,24 @@ void rkispp_free_buffer(struct rkispp_device *dev,
 	}
 }
 
+void rkispp_prepare_buffer(struct rkispp_device *dev,
+			struct rkispp_dummy_buffer *buf)
+{
+	const struct vb2_mem_ops *g_ops = dev->hw_dev->mem_ops;
+
+	if (buf && buf->mem_priv)
+		g_ops->prepare(buf->mem_priv);
+}
+
+void rkispp_finish_buffer(struct rkispp_device *dev,
+			struct rkispp_dummy_buffer *buf)
+{
+	const struct vb2_mem_ops *g_ops = dev->hw_dev->mem_ops;
+
+	if (buf && buf->mem_priv)
+		g_ops->finish(buf->mem_priv);
+}
+
 int rkispp_attach_hw(struct rkispp_device *ispp)
 {
 	struct device_node *np;
@@ -261,6 +278,7 @@ static void rkispp_free_pool(struct rkispp_hw_dev *hw)
 	}
 
 	rkispp_free_regbuf(hw);
+	hw->is_idle = true;
 }
 
 static int rkispp_init_pool(struct rkispp_hw_dev *hw, struct rkisp_ispp_buf *dbufs)
@@ -303,8 +321,11 @@ static int rkispp_init_pool(struct rkispp_hw_dev *hw, struct rkisp_ispp_buf *dbu
 		if (rkispp_debug)
 			dev_info(hw->dev, "%s dma[%d]:0x%x\n",
 				 __func__, i, (u32)pool->dma[i]);
+
+		pool->vaddr[i] = g_ops->vaddr(mem);
 	}
 	rkispp_init_regbuf(hw);
+	hw->is_idle = true;
 	return ret;
 err:
 	rkispp_free_pool(hw);
@@ -323,6 +344,8 @@ static void rkispp_queue_dmabuf(struct rkispp_hw_dev *hw, struct rkisp_ispp_buf 
 	spin_lock_irqsave(&hw->buf_lock, lock_flags);
 	if (!dbufs)
 		hw->is_idle = true;
+	if (hw->is_shutdown)
+		hw->is_idle = false;
 	if (dbufs && list_empty(list) && hw->is_idle) {
 		/* ispp idle or handle same device */
 		buf = dbufs;
@@ -376,19 +399,6 @@ int rkispp_event_handle(struct rkispp_device *ispp, u32 cmd, void *arg)
 	}
 
 	return ret;
-}
-
-void rkispp_soft_reset(struct rkispp_device *ispp)
-{
-	struct rkispp_hw_dev *hw = ispp->hw_dev;
-	struct iommu_domain *domain = iommu_get_domain_for_dev(hw->dev);
-
-	if (domain)
-		iommu_detach_device(domain, hw->dev);
-	writel(GLB_SOFT_RST_ALL, hw->base_addr + RKISPP_CTRL_RESET);
-	udelay(10);
-	if (domain)
-		iommu_attach_device(domain, hw->dev);
 }
 
 static int rkispp_alloc_page_dummy_buf(struct rkispp_device *dev, u32 size)

@@ -53,6 +53,7 @@ int rkisp_fcc_xysubs(u32 fcc, u32 *xsubs, u32 *ysubs)
 	case V4L2_PIX_FMT_NV12M:
 	case V4L2_PIX_FMT_YUV420:
 	case V4L2_PIX_FMT_YVU420:
+	case V4L2_PIX_FMT_FBCG:
 		*xsubs = 2;
 		*ysubs = 2;
 		break;
@@ -384,6 +385,17 @@ static const struct capture_fmt sp_fmts[] = {
 		.mplanes = 1,
 		.write_format = MI_CTRL_SP_WRITE_PLA,
 		.output_format = MI_CTRL_SP_OUTPUT_RGB565,
+	},
+	/* fbcg */
+	{
+		.fourcc = V4L2_PIX_FMT_FBCG,
+		.fmt_type = FMT_FBCGAIN,
+		.bpp = { 8, 16 },
+		.cplanes = 2,
+		.mplanes = 2,
+		.uv_swap = 0,
+		.write_format = MI_CTRL_SP_WRITE_SPLA,
+		.output_format = MI_CTRL_SP_OUTPUT_YUV420,
 	}
 };
 
@@ -622,6 +634,10 @@ static int rkisp_set_fmt(struct rkisp_stream *stream,
 
 		plane_fmt->sizeimage = plane_fmt->bytesperline * height;
 
+		/* uv address is y size offset need 64 align */
+		if (fmt->fmt_type == FMT_FBCGAIN && i == 0)
+			plane_fmt->sizeimage = ALIGN(plane_fmt->sizeimage, 64);
+
 		imagsize += plane_fmt->sizeimage;
 	}
 
@@ -629,10 +645,10 @@ static int rkisp_set_fmt(struct rkisp_stream *stream,
 	 * it's important since we want to unify none-MPLANE
 	 * and MPLANE.
 	 */
-	if (fmt->mplanes == 1)
+	if (fmt->mplanes == 1 || fmt->fmt_type == FMT_FBCGAIN)
 		pixm->plane_fmt[0].sizeimage = imagsize;
 
-	if (!try) {
+	if (!try && !stream->start_stream && !stream->streaming) {
 		stream->out_isp_fmt = *fmt;
 		stream->out_fmt = *pixm;
 
@@ -836,7 +852,7 @@ static int rkisp_s_fmt_vid_cap_mplane(struct file *file,
 	struct rkisp_vdev_node *node = vdev_to_node(vdev);
 	struct rkisp_device *dev = stream->ispdev;
 
-	if (vb2_is_busy(&node->buf_queue)) {
+	if (vb2_is_streaming(&node->buf_queue)) {
 		v4l2_err(&dev->v4l2_dev, "%s queue busy\n", __func__);
 		return -EBUSY;
 	}
