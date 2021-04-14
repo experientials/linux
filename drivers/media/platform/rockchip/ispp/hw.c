@@ -327,6 +327,7 @@ static int rkispp_hw_probe(struct platform_device *pdev)
 	hw_dev->is_dma_contig = true;
 	hw_dev->is_shutdown = false;
 	hw_dev->is_first = true;
+	hw_dev->first_frame_dma = -1;
 	hw_dev->is_mmu = is_iommu_enable(dev);
 	ret = of_reserved_mem_device_init(dev);
 	if (ret) {
@@ -344,6 +345,7 @@ static int rkispp_hw_probe(struct platform_device *pdev)
 
 	rkispp_register_fec(hw_dev);
 	pm_runtime_enable(&pdev->dev);
+
 	return platform_driver_register(&rkispp_plat_drv);
 err:
 	return ret;

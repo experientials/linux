@@ -19,7 +19,8 @@
 	(((a) & 0xFFFF) << 0 | ((b) & 0xFFFF) << 16)
 
 #define ISP2X_REG_WR_MASK		BIT(31) //disable write protect
-#define ISP2X_NOBIG_OVERFLOW_SIZE	(2560 * 1440)
+#define ISP2X_NOBIG_OVERFLOW_SIZE	(2688 * 1536)
+#define ISP2X_AUTO_BIGMODE_WIDTH	2688
 
 static inline void
 rkisp_iowrite32(struct rkisp_isp_params_vdev *params_vdev,
@@ -3909,6 +3910,7 @@ rkisp_params_first_cfg_v2x(struct rkisp_isp_params_vdev *params_vdev)
 		(struct rkisp_isp_params_v21_ops *)params_vdev->priv_ops;
 	struct rkisp_isp_params_val_v21 *priv_val =
 		(struct rkisp_isp_params_val_v21 *)params_vdev->priv_val;
+	struct v4l2_rect *out_crop = &params_vdev->dev->isp_sdev.out_crop;
 
 	rkisp_alloc_bay3d_buf(params_vdev, params_vdev->isp21_params);
 	spin_lock(&params_vdev->config_lock);
@@ -3931,6 +3933,13 @@ rkisp_params_first_cfg_v2x(struct rkisp_isp_params_vdev *params_vdev)
 	__isp_isr_other_config(params_vdev, params_vdev->isp21_params, RKISP_PARAMS_ALL);
 	__isp_isr_meas_config(params_vdev, params_vdev->isp21_params, RKISP_PARAMS_ALL);
 	__preisp_isr_update_hdrae_para(params_vdev, params_vdev->isp21_params);
+	if (out_crop->width <= ISP2X_AUTO_BIGMODE_WIDTH &&
+	    isp_param_get_insize(params_vdev) > ISP2X_NOBIG_OVERFLOW_SIZE) {
+		rkisp_set_bits(params_vdev->dev, ISP_CTRL1,
+			       ISP2X_SYS_BIGMODE_MANUAL | ISP2X_SYS_BIGMODE_FORCEEN,
+			       ISP2X_SYS_BIGMODE_MANUAL | ISP2X_SYS_BIGMODE_FORCEEN, false);
+	}
+
 	params_vdev->cur_hdrmge = params_vdev->isp21_params->others.hdrmge_cfg;
 	params_vdev->cur_hdrdrc = params_vdev->isp21_params->others.drc_cfg;
 	params_vdev->last_hdrmge = params_vdev->cur_hdrmge;
@@ -4107,7 +4116,7 @@ rkisp_params_disable_isp_v2x(struct rkisp_isp_params_vdev *params_vdev)
 
 static void
 rkisp_params_cfg_v2x(struct rkisp_isp_params_vdev *params_vdev,
-		     u32 frame_id, u32 rdbk_times, enum rkisp_params_type type)
+		     u32 frame_id, enum rkisp_params_type type)
 {
 	struct isp21_isp_params_cfg *new_params = NULL;
 	struct rkisp_buffer *cur_buf = params_vdev->cur_buf;
@@ -4158,8 +4167,6 @@ rkisp_params_cfg_v2x(struct rkisp_isp_params_vdev *params_vdev,
 		params_vdev->cur_hdrdrc = new_params->others.drc_cfg;
 		vb2_buffer_done(&cur_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 		cur_buf = NULL;
-	} else {
-		params_vdev->rdbk_times = rdbk_times;
 	}
 
 unlock:
@@ -4199,12 +4206,13 @@ rkisp_params_isr_v2x(struct rkisp_isp_params_vdev *params_vdev,
 
 	rkisp_dmarx_get_frame(dev, &cur_frame_id, NULL, NULL, true);
 	if (isp_mis & CIF_ISP_V_START) {
+		if (params_vdev->rdbk_times)
+			params_vdev->rdbk_times--;
 		if (!params_vdev->cur_buf)
 			return;
 
-		params_vdev->rdbk_times--;
 		if (IS_HDR_RDBK(dev->csi_dev.rd_mode) && !params_vdev->rdbk_times) {
-			rkisp_params_cfg_v2x(params_vdev, cur_frame_id, 0, RKISP_PARAMS_SHD);
+			rkisp_params_cfg_v2x(params_vdev, cur_frame_id, RKISP_PARAMS_SHD);
 			return;
 		}
 	}
@@ -4213,7 +4221,7 @@ rkisp_params_isr_v2x(struct rkisp_isp_params_vdev *params_vdev,
 		rkisp_params_clear_fstflg(params_vdev);
 
 	if ((isp_mis & CIF_ISP_FRAME) && !IS_HDR_RDBK(dev->csi_dev.rd_mode))
-		rkisp_params_cfg_v2x(params_vdev, cur_frame_id, 0, RKISP_PARAMS_ALL);
+		rkisp_params_cfg_v2x(params_vdev, cur_frame_id, RKISP_PARAMS_ALL);
 }
 
 static struct rkisp_isp_params_ops rkisp_isp_params_ops_tbl = {

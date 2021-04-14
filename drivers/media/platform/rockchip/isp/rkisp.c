@@ -653,6 +653,8 @@ static int rkisp_config_isp(struct rkisp_device *dev)
 		    CIF_ISP_FRAME_IN;
 	if (dev->isp_ver == ISP_V20 || dev->isp_ver == ISP_V21)
 		irq_mask |= ISP2X_LSC_LUT_ERR;
+	if (dev->isp_ver == ISP_V20)
+		irq_mask |= ISP2X_HDR_DONE;
 	rkisp_write(dev, CIF_ISP_IMSC, irq_mask, true);
 
 	if ((dev->isp_ver == ISP_V20 || dev->isp_ver == ISP_V21) &&
@@ -2332,6 +2334,9 @@ void rkisp_isp_isr(unsigned int isp_mis,
 		else
 			dev->csi_dev.filt_state[CSI_F_VS]--;
 		if (IS_HDR_RDBK(dev->hdr.op_mode)) {
+			/* read 3d lut at isp readback */
+			if (!dev->hw_dev->is_single)
+				rkisp_write(dev, ISP_3DLUT_UPDATE, 0, true);
 			rkisp_stats_rdbk_enable(&dev->stats_vdev, true);
 			goto vs_skip;
 		}

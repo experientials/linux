@@ -51,6 +51,11 @@ bool rkispp_reg_withstream;
 module_param_named(sendreg_withstream, rkispp_reg_withstream, bool, 0644);
 MODULE_PARM_DESC(sendreg_withstream, "rkispp send reg out with stream");
 
+char rkispp_reg_withstream_video_name[RKISPP_VIDEO_NAME_LEN];
+module_param_string(sendreg_withstream_video_name, rkispp_reg_withstream_video_name,
+		    RKISPP_VIDEO_NAME_LEN, 0644);
+MODULE_PARM_DESC(sendreg_withstream, "rkispp video send reg out with stream");
+
 unsigned int rkispp_debug_reg = 0x1F;
 module_param_named(debug_reg, rkispp_debug_reg, uint, 0644);
 MODULE_PARM_DESC(debug_reg, "rkispp debug register");
@@ -184,9 +189,8 @@ static int rkispp_create_links(struct rkispp_device *ispp_dev)
 	if (ret < 0)
 		return ret;
 
-	/* default enable tnr (2to1), nr, sharp */
-	ispp_dev->stream_vdev.module_ens =
-		ISPP_MODULE_TNR | ISPP_MODULE_NR | ISPP_MODULE_SHP;
+	/* default enable */
+	ispp_dev->stream_vdev.module_ens = ISPP_MODULE_NR | ISPP_MODULE_SHP;
 	return 0;
 }
 

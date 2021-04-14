@@ -97,6 +97,32 @@
  * 2. get stats only when meas done is on
  * 3. fix lsc lut error in start/stop test
  *
+ * v1.5.1:
+ * 1. support to set format if no streaming
+ * 2. add vb2_rdma_sg_memops to support contiguous page
+ * 3. fix gain buf update
+ * 4. 64 align y size for fbcgain format
+ * 5. add trigger mode ioctl
+ * 6. fix config of clk_dbg
+ * 7. fix path select of cif input
+ * 8. fix mpfbc buf update if readback off
+ * 9. fix array overflow
+ * 10. use force big mode when auto big mode is incorrect
+ * 11. fix extend line with isp input crop case
+ * 12. set lgmean related regs for tmo in hdr isr
+ *
+ * v1.6.0:
+ * 1. reorder of subdev stream
+ * 2. fix media link err for name don't match
+ * 3. switch hdr_done interrupt according to hdrtmo cnt mode
+ * 4. support output isp/ispp reg in nv12 format
+ * 5. isp and ispp add shutdown
+ * 6. image input from user
+ * 7. import dma API for memory synchronisation for thunderboot
+ * 8. don't start ldch asynchronously in multi-isp mode
+ * 9. fix err of mp dump raw for isp20
+ * 10. make sure 3dlut no continuous read twice
+ * 11. adjust rdbk times with mulit dev for isp2.0
  */
 
 #define RKISP_DRIVER_VERSION RKISP_API_VERSION

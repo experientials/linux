@@ -491,21 +491,10 @@ void rkisp_trigger_read_back(struct rkisp_csi_device *csi, u8 dma2frm, u32 mode)
 	u32 val, cur_frame_id, tmp, rd_mode;
 	bool is_feature_on = hw->is_feature_on;
 	u64 iq_feature = hw->iq_feature;
-	bool is_upd = false;
+	bool is_upd = false, is_3dlut_upd = false;
 
-	if (dev->isp_ver == ISP_V21)
-		dma2frm = 0;
 	hw->cur_dev_id = dev->dev_id;
 	rkisp_dmarx_get_frame(dev, &cur_frame_id, NULL, NULL, true);
-	if (dma2frm > 2)
-		dma2frm = 2;
-	if (dma2frm == 2)
-		csi->frame_cnt_x3++;
-	else if (dma2frm == 1)
-		csi->frame_cnt_x2++;
-	else
-		csi->frame_cnt_x1++;
-	csi->frame_cnt++;
 
 	val = 0;
 	if (mode & T_START_X1) {
@@ -560,7 +549,7 @@ void rkisp_trigger_read_back(struct rkisp_csi_device *csi, u8 dma2frm, u32 mode)
 		rkisp_params_first_cfg(&dev->params_vdev,
 				       &dev->isp_sdev.in_fmt,
 				       dev->isp_sdev.quantization);
-	rkisp_params_cfg(params_vdev, cur_frame_id, dma2frm + 1);
+	rkisp_params_cfg(params_vdev, cur_frame_id);
 
 	if (!hw->is_single) {
 		rkisp_update_regs(dev, CTRL_VI_ISP_PATH, SUPER_IMP_COLOR_CR);
@@ -568,17 +557,42 @@ void rkisp_trigger_read_back(struct rkisp_csi_device *csi, u8 dma2frm, u32 mode)
 		rkisp_update_regs(dev, ISP_ACQ_PROP, DUAL_CROP_CTRL);
 		rkisp_update_regs(dev, ISP_GAMMA_OUT_CTRL, ISP_LSC_CTRL);
 		rkisp_update_regs(dev, ISP_LSC_XGRAD_01, ISP_RAWAWB_RAM_DATA);
+		if (dev->isp_ver == ISP_V20 &&
+		    (rkisp_read(dev, ISP_DHAZ_CTRL, false) & ISP_DHAZ_ENMUX ||
+		     rkisp_read(dev, ISP_HDRTMO_CTRL, false) & ISP_HDRTMO_EN)) {
+			dma2frm += (dma2frm ? 0 : 1);
+		}
 		is_upd = true;
 	}
 
-	if (IS_HDR_RDBK(dev->csi_dev.rd_mode))
-		rkisp_params_cfgsram(params_vdev);
+	if (dev->isp_ver == ISP_V21)
+		dma2frm = 0;
+	if (dma2frm > 2)
+		dma2frm = 2;
+	if (dma2frm == 2)
+		csi->frame_cnt_x3++;
+	else if (dma2frm == 1)
+		csi->frame_cnt_x2++;
+	else
+		csi->frame_cnt_x1++;
+	csi->frame_cnt++;
 
+	rkisp_params_cfgsram(params_vdev);
+	params_vdev->rdbk_times = dma2frm + 1;
+
+	/* read 3d lut at frame end */
+	if (hw->is_single && is_upd &&
+	    rkisp_read_reg_cache(dev, ISP_3DLUT_UPDATE) & 0x1) {
+		rkisp_write(dev, ISP_3DLUT_UPDATE, 0, true);
+		is_3dlut_upd = true;
+	}
 	if (is_upd) {
 		val = rkisp_read(dev, ISP_CTRL, false);
 		val |= CIF_ISP_CTRL_ISP_CFG_UPD;
 		rkisp_write(dev, ISP_CTRL, val, true);
 	}
+	if (is_3dlut_upd)
+		rkisp_write(dev, ISP_3DLUT_UPDATE, 1, true);
 
 	memset(csi->filt_state, 0, sizeof(csi->filt_state));
 	csi->filt_state[CSI_F_VS] = dma2frm;
