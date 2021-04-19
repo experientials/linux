@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * sc430cs driver
+ * sc401ai driver
  *
  * Copyright (C) 2020 Rockchip Electronics Co., Ltd.
  *
@@ -36,84 +36,84 @@
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
 #endif
 
-#define SC430CS_LANES			4
-#define SC430CS_BITS_PER_SAMPLE		10
-#define SC430CS_LINK_FREQ_315		157500000// 315Mbps
+#define SC401AI_LANES			4
+#define SC401AI_BITS_PER_SAMPLE		10
+#define SC401AI_LINK_FREQ_315		157500000// 315Mbps
 
-#define PIXEL_RATE_WITH_315M_10BIT		(SC430CS_LINK_FREQ_315 * 2 * \
-					SC430CS_LANES / SC430CS_BITS_PER_SAMPLE)
-#define SC430CS_XVCLK_FREQ		27000000
+#define PIXEL_RATE_WITH_315M_10BIT		(SC401AI_LINK_FREQ_315 * 2 * \
+					SC401AI_LANES / SC401AI_BITS_PER_SAMPLE)
+#define SC401AI_XVCLK_FREQ		27000000
 
 #define CHIP_ID				0xcd2e
-#define SC430CS_REG_CHIP_ID		0x3107
+#define SC401AI_REG_CHIP_ID		0x3107
 
-#define SC430CS_REG_CTRL_MODE		0x0100
-#define SC430CS_MODE_SW_STANDBY		0x0
-#define SC430CS_MODE_STREAMING		BIT(0)
+#define SC401AI_REG_CTRL_MODE		0x0100
+#define SC401AI_MODE_SW_STANDBY		0x0
+#define SC401AI_MODE_STREAMING		BIT(0)
 
-#define SC430CS_REG_EXPOSURE_H		0x3e00
-#define SC430CS_REG_EXPOSURE_M		0x3e01
-#define SC430CS_REG_EXPOSURE_L		0x3e02
-#define	SC430CS_EXPOSURE_MIN		1
-#define	SC430CS_EXPOSURE_STEP		1
-#define SC430CS_VTS_MAX			0x7fff
+#define SC401AI_REG_EXPOSURE_H		0x3e00
+#define SC401AI_REG_EXPOSURE_M		0x3e01
+#define SC401AI_REG_EXPOSURE_L		0x3e02
+#define	SC401AI_EXPOSURE_MIN		1
+#define	SC401AI_EXPOSURE_STEP		1
+#define SC401AI_VTS_MAX			0x7fff
 
-#define SC430CS_REG_DIG_GAIN		0x3e06
-#define SC430CS_REG_DIG_FINE_GAIN	0x3e07
-#define SC430CS_REG_ANA_GAIN		0x3e08
-#define SC430CS_REG_ANA_FINE_GAIN	0x3e09
-#define SC430CS_GAIN_MIN		0x0040
-#define SC430CS_GAIN_MAX		(24 * 32 * 64)    //23.32*31.75*64
-#define SC430CS_GAIN_STEP		1
-#define SC430CS_GAIN_DEFAULT		0x0800
+#define SC401AI_REG_DIG_GAIN		0x3e06
+#define SC401AI_REG_DIG_FINE_GAIN	0x3e07
+#define SC401AI_REG_ANA_GAIN		0x3e08
+#define SC401AI_REG_ANA_FINE_GAIN	0x3e09
+#define SC401AI_GAIN_MIN		0x0040
+#define SC401AI_GAIN_MAX		(24 * 32 * 64)    //23.32*31.75*64
+#define SC401AI_GAIN_STEP		1
+#define SC401AI_GAIN_DEFAULT		0x0800
 
 
-#define SC430CS_REG_GROUP_HOLD		0x3812
-#define SC430CS_GROUP_HOLD_START	0x00
-#define SC430CS_GROUP_HOLD_END		0x30
+#define SC401AI_REG_GROUP_HOLD		0x3812
+#define SC401AI_GROUP_HOLD_START	0x00
+#define SC401AI_GROUP_HOLD_END		0x30
 
-#define SC430CS_REG_HIGH_TEMP_H		0x3974
-#define SC430CS_REG_HIGH_TEMP_L		0x3975
+#define SC401AI_REG_HIGH_TEMP_H		0x3974
+#define SC401AI_REG_HIGH_TEMP_L		0x3975
 
-#define SC430CS_REG_TEST_PATTERN	0x4501
-#define SC430CS_TEST_PATTERN_BIT_MASK	BIT(3)
+#define SC401AI_REG_TEST_PATTERN	0x4501
+#define SC401AI_TEST_PATTERN_BIT_MASK	BIT(3)
 
-#define SC430CS_REG_VTS_H		0x320e
-#define SC430CS_REG_VTS_L		0x320f
+#define SC401AI_REG_VTS_H		0x320e
+#define SC401AI_REG_VTS_L		0x320f
 
-#define SC430CS_FLIP_MIRROR_REG		0x3221
+#define SC401AI_FLIP_MIRROR_REG		0x3221
 
-#define SC430CS_FETCH_EXP_H(VAL)		(((VAL) >> 12) & 0xF)
-#define SC430CS_FETCH_EXP_M(VAL)		(((VAL) >> 4) & 0xFF)
-#define SC430CS_FETCH_EXP_L(VAL)		(((VAL) & 0xF) << 4)
+#define SC401AI_FETCH_EXP_H(VAL)		(((VAL) >> 12) & 0xF)
+#define SC401AI_FETCH_EXP_M(VAL)		(((VAL) >> 4) & 0xFF)
+#define SC401AI_FETCH_EXP_L(VAL)		(((VAL) & 0xF) << 4)
 
-#define SC430CS_FETCH_AGAIN_H(VAL)		(((VAL) >> 8) & 0x03)
-#define SC430CS_FETCH_AGAIN_L(VAL)		((VAL) & 0xFF)
+#define SC401AI_FETCH_AGAIN_H(VAL)		(((VAL) >> 8) & 0x03)
+#define SC401AI_FETCH_AGAIN_L(VAL)		((VAL) & 0xFF)
 
-#define SC430CS_FETCH_MIRROR(VAL, ENABLE)	(ENABLE ? VAL | 0x06 : VAL & 0xf9)
-#define SC430CS_FETCH_FLIP(VAL, ENABLE)		(ENABLE ? VAL | 0x60 : VAL & 0x9f)
+#define SC401AI_FETCH_MIRROR(VAL, ENABLE)	(ENABLE ? VAL | 0x06 : VAL & 0xf9)
+#define SC401AI_FETCH_FLIP(VAL, ENABLE)		(ENABLE ? VAL | 0x60 : VAL & 0x9f)
 
 #define REG_DELAY			0xFFFE
 #define REG_NULL			0xFFFF
 
-#define SC430CS_REG_VALUE_08BIT		1
-#define SC430CS_REG_VALUE_16BIT		2
-#define SC430CS_REG_VALUE_24BIT		3
+#define SC401AI_REG_VALUE_08BIT		1
+#define SC401AI_REG_VALUE_16BIT		2
+#define SC401AI_REG_VALUE_24BIT		3
 
 #define OF_CAMERA_PINCTRL_STATE_DEFAULT	"rockchip,camera_default"
 #define OF_CAMERA_PINCTRL_STATE_SLEEP	"rockchip,camera_sleep"
 #define OF_CAMERA_HDR_MODE		"rockchip,camera-hdr-mode"
-#define SC430CS_NAME			"sc430cs"
+#define SC401AI_NAME			"sc401ai"
 
-static const char * const sc430cs_supply_names[] = {
+static const char * const sc401ai_supply_names[] = {
 	"avdd",		/* Analog power */
 	"dovdd",	/* Digital I/O power */
 	"dvdd",		/* Digital core power */
 };
 
-#define SC430CS_NUM_SUPPLIES ARRAY_SIZE(sc430cs_supply_names)
+#define SC401AI_NUM_SUPPLIES ARRAY_SIZE(sc401ai_supply_names)
 
-enum sc430cs_max_pad {
+enum sc401ai_max_pad {
 	PAD0, /* link to isp */
 	PAD1, /* link to csi wr0 | hdr x2:L x3:M */
 	PAD2, /* link to csi wr1 | hdr      x3:L */
@@ -126,7 +126,7 @@ struct regval {
 	u8 val;
 };
 
-struct sc430cs_mode {
+struct sc401ai_mode {
 	u32 bus_fmt;
 	u32 width;
 	u32 height;
@@ -139,12 +139,12 @@ struct sc430cs_mode {
 	u32 vc[PAD_MAX];
 };
 
-struct sc430cs {
+struct sc401ai {
 	struct i2c_client	*client;
 	struct clk		*xvclk;
 	struct gpio_desc	*reset_gpio;
 	struct gpio_desc	*pwdn_gpio;
-	struct regulator_bulk_data supplies[SC430CS_NUM_SUPPLIES];
+	struct regulator_bulk_data supplies[SC401AI_NUM_SUPPLIES];
 
 	struct pinctrl		*pinctrl;
 	struct pinctrl_state	*pins_default;
@@ -162,7 +162,7 @@ struct sc430cs {
 	struct mutex		mutex;
 	bool			streaming;
 	bool			power_on;
-	const struct sc430cs_mode *cur_mode;
+	const struct sc401ai_mode *cur_mode;
 	u32			module_index;
 	const char		*module_facing;
 	const char		*module_name;
@@ -171,12 +171,12 @@ struct sc430cs {
 	struct preisp_hdrae_exp_s init_hdrae_exp;
 };
 
-#define to_sc430cs(sd) container_of(sd, struct sc430cs, subdev)
+#define to_sc401ai(sd) container_of(sd, struct sc401ai, subdev)
 
 /*
  * Xclk 24Mhz
  */
-static const struct regval sc430cs_global_regs[] = {
+static const struct regval sc401ai_global_regs[] = {
 	{REG_NULL, 0x00},
 };
 
@@ -185,7 +185,7 @@ static const struct regval sc430cs_global_regs[] = {
  * max_framerate 30fps
  * mipi_datarate per lane 315Mbps, 4lane
  */
-static const struct regval sc430cs_linear_10_2560x1440_regs[] = {
+static const struct regval sc401ai_linear_10_2560x1440_regs[] = {
 	{0x0103, 0x01},
 	{0x0100, 0x00},
 	{0x36e9, 0x80},
@@ -285,7 +285,7 @@ static const struct regval sc430cs_linear_10_2560x1440_regs[] = {
 	{REG_NULL, 0x00},
 };
 
-static const struct sc430cs_mode supported_modes[] = {
+static const struct sc401ai_mode supported_modes[] = {
 	{
 		.width = 2560,
 		.height = 1440,
@@ -297,17 +297,17 @@ static const struct sc430cs_mode supported_modes[] = {
 		.hts_def = 0x0578 * 2,
 		.vts_def = 0x05dc,
 		.bus_fmt = MEDIA_BUS_FMT_SBGGR10_1X10,
-		.reg_list = sc430cs_linear_10_2560x1440_regs,
+		.reg_list = sc401ai_linear_10_2560x1440_regs,
 		.hdr_mode = NO_HDR,
 		.vc[PAD0] = V4L2_MBUS_CSI2_CHANNEL_0,
 	}
 };
 
 static const s64 link_freq_menu_items[] = {
-	SC430CS_LINK_FREQ_315
+	SC401AI_LINK_FREQ_315
 };
 
-static const char * const sc430cs_test_pattern_menu[] = {
+static const char * const sc401ai_test_pattern_menu[] = {
 	"Disabled",
 	"Vertical Color Bar Type 1",
 	"Vertical Color Bar Type 2",
@@ -316,7 +316,7 @@ static const char * const sc430cs_test_pattern_menu[] = {
 };
 
 /* Write registers up to 4 at a time */
-static int sc430cs_write_reg(struct i2c_client *client, u16 reg,
+static int sc401ai_write_reg(struct i2c_client *client, u16 reg,
 			    u32 len, u32 val)
 {
 	u32 buf_i, val_i;
@@ -343,21 +343,21 @@ static int sc430cs_write_reg(struct i2c_client *client, u16 reg,
 	return 0;
 }
 
-static int sc430cs_write_array(struct i2c_client *client,
+static int sc401ai_write_array(struct i2c_client *client,
 			       const struct regval *regs)
 {
 	u32 i;
 	int ret = 0;
 
 	for (i = 0; ret == 0 && regs[i].addr != REG_NULL; i++)
-		ret = sc430cs_write_reg(client, regs[i].addr,
-					SC430CS_REG_VALUE_08BIT, regs[i].val);
+		ret = sc401ai_write_reg(client, regs[i].addr,
+					SC401AI_REG_VALUE_08BIT, regs[i].val);
 
 	return ret;
 }
 
 /* Read registers up to 4 at a time */
-static int sc430cs_read_reg(struct i2c_client *client, u16 reg, unsigned int len,
+static int sc401ai_read_reg(struct i2c_client *client, u16 reg, unsigned int len,
 			    u32 *val)
 {
 	struct i2c_msg msgs[2];
@@ -391,7 +391,7 @@ static int sc430cs_read_reg(struct i2c_client *client, u16 reg, unsigned int len
 	return 0;
 }
 
-static int sc430cs_set_gain_reg(struct sc430cs *sc430cs, u32 gain)
+static int sc401ai_set_gain_reg(struct sc401ai *sc401ai, u32 gain)
 {
 	u8 Coarse_gain = 1, DIG_gain = 1;
 	u32 Dcg_gainx100 = 1, ANA_Fine_gainx64 = 1;
@@ -402,8 +402,8 @@ static int sc430cs_set_gain_reg(struct sc430cs *sc430cs, u32 gain)
 	gain = gain * 16;
 	if (gain <= 1024)
 		gain = 1024;
-	else if (gain > SC430CS_GAIN_MAX * 16)
-		gain = SC430CS_GAIN_MAX * 16;
+	else if (gain > SC401AI_GAIN_MAX * 16)
+		gain = SC401AI_GAIN_MAX * 16;
 
 	if (gain < 1504) {               // start again
 		Dcg_gainx100 = 100;
@@ -492,35 +492,35 @@ static int sc430cs_set_gain_reg(struct sc430cs *sc430cs, u32 gain)
 		DIG_Fine_gain_reg = abs(800 * gain / (Dcg_gainx100 * Coarse_gain *
 							DIG_gain) / ANA_Fine_gainx64);
 
-	ret = sc430cs_write_reg(sc430cs->client,
-				SC430CS_REG_DIG_GAIN,
-				SC430CS_REG_VALUE_08BIT,
+	ret = sc401ai_write_reg(sc401ai->client,
+				SC401AI_REG_DIG_GAIN,
+				SC401AI_REG_VALUE_08BIT,
 				DIG_gain_reg & 0xF);
-	ret |= sc430cs_write_reg(sc430cs->client,
-				 SC430CS_REG_DIG_FINE_GAIN,
-				 SC430CS_REG_VALUE_08BIT,
+	ret |= sc401ai_write_reg(sc401ai->client,
+				 SC401AI_REG_DIG_FINE_GAIN,
+				 SC401AI_REG_VALUE_08BIT,
 				 DIG_Fine_gain_reg);
-	ret |= sc430cs_write_reg(sc430cs->client,
-				 SC430CS_REG_ANA_GAIN,
-				 SC430CS_REG_VALUE_08BIT,
+	ret |= sc401ai_write_reg(sc401ai->client,
+				 SC401AI_REG_ANA_GAIN,
+				 SC401AI_REG_VALUE_08BIT,
 				 Coarse_gain_reg);
-	ret |= sc430cs_write_reg(sc430cs->client,
-				 SC430CS_REG_ANA_FINE_GAIN,
-				 SC430CS_REG_VALUE_08BIT,
+	ret |= sc401ai_write_reg(sc401ai->client,
+				 SC401AI_REG_ANA_FINE_GAIN,
+				 SC401AI_REG_VALUE_08BIT,
 				 ANA_Fine_gain_reg);
 
 	return ret;
 }
 
-static int sc430cs_get_reso_dist(const struct sc430cs_mode *mode,
+static int sc401ai_get_reso_dist(const struct sc401ai_mode *mode,
 				 struct v4l2_mbus_framefmt *framefmt)
 {
 	return abs(mode->width - framefmt->width) +
 	       abs(mode->height - framefmt->height);
 }
 
-static const struct sc430cs_mode *
-sc430cs_find_best_fit(struct v4l2_subdev_format *fmt)
+static const struct sc401ai_mode *
+sc401ai_find_best_fit(struct v4l2_subdev_format *fmt)
 {
 	struct v4l2_mbus_framefmt *framefmt = &fmt->format;
 	int dist;
@@ -529,7 +529,7 @@ sc430cs_find_best_fit(struct v4l2_subdev_format *fmt)
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
-		dist = sc430cs_get_reso_dist(&supported_modes[i], framefmt);
+		dist = sc401ai_get_reso_dist(&supported_modes[i], framefmt);
 		if (cur_best_fit_dist == -1 || dist < cur_best_fit_dist) {
 			cur_best_fit_dist = dist;
 			cur_best_fit = i;
@@ -539,17 +539,17 @@ sc430cs_find_best_fit(struct v4l2_subdev_format *fmt)
 	return &supported_modes[cur_best_fit];
 }
 
-static int sc430cs_set_fmt(struct v4l2_subdev *sd,
+static int sc401ai_set_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_pad_config *cfg,
 			   struct v4l2_subdev_format *fmt)
 {
-	struct sc430cs *sc430cs = to_sc430cs(sd);
-	const struct sc430cs_mode *mode;
+	struct sc401ai *sc401ai = to_sc401ai(sd);
+	const struct sc401ai_mode *mode;
 	s64 h_blank, vblank_def;
 
-	mutex_lock(&sc430cs->mutex);
+	mutex_lock(&sc401ai->mutex);
 
-	mode = sc430cs_find_best_fit(fmt);
+	mode = sc401ai_find_best_fit(fmt);
 	fmt->format.code = mode->bus_fmt;
 	fmt->format.width = mode->width;
 	fmt->format.height = mode->height;
@@ -558,38 +558,38 @@ static int sc430cs_set_fmt(struct v4l2_subdev *sd,
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
 		*v4l2_subdev_get_try_format(sd, cfg, fmt->pad) = fmt->format;
 #else
-		mutex_unlock(&sc430cs->mutex);
+		mutex_unlock(&sc401ai->mutex);
 		return -ENOTTY;
 #endif
 	} else {
-		sc430cs->cur_mode = mode;
+		sc401ai->cur_mode = mode;
 		h_blank = mode->hts_def - mode->width;
-		__v4l2_ctrl_modify_range(sc430cs->hblank, h_blank,
+		__v4l2_ctrl_modify_range(sc401ai->hblank, h_blank,
 					 h_blank, 1, h_blank);
 		vblank_def = mode->vts_def - mode->height;
-		__v4l2_ctrl_modify_range(sc430cs->vblank, vblank_def,
-					 SC430CS_VTS_MAX - mode->height,
+		__v4l2_ctrl_modify_range(sc401ai->vblank, vblank_def,
+					 SC401AI_VTS_MAX - mode->height,
 					 1, vblank_def);
 	}
 
-	mutex_unlock(&sc430cs->mutex);
+	mutex_unlock(&sc401ai->mutex);
 
 	return 0;
 }
 
-static int sc430cs_get_fmt(struct v4l2_subdev *sd,
+static int sc401ai_get_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_pad_config *cfg,
 			   struct v4l2_subdev_format *fmt)
 {
-	struct sc430cs *sc430cs = to_sc430cs(sd);
-	const struct sc430cs_mode *mode = sc430cs->cur_mode;
+	struct sc401ai *sc401ai = to_sc401ai(sd);
+	const struct sc401ai_mode *mode = sc401ai->cur_mode;
 
-	mutex_lock(&sc430cs->mutex);
+	mutex_lock(&sc401ai->mutex);
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
 		fmt->format = *v4l2_subdev_get_try_format(sd, cfg, fmt->pad);
 #else
-		mutex_unlock(&sc430cs->mutex);
+		mutex_unlock(&sc401ai->mutex);
 		return -ENOTTY;
 #endif
 	} else {
@@ -603,25 +603,25 @@ static int sc430cs_get_fmt(struct v4l2_subdev *sd,
 		else
 			fmt->reserved[0] = mode->vc[PAD0];
 	}
-	mutex_unlock(&sc430cs->mutex);
+	mutex_unlock(&sc401ai->mutex);
 
 	return 0;
 }
 
-static int sc430cs_enum_mbus_code(struct v4l2_subdev *sd,
+static int sc401ai_enum_mbus_code(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_pad_config *cfg,
 				  struct v4l2_subdev_mbus_code_enum *code)
 {
-	struct sc430cs *sc430cs = to_sc430cs(sd);
+	struct sc401ai *sc401ai = to_sc401ai(sd);
 
 	if (code->index != 0)
 		return -EINVAL;
-	code->code = sc430cs->cur_mode->bus_fmt;
+	code->code = sc401ai->cur_mode->bus_fmt;
 
 	return 0;
 }
 
-static int sc430cs_enum_frame_sizes(struct v4l2_subdev *sd,
+static int sc401ai_enum_frame_sizes(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_pad_config *cfg,
 				    struct v4l2_subdev_frame_size_enum *fse)
 {
@@ -639,42 +639,42 @@ static int sc430cs_enum_frame_sizes(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int sc430cs_enable_test_pattern(struct sc430cs *sc430cs, u32 pattern)
+static int sc401ai_enable_test_pattern(struct sc401ai *sc401ai, u32 pattern)
 {
 	u32 val = 0;
 	int ret = 0;
 
-	ret = sc430cs_read_reg(sc430cs->client, SC430CS_REG_TEST_PATTERN,
-			       SC430CS_REG_VALUE_08BIT, &val);
+	ret = sc401ai_read_reg(sc401ai->client, SC401AI_REG_TEST_PATTERN,
+			       SC401AI_REG_VALUE_08BIT, &val);
 	if (pattern)
-		val |= SC430CS_TEST_PATTERN_BIT_MASK;
+		val |= SC401AI_TEST_PATTERN_BIT_MASK;
 	else
-		val &= ~SC430CS_TEST_PATTERN_BIT_MASK;
+		val &= ~SC401AI_TEST_PATTERN_BIT_MASK;
 
-	ret |= sc430cs_write_reg(sc430cs->client, SC430CS_REG_TEST_PATTERN,
-				 SC430CS_REG_VALUE_08BIT, val);
+	ret |= sc401ai_write_reg(sc401ai->client, SC401AI_REG_TEST_PATTERN,
+				 SC401AI_REG_VALUE_08BIT, val);
 	return ret;
 }
 
-static int sc430cs_g_frame_interval(struct v4l2_subdev *sd,
+static int sc401ai_g_frame_interval(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_frame_interval *fi)
 {
-	struct sc430cs *sc430cs = to_sc430cs(sd);
-	const struct sc430cs_mode *mode = sc430cs->cur_mode;
+	struct sc401ai *sc401ai = to_sc401ai(sd);
+	const struct sc401ai_mode *mode = sc401ai->cur_mode;
 
-	mutex_lock(&sc430cs->mutex);
+	mutex_lock(&sc401ai->mutex);
 	fi->interval = mode->max_fps;
-	mutex_unlock(&sc430cs->mutex);
+	mutex_unlock(&sc401ai->mutex);
 
 	return 0;
 }
 
-static int sc430cs_g_mbus_config(struct v4l2_subdev *sd,
+static int sc401ai_g_mbus_config(struct v4l2_subdev *sd,
 				 struct v4l2_mbus_config *config)
 {
-	struct sc430cs *sc430cs = to_sc430cs(sd);
-	const struct sc430cs_mode *mode = sc430cs->cur_mode;
-	u32 val = 1 << (SC430CS_LANES - 1) |
+	struct sc401ai *sc401ai = to_sc401ai(sd);
+	const struct sc401ai_mode *mode = sc401ai->cur_mode;
+	u32 val = 1 << (SC401AI_LANES - 1) |
 		V4L2_MBUS_CSI2_CHANNEL_0 |
 		V4L2_MBUS_CSI2_CONTINUOUS_CLOCK;
 
@@ -689,19 +689,19 @@ static int sc430cs_g_mbus_config(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static void sc430cs_get_module_inf(struct sc430cs *sc430cs,
+static void sc401ai_get_module_inf(struct sc401ai *sc401ai,
 				   struct rkmodule_inf *inf)
 {
 	memset(inf, 0, sizeof(*inf));
-	strlcpy(inf->base.sensor, SC430CS_NAME, sizeof(inf->base.sensor));
-	strlcpy(inf->base.module, sc430cs->module_name,
+	strlcpy(inf->base.sensor, SC401AI_NAME, sizeof(inf->base.sensor));
+	strlcpy(inf->base.module, sc401ai->module_name,
 		sizeof(inf->base.module));
-	strlcpy(inf->base.lens, sc430cs->len_name, sizeof(inf->base.lens));
+	strlcpy(inf->base.lens, sc401ai->len_name, sizeof(inf->base.lens));
 }
 
-static long sc430cs_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
+static long sc401ai_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 {
-	struct sc430cs *sc430cs = to_sc430cs(sd);
+	struct sc401ai *sc401ai = to_sc401ai(sd);
 	struct rkmodule_hdr_cfg *hdr;
 	u32 i, h, w;
 	long ret = 0;
@@ -709,36 +709,36 @@ static long sc430cs_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
-		sc430cs_get_module_inf(sc430cs, (struct rkmodule_inf *)arg);
+		sc401ai_get_module_inf(sc401ai, (struct rkmodule_inf *)arg);
 		break;
 	case RKMODULE_GET_HDR_CFG:
 		hdr = (struct rkmodule_hdr_cfg *)arg;
 		hdr->esp.mode = HDR_NORMAL_VC;
-		hdr->hdr_mode = sc430cs->cur_mode->hdr_mode;
+		hdr->hdr_mode = sc401ai->cur_mode->hdr_mode;
 		break;
 	case RKMODULE_SET_HDR_CFG:
 		hdr = (struct rkmodule_hdr_cfg *)arg;
-		w = sc430cs->cur_mode->width;
-		h = sc430cs->cur_mode->height;
+		w = sc401ai->cur_mode->width;
+		h = sc401ai->cur_mode->height;
 		for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
 			if (w == supported_modes[i].width &&
 			    h == supported_modes[i].height &&
 			    supported_modes[i].hdr_mode == hdr->hdr_mode) {
-				sc430cs->cur_mode = &supported_modes[i];
+				sc401ai->cur_mode = &supported_modes[i];
 				break;
 			}
 		}
 		if (i == ARRAY_SIZE(supported_modes)) {
-			dev_err(&sc430cs->client->dev,
+			dev_err(&sc401ai->client->dev,
 				"not find hdr mode:%d %dx%d config\n",
 				hdr->hdr_mode, w, h);
 			ret = -EINVAL;
 		} else {
-			w = sc430cs->cur_mode->hts_def - sc430cs->cur_mode->width;
-			h = sc430cs->cur_mode->vts_def - sc430cs->cur_mode->height;
-			__v4l2_ctrl_modify_range(sc430cs->hblank, w, w, 1, w);
-			__v4l2_ctrl_modify_range(sc430cs->vblank, h,
-						 SC430CS_VTS_MAX - sc430cs->cur_mode->height, 1, h);
+			w = sc401ai->cur_mode->hts_def - sc401ai->cur_mode->width;
+			h = sc401ai->cur_mode->vts_def - sc401ai->cur_mode->height;
+			__v4l2_ctrl_modify_range(sc401ai->hblank, w, w, 1, w);
+			__v4l2_ctrl_modify_range(sc401ai->vblank, h,
+						 SC401AI_VTS_MAX - sc401ai->cur_mode->height, 1, h);
 		}
 		break;
 	case PREISP_CMD_SET_HDRAE_EXP:
@@ -748,11 +748,11 @@ static long sc430cs_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		stream = *((u32 *)arg);
 
 		if (stream)
-			ret = sc430cs_write_reg(sc430cs->client, SC430CS_REG_CTRL_MODE,
-				 SC430CS_REG_VALUE_08BIT, SC430CS_MODE_STREAMING);
+			ret = sc401ai_write_reg(sc401ai->client, SC401AI_REG_CTRL_MODE,
+				 SC401AI_REG_VALUE_08BIT, SC401AI_MODE_STREAMING);
 		else
-			ret = sc430cs_write_reg(sc430cs->client, SC430CS_REG_CTRL_MODE,
-				 SC430CS_REG_VALUE_08BIT, SC430CS_MODE_SW_STANDBY);
+			ret = sc401ai_write_reg(sc401ai->client, SC401AI_REG_CTRL_MODE,
+				 SC401AI_REG_VALUE_08BIT, SC401AI_MODE_SW_STANDBY);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -763,7 +763,7 @@ static long sc430cs_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 }
 
 #ifdef CONFIG_COMPAT
-static long sc430cs_compat_ioctl32(struct v4l2_subdev *sd,
+static long sc401ai_compat_ioctl32(struct v4l2_subdev *sd,
 				   unsigned int cmd, unsigned long arg)
 {
 	void __user *up = compat_ptr(arg);
@@ -782,7 +782,7 @@ static long sc430cs_compat_ioctl32(struct v4l2_subdev *sd,
 			return ret;
 		}
 
-		ret = sc430cs_ioctl(sd, cmd, inf);
+		ret = sc401ai_ioctl(sd, cmd, inf);
 		if (!ret)
 			ret = copy_to_user(up, inf, sizeof(*inf));
 		kfree(inf);
@@ -796,7 +796,7 @@ static long sc430cs_compat_ioctl32(struct v4l2_subdev *sd,
 
 		ret = copy_from_user(cfg, up, sizeof(*cfg));
 		if (!ret)
-			ret = sc430cs_ioctl(sd, cmd, cfg);
+			ret = sc401ai_ioctl(sd, cmd, cfg);
 		kfree(cfg);
 		break;
 	case RKMODULE_GET_HDR_CFG:
@@ -806,7 +806,7 @@ static long sc430cs_compat_ioctl32(struct v4l2_subdev *sd,
 			return ret;
 		}
 
-		ret = sc430cs_ioctl(sd, cmd, hdr);
+		ret = sc401ai_ioctl(sd, cmd, hdr);
 		if (!ret)
 			ret = copy_to_user(up, hdr, sizeof(*hdr));
 		kfree(hdr);
@@ -820,7 +820,7 @@ static long sc430cs_compat_ioctl32(struct v4l2_subdev *sd,
 
 		ret = copy_from_user(hdr, up, sizeof(*hdr));
 		if (!ret)
-			ret = sc430cs_ioctl(sd, cmd, hdr);
+			ret = sc401ai_ioctl(sd, cmd, hdr);
 		kfree(hdr);
 		break;
 	case PREISP_CMD_SET_HDRAE_EXP:
@@ -832,13 +832,13 @@ static long sc430cs_compat_ioctl32(struct v4l2_subdev *sd,
 
 		ret = copy_from_user(hdrae, up, sizeof(*hdrae));
 		if (!ret)
-			ret = sc430cs_ioctl(sd, cmd, hdrae);
+			ret = sc401ai_ioctl(sd, cmd, hdrae);
 		kfree(hdrae);
 		break;
 	case RKMODULE_SET_QUICK_STREAM:
 		ret = copy_from_user(&stream, up, sizeof(u32));
 		if (!ret)
-			ret = sc430cs_ioctl(sd, cmd, &stream);
+			ret = sc401ai_ioctl(sd, cmd, &stream);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -849,38 +849,38 @@ static long sc430cs_compat_ioctl32(struct v4l2_subdev *sd,
 }
 #endif
 
-static int __sc430cs_start_stream(struct sc430cs *sc430cs)
+static int __sc401ai_start_stream(struct sc401ai *sc401ai)
 {
 	int ret;
 
-	ret = sc430cs_write_array(sc430cs->client, sc430cs->cur_mode->reg_list);
+	ret = sc401ai_write_array(sc401ai->client, sc401ai->cur_mode->reg_list);
 	if (ret)
 		return ret;
 
 	/* In case these controls are set before streaming */
-	ret = __v4l2_ctrl_handler_setup(&sc430cs->ctrl_handler);
+	ret = __v4l2_ctrl_handler_setup(&sc401ai->ctrl_handler);
 	if (ret)
 		return ret;
 
-	return sc430cs_write_reg(sc430cs->client, SC430CS_REG_CTRL_MODE,
-				 SC430CS_REG_VALUE_08BIT, SC430CS_MODE_STREAMING);
+	return sc401ai_write_reg(sc401ai->client, SC401AI_REG_CTRL_MODE,
+				 SC401AI_REG_VALUE_08BIT, SC401AI_MODE_STREAMING);
 }
 
-static int __sc430cs_stop_stream(struct sc430cs *sc430cs)
+static int __sc401ai_stop_stream(struct sc401ai *sc401ai)
 {
-	return sc430cs_write_reg(sc430cs->client, SC430CS_REG_CTRL_MODE,
-				 SC430CS_REG_VALUE_08BIT, SC430CS_MODE_SW_STANDBY);
+	return sc401ai_write_reg(sc401ai->client, SC401AI_REG_CTRL_MODE,
+				 SC401AI_REG_VALUE_08BIT, SC401AI_MODE_SW_STANDBY);
 }
 
-static int sc430cs_s_stream(struct v4l2_subdev *sd, int on)
+static int sc401ai_s_stream(struct v4l2_subdev *sd, int on)
 {
-	struct sc430cs *sc430cs = to_sc430cs(sd);
-	struct i2c_client *client = sc430cs->client;
+	struct sc401ai *sc401ai = to_sc401ai(sd);
+	struct i2c_client *client = sc401ai->client;
 	int ret = 0;
 
-	mutex_lock(&sc430cs->mutex);
+	mutex_lock(&sc401ai->mutex);
 	on = !!on;
-	if (on == sc430cs->streaming)
+	if (on == sc401ai->streaming)
 		goto unlock_and_return;
 
 	if (on) {
@@ -890,35 +890,35 @@ static int sc430cs_s_stream(struct v4l2_subdev *sd, int on)
 			goto unlock_and_return;
 		}
 
-		ret = __sc430cs_start_stream(sc430cs);
+		ret = __sc401ai_start_stream(sc401ai);
 		if (ret) {
 			v4l2_err(sd, "start stream failed while write regs\n");
 			pm_runtime_put(&client->dev);
 			goto unlock_and_return;
 		}
 	} else {
-		__sc430cs_stop_stream(sc430cs);
+		__sc401ai_stop_stream(sc401ai);
 		pm_runtime_put(&client->dev);
 	}
 
-	sc430cs->streaming = on;
+	sc401ai->streaming = on;
 
 unlock_and_return:
-	mutex_unlock(&sc430cs->mutex);
+	mutex_unlock(&sc401ai->mutex);
 
 	return ret;
 }
 
-static int sc430cs_s_power(struct v4l2_subdev *sd, int on)
+static int sc401ai_s_power(struct v4l2_subdev *sd, int on)
 {
-	struct sc430cs *sc430cs = to_sc430cs(sd);
-	struct i2c_client *client = sc430cs->client;
+	struct sc401ai *sc401ai = to_sc401ai(sd);
+	struct i2c_client *client = sc401ai->client;
 	int ret = 0;
 
-	mutex_lock(&sc430cs->mutex);
+	mutex_lock(&sc401ai->mutex);
 
 	/* If the power state is not modified - no work to do. */
-	if (sc430cs->power_on == !!on)
+	if (sc401ai->power_on == !!on)
 		goto unlock_and_return;
 
 	if (on) {
@@ -928,148 +928,148 @@ static int sc430cs_s_power(struct v4l2_subdev *sd, int on)
 			goto unlock_and_return;
 		}
 
-		ret = sc430cs_write_array(sc430cs->client, sc430cs_global_regs);
+		ret = sc401ai_write_array(sc401ai->client, sc401ai_global_regs);
 		if (ret) {
 			v4l2_err(sd, "could not set init registers\n");
 			pm_runtime_put_noidle(&client->dev);
 			goto unlock_and_return;
 		}
 
-		sc430cs->power_on = true;
+		sc401ai->power_on = true;
 	} else {
 		pm_runtime_put(&client->dev);
-		sc430cs->power_on = false;
+		sc401ai->power_on = false;
 	}
 
 unlock_and_return:
-	mutex_unlock(&sc430cs->mutex);
+	mutex_unlock(&sc401ai->mutex);
 
 	return ret;
 }
 
 /* Calculate the delay in us by clock rate and clock cycles */
-static inline u32 sc430cs_cal_delay(u32 cycles)
+static inline u32 sc401ai_cal_delay(u32 cycles)
 {
-	return DIV_ROUND_UP(cycles, SC430CS_XVCLK_FREQ / 1000 / 1000);
+	return DIV_ROUND_UP(cycles, SC401AI_XVCLK_FREQ / 1000 / 1000);
 }
 
-static int __sc430cs_power_on(struct sc430cs *sc430cs)
+static int __sc401ai_power_on(struct sc401ai *sc401ai)
 {
 	int ret;
 	u32 delay_us;
-	struct device *dev = &sc430cs->client->dev;
+	struct device *dev = &sc401ai->client->dev;
 
-	if (!IS_ERR_OR_NULL(sc430cs->pins_default)) {
-		ret = pinctrl_select_state(sc430cs->pinctrl,
-					   sc430cs->pins_default);
+	if (!IS_ERR_OR_NULL(sc401ai->pins_default)) {
+		ret = pinctrl_select_state(sc401ai->pinctrl,
+					   sc401ai->pins_default);
 		if (ret < 0)
 			dev_err(dev, "could not set pins\n");
 	}
-	ret = clk_set_rate(sc430cs->xvclk, SC430CS_XVCLK_FREQ);
+	ret = clk_set_rate(sc401ai->xvclk, SC401AI_XVCLK_FREQ);
 	if (ret < 0)
 		dev_warn(dev, "Failed to set xvclk rate (24MHz)\n");
-	if (clk_get_rate(sc430cs->xvclk) != SC430CS_XVCLK_FREQ)
+	if (clk_get_rate(sc401ai->xvclk) != SC401AI_XVCLK_FREQ)
 		dev_warn(dev, "xvclk mismatched, modes are based on 24MHz\n");
-	ret = clk_prepare_enable(sc430cs->xvclk);
+	ret = clk_prepare_enable(sc401ai->xvclk);
 	if (ret < 0) {
 		dev_err(dev, "Failed to enable xvclk\n");
 		return ret;
 	}
-	if (!IS_ERR(sc430cs->reset_gpio))
-		gpiod_set_value_cansleep(sc430cs->reset_gpio, 0);
+	if (!IS_ERR(sc401ai->reset_gpio))
+		gpiod_set_value_cansleep(sc401ai->reset_gpio, 0);
 
-	ret = regulator_bulk_enable(SC430CS_NUM_SUPPLIES, sc430cs->supplies);
+	ret = regulator_bulk_enable(SC401AI_NUM_SUPPLIES, sc401ai->supplies);
 	if (ret < 0) {
 		dev_err(dev, "Failed to enable regulators\n");
 		goto disable_clk;
 	}
 
-	if (!IS_ERR(sc430cs->reset_gpio))
-		gpiod_set_value_cansleep(sc430cs->reset_gpio, 1);
+	if (!IS_ERR(sc401ai->reset_gpio))
+		gpiod_set_value_cansleep(sc401ai->reset_gpio, 1);
 
 	usleep_range(500, 1000);
-	if (!IS_ERR(sc430cs->pwdn_gpio))
-		gpiod_set_value_cansleep(sc430cs->pwdn_gpio, 1);
+	if (!IS_ERR(sc401ai->pwdn_gpio))
+		gpiod_set_value_cansleep(sc401ai->pwdn_gpio, 1);
 
-	if (!IS_ERR(sc430cs->reset_gpio))
+	if (!IS_ERR(sc401ai->reset_gpio))
 		usleep_range(6000, 8000);
 	else
 		usleep_range(12000, 16000);
 
 	/* 8192 cycles prior to first SCCB transaction */
-	delay_us = sc430cs_cal_delay(8192);
+	delay_us = sc401ai_cal_delay(8192);
 	usleep_range(delay_us, delay_us * 2);
 
 	return 0;
 
 disable_clk:
-	clk_disable_unprepare(sc430cs->xvclk);
+	clk_disable_unprepare(sc401ai->xvclk);
 
 	return ret;
 }
 
-static void __sc430cs_power_off(struct sc430cs *sc430cs)
+static void __sc401ai_power_off(struct sc401ai *sc401ai)
 {
 	int ret;
-	struct device *dev = &sc430cs->client->dev;
+	struct device *dev = &sc401ai->client->dev;
 
-	if (!IS_ERR(sc430cs->pwdn_gpio))
-		gpiod_set_value_cansleep(sc430cs->pwdn_gpio, 0);
-	clk_disable_unprepare(sc430cs->xvclk);
-	if (!IS_ERR(sc430cs->reset_gpio))
-		gpiod_set_value_cansleep(sc430cs->reset_gpio, 0);
-	if (!IS_ERR_OR_NULL(sc430cs->pins_sleep)) {
-		ret = pinctrl_select_state(sc430cs->pinctrl,
-					   sc430cs->pins_sleep);
+	if (!IS_ERR(sc401ai->pwdn_gpio))
+		gpiod_set_value_cansleep(sc401ai->pwdn_gpio, 0);
+	clk_disable_unprepare(sc401ai->xvclk);
+	if (!IS_ERR(sc401ai->reset_gpio))
+		gpiod_set_value_cansleep(sc401ai->reset_gpio, 0);
+	if (!IS_ERR_OR_NULL(sc401ai->pins_sleep)) {
+		ret = pinctrl_select_state(sc401ai->pinctrl,
+					   sc401ai->pins_sleep);
 		if (ret < 0)
 			dev_dbg(dev, "could not set pins\n");
 	}
-	regulator_bulk_disable(SC430CS_NUM_SUPPLIES, sc430cs->supplies);
+	regulator_bulk_disable(SC401AI_NUM_SUPPLIES, sc401ai->supplies);
 }
 
-static int sc430cs_runtime_resume(struct device *dev)
+static int sc401ai_runtime_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct sc430cs *sc430cs = to_sc430cs(sd);
+	struct sc401ai *sc401ai = to_sc401ai(sd);
 
-	return __sc430cs_power_on(sc430cs);
+	return __sc401ai_power_on(sc401ai);
 }
 
-static int sc430cs_runtime_suspend(struct device *dev)
+static int sc401ai_runtime_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct sc430cs *sc430cs = to_sc430cs(sd);
+	struct sc401ai *sc401ai = to_sc401ai(sd);
 
-	__sc430cs_power_off(sc430cs);
+	__sc401ai_power_off(sc401ai);
 
 	return 0;
 }
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
-static int sc430cs_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
+static int sc401ai_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
-	struct sc430cs *sc430cs = to_sc430cs(sd);
+	struct sc401ai *sc401ai = to_sc401ai(sd);
 	struct v4l2_mbus_framefmt *try_fmt =
 				v4l2_subdev_get_try_format(sd, fh->pad, 0);
-	const struct sc430cs_mode *def_mode = &supported_modes[0];
+	const struct sc401ai_mode *def_mode = &supported_modes[0];
 
-	mutex_lock(&sc430cs->mutex);
+	mutex_lock(&sc401ai->mutex);
 	/* Initialize try_fmt */
 	try_fmt->width = def_mode->width;
 	try_fmt->height = def_mode->height;
 	try_fmt->code = def_mode->bus_fmt;
 	try_fmt->field = V4L2_FIELD_NONE;
 
-	mutex_unlock(&sc430cs->mutex);
+	mutex_unlock(&sc401ai->mutex);
 	/* No crop or compose */
 
 	return 0;
 }
 #endif
 
-static int sc430cs_enum_frame_interval(struct v4l2_subdev *sd,
+static int sc401ai_enum_frame_interval(struct v4l2_subdev *sd,
 				       struct v4l2_subdev_pad_config *cfg,
 				       struct v4l2_subdev_frame_interval_enum *fie)
 {
@@ -1084,50 +1084,50 @@ static int sc430cs_enum_frame_interval(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static const struct dev_pm_ops sc430cs_pm_ops = {
-	SET_RUNTIME_PM_OPS(sc430cs_runtime_suspend,
-			   sc430cs_runtime_resume, NULL)
+static const struct dev_pm_ops sc401ai_pm_ops = {
+	SET_RUNTIME_PM_OPS(sc401ai_runtime_suspend,
+			   sc401ai_runtime_resume, NULL)
 };
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
-static const struct v4l2_subdev_internal_ops sc430cs_internal_ops = {
-	.open = sc430cs_open,
+static const struct v4l2_subdev_internal_ops sc401ai_internal_ops = {
+	.open = sc401ai_open,
 };
 #endif
 
-static const struct v4l2_subdev_core_ops sc430cs_core_ops = {
-	.s_power = sc430cs_s_power,
-	.ioctl = sc430cs_ioctl,
+static const struct v4l2_subdev_core_ops sc401ai_core_ops = {
+	.s_power = sc401ai_s_power,
+	.ioctl = sc401ai_ioctl,
 #ifdef CONFIG_COMPAT
-	.compat_ioctl32 = sc430cs_compat_ioctl32,
+	.compat_ioctl32 = sc401ai_compat_ioctl32,
 #endif
 };
 
-static const struct v4l2_subdev_video_ops sc430cs_video_ops = {
-	.s_stream = sc430cs_s_stream,
-	.g_frame_interval = sc430cs_g_frame_interval,
-	.g_mbus_config = sc430cs_g_mbus_config,
+static const struct v4l2_subdev_video_ops sc401ai_video_ops = {
+	.s_stream = sc401ai_s_stream,
+	.g_frame_interval = sc401ai_g_frame_interval,
+	.g_mbus_config = sc401ai_g_mbus_config,
 };
 
-static const struct v4l2_subdev_pad_ops sc430cs_pad_ops = {
-	.enum_mbus_code = sc430cs_enum_mbus_code,
-	.enum_frame_size = sc430cs_enum_frame_sizes,
-	.enum_frame_interval = sc430cs_enum_frame_interval,
-	.get_fmt = sc430cs_get_fmt,
-	.set_fmt = sc430cs_set_fmt,
+static const struct v4l2_subdev_pad_ops sc401ai_pad_ops = {
+	.enum_mbus_code = sc401ai_enum_mbus_code,
+	.enum_frame_size = sc401ai_enum_frame_sizes,
+	.enum_frame_interval = sc401ai_enum_frame_interval,
+	.get_fmt = sc401ai_get_fmt,
+	.set_fmt = sc401ai_set_fmt,
 };
 
-static const struct v4l2_subdev_ops sc430cs_subdev_ops = {
-	.core	= &sc430cs_core_ops,
-	.video	= &sc430cs_video_ops,
-	.pad	= &sc430cs_pad_ops,
+static const struct v4l2_subdev_ops sc401ai_subdev_ops = {
+	.core	= &sc401ai_core_ops,
+	.video	= &sc401ai_video_ops,
+	.pad	= &sc401ai_pad_ops,
 };
 
-static int sc430cs_set_ctrl(struct v4l2_ctrl *ctrl)
+static int sc401ai_set_ctrl(struct v4l2_ctrl *ctrl)
 {
-	struct sc430cs *sc430cs = container_of(ctrl->handler,
-					       struct sc430cs, ctrl_handler);
-	struct i2c_client *client = sc430cs->client;
+	struct sc401ai *sc401ai = container_of(ctrl->handler,
+					       struct sc401ai, ctrl_handler);
+	struct i2c_client *client = sc401ai->client;
 	s64 max;
 	int ret = 0;
 	u32 val = 0;
@@ -1136,11 +1136,11 @@ static int sc430cs_set_ctrl(struct v4l2_ctrl *ctrl)
 	switch (ctrl->id) {
 	case V4L2_CID_VBLANK:
 		/* Update max exposure while meeting expected vblanking */
-		max = sc430cs->cur_mode->height + ctrl->val - 4;
-		__v4l2_ctrl_modify_range(sc430cs->exposure,
-					 sc430cs->exposure->minimum, max,
-					 sc430cs->exposure->step,
-					 sc430cs->exposure->default_value);
+		max = sc401ai->cur_mode->height + ctrl->val - 4;
+		__v4l2_ctrl_modify_range(sc401ai->exposure,
+					 sc401ai->exposure->minimum, max,
+					 sc401ai->exposure->step,
+					 sc401ai->exposure->default_value);
 		break;
 	}
 
@@ -1149,56 +1149,56 @@ static int sc430cs_set_ctrl(struct v4l2_ctrl *ctrl)
 
 	switch (ctrl->id) {
 	case V4L2_CID_EXPOSURE:
-		if (sc430cs->cur_mode->hdr_mode == NO_HDR) {
+		if (sc401ai->cur_mode->hdr_mode == NO_HDR) {
 			val = ctrl->val << 1;
 			/* 4 least significant bits of expsoure are fractional part */
-			ret = sc430cs_write_reg(sc430cs->client,
-						SC430CS_REG_EXPOSURE_H,
-						SC430CS_REG_VALUE_08BIT,
-						SC430CS_FETCH_EXP_H(val));
-			ret |= sc430cs_write_reg(sc430cs->client,
-						 SC430CS_REG_EXPOSURE_M,
-						 SC430CS_REG_VALUE_08BIT,
-						 SC430CS_FETCH_EXP_M(val));
-			ret |= sc430cs_write_reg(sc430cs->client,
-						 SC430CS_REG_EXPOSURE_L,
-						 SC430CS_REG_VALUE_08BIT,
-						 SC430CS_FETCH_EXP_L(val));
+			ret = sc401ai_write_reg(sc401ai->client,
+						SC401AI_REG_EXPOSURE_H,
+						SC401AI_REG_VALUE_08BIT,
+						SC401AI_FETCH_EXP_H(val));
+			ret |= sc401ai_write_reg(sc401ai->client,
+						 SC401AI_REG_EXPOSURE_M,
+						 SC401AI_REG_VALUE_08BIT,
+						 SC401AI_FETCH_EXP_M(val));
+			ret |= sc401ai_write_reg(sc401ai->client,
+						 SC401AI_REG_EXPOSURE_L,
+						 SC401AI_REG_VALUE_08BIT,
+						 SC401AI_FETCH_EXP_L(val));
 		}
 		break;
 	case V4L2_CID_ANALOGUE_GAIN:
-		if (sc430cs->cur_mode->hdr_mode == NO_HDR)
-			ret = sc430cs_set_gain_reg(sc430cs, ctrl->val);
+		if (sc401ai->cur_mode->hdr_mode == NO_HDR)
+			ret = sc401ai_set_gain_reg(sc401ai, ctrl->val);
 		break;
 	case V4L2_CID_VBLANK:
-		ret = sc430cs_write_reg(sc430cs->client,
-					SC430CS_REG_VTS_H,
-					SC430CS_REG_VALUE_08BIT,
-					(ctrl->val + sc430cs->cur_mode->height)
+		ret = sc401ai_write_reg(sc401ai->client,
+					SC401AI_REG_VTS_H,
+					SC401AI_REG_VALUE_08BIT,
+					(ctrl->val + sc401ai->cur_mode->height)
 					>> 8);
-		ret |= sc430cs_write_reg(sc430cs->client,
-					 SC430CS_REG_VTS_L,
-					 SC430CS_REG_VALUE_08BIT,
-					 (ctrl->val + sc430cs->cur_mode->height)
+		ret |= sc401ai_write_reg(sc401ai->client,
+					 SC401AI_REG_VTS_L,
+					 SC401AI_REG_VALUE_08BIT,
+					 (ctrl->val + sc401ai->cur_mode->height)
 					 & 0xff);
-		sc430cs->cur_vts = ctrl->val + sc430cs->cur_mode->height;
+		sc401ai->cur_vts = ctrl->val + sc401ai->cur_mode->height;
 		break;
 	case V4L2_CID_TEST_PATTERN:
-		ret = sc430cs_enable_test_pattern(sc430cs, ctrl->val);
+		ret = sc401ai_enable_test_pattern(sc401ai, ctrl->val);
 		break;
 	case V4L2_CID_HFLIP:
-		ret = sc430cs_read_reg(sc430cs->client, SC430CS_FLIP_MIRROR_REG,
-				       SC430CS_REG_VALUE_08BIT, &val);
-		ret |= sc430cs_write_reg(sc430cs->client, SC430CS_FLIP_MIRROR_REG,
-					 SC430CS_REG_VALUE_08BIT,
-					 SC430CS_FETCH_MIRROR(val, ctrl->val));
+		ret = sc401ai_read_reg(sc401ai->client, SC401AI_FLIP_MIRROR_REG,
+				       SC401AI_REG_VALUE_08BIT, &val);
+		ret |= sc401ai_write_reg(sc401ai->client, SC401AI_FLIP_MIRROR_REG,
+					 SC401AI_REG_VALUE_08BIT,
+					 SC401AI_FETCH_MIRROR(val, ctrl->val));
 		break;
 	case V4L2_CID_VFLIP:
-		ret = sc430cs_read_reg(sc430cs->client, SC430CS_FLIP_MIRROR_REG,
-				       SC430CS_REG_VALUE_08BIT, &val);
-		ret |= sc430cs_write_reg(sc430cs->client, SC430CS_FLIP_MIRROR_REG,
-					 SC430CS_REG_VALUE_08BIT,
-					 SC430CS_FETCH_FLIP(val, ctrl->val));
+		ret = sc401ai_read_reg(sc401ai->client, SC401AI_FLIP_MIRROR_REG,
+				       SC401AI_REG_VALUE_08BIT, &val);
+		ret |= sc401ai_write_reg(sc401ai->client, SC401AI_FLIP_MIRROR_REG,
+					 SC401AI_REG_VALUE_08BIT,
+					 SC401AI_FETCH_FLIP(val, ctrl->val));
 		break;
 	default:
 		dev_warn(&client->dev, "%s Unhandled id:0x%x, val:0x%x\n",
@@ -1211,25 +1211,25 @@ static int sc430cs_set_ctrl(struct v4l2_ctrl *ctrl)
 	return ret;
 }
 
-static const struct v4l2_ctrl_ops sc430cs_ctrl_ops = {
-	.s_ctrl = sc430cs_set_ctrl,
+static const struct v4l2_ctrl_ops sc401ai_ctrl_ops = {
+	.s_ctrl = sc401ai_set_ctrl,
 };
 
-static int sc430cs_initialize_controls(struct sc430cs *sc430cs)
+static int sc401ai_initialize_controls(struct sc401ai *sc401ai)
 {
-	const struct sc430cs_mode *mode;
+	const struct sc401ai_mode *mode;
 	struct v4l2_ctrl_handler *handler;
 	struct v4l2_ctrl *ctrl;
 	s64 exposure_max, vblank_def;
 	u32 h_blank;
 	int ret;
 
-	handler = &sc430cs->ctrl_handler;
-	mode = sc430cs->cur_mode;
+	handler = &sc401ai->ctrl_handler;
+	mode = sc401ai->cur_mode;
 	ret = v4l2_ctrl_handler_init(handler, 9);
 	if (ret)
 		return ret;
-	handler->lock = &sc430cs->mutex;
+	handler->lock = &sc401ai->mutex;
 
 	ctrl = v4l2_ctrl_new_int_menu(handler, NULL, V4L2_CID_LINK_FREQ,
 				      0, 0, link_freq_menu_items);
@@ -1240,41 +1240,41 @@ static int sc430cs_initialize_controls(struct sc430cs *sc430cs)
 			  0, PIXEL_RATE_WITH_315M_10BIT, 1, PIXEL_RATE_WITH_315M_10BIT);
 
 	h_blank = mode->hts_def - mode->width;
-	sc430cs->hblank = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_HBLANK,
+	sc401ai->hblank = v4l2_ctrl_new_std(handler, NULL, V4L2_CID_HBLANK,
 					    h_blank, h_blank, 1, h_blank);
-	if (sc430cs->hblank)
-		sc430cs->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	if (sc401ai->hblank)
+		sc401ai->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	vblank_def = mode->vts_def - mode->height;
-	sc430cs->vblank = v4l2_ctrl_new_std(handler, &sc430cs_ctrl_ops,
+	sc401ai->vblank = v4l2_ctrl_new_std(handler, &sc401ai_ctrl_ops,
 					    V4L2_CID_VBLANK, vblank_def,
-					    SC430CS_VTS_MAX - mode->height,
+					    SC401AI_VTS_MAX - mode->height,
 					    1, vblank_def);
 	exposure_max = mode->vts_def - 4;
-	sc430cs->exposure = v4l2_ctrl_new_std(handler, &sc430cs_ctrl_ops,
-					      V4L2_CID_EXPOSURE, SC430CS_EXPOSURE_MIN,
-					      exposure_max, SC430CS_EXPOSURE_STEP,
+	sc401ai->exposure = v4l2_ctrl_new_std(handler, &sc401ai_ctrl_ops,
+					      V4L2_CID_EXPOSURE, SC401AI_EXPOSURE_MIN,
+					      exposure_max, SC401AI_EXPOSURE_STEP,
 					      mode->exp_def);
-	sc430cs->anal_gain = v4l2_ctrl_new_std(handler, &sc430cs_ctrl_ops,
-					       V4L2_CID_ANALOGUE_GAIN, SC430CS_GAIN_MIN,
-					       SC430CS_GAIN_MAX, SC430CS_GAIN_STEP,
-					       SC430CS_GAIN_DEFAULT);
-	sc430cs->test_pattern = v4l2_ctrl_new_std_menu_items(handler,
-							    &sc430cs_ctrl_ops,
+	sc401ai->anal_gain = v4l2_ctrl_new_std(handler, &sc401ai_ctrl_ops,
+					       V4L2_CID_ANALOGUE_GAIN, SC401AI_GAIN_MIN,
+					       SC401AI_GAIN_MAX, SC401AI_GAIN_STEP,
+					       SC401AI_GAIN_DEFAULT);
+	sc401ai->test_pattern = v4l2_ctrl_new_std_menu_items(handler,
+							    &sc401ai_ctrl_ops,
 					V4L2_CID_TEST_PATTERN,
-					ARRAY_SIZE(sc430cs_test_pattern_menu) - 1,
-					0, 0, sc430cs_test_pattern_menu);
-	v4l2_ctrl_new_std(handler, &sc430cs_ctrl_ops,
+					ARRAY_SIZE(sc401ai_test_pattern_menu) - 1,
+					0, 0, sc401ai_test_pattern_menu);
+	v4l2_ctrl_new_std(handler, &sc401ai_ctrl_ops,
 				V4L2_CID_HFLIP, 0, 1, 1, 0);
-	v4l2_ctrl_new_std(handler, &sc430cs_ctrl_ops,
+	v4l2_ctrl_new_std(handler, &sc401ai_ctrl_ops,
 				V4L2_CID_VFLIP, 0, 1, 1, 0);
 	if (handler->error) {
 		ret = handler->error;
-		dev_err(&sc430cs->client->dev,
+		dev_err(&sc401ai->client->dev,
 			"Failed to init controls(%d)\n", ret);
 		goto err_free_handler;
 	}
 
-	sc430cs->subdev.ctrl_handler = handler;
+	sc401ai->subdev.ctrl_handler = handler;
 
 	return 0;
 
@@ -1284,15 +1284,15 @@ err_free_handler:
 	return ret;
 }
 
-static int sc430cs_check_sensor_id(struct sc430cs *sc430cs,
+static int sc401ai_check_sensor_id(struct sc401ai *sc401ai,
 				   struct i2c_client *client)
 {
-	struct device *dev = &sc430cs->client->dev;
+	struct device *dev = &sc401ai->client->dev;
 	u32 id = 0;
 	int ret;
 
-	ret = sc430cs_read_reg(client, SC430CS_REG_CHIP_ID,
-			       SC430CS_REG_VALUE_16BIT, &id);
+	ret = sc401ai_read_reg(client, SC401AI_REG_CHIP_ID,
+			       SC401AI_REG_VALUE_16BIT, &id);
 	if (id != CHIP_ID) {
 		dev_err(dev, "Unexpected sensor id(%06x), ret(%d)\n", id, ret);
 		return -ENODEV;
@@ -1303,24 +1303,24 @@ static int sc430cs_check_sensor_id(struct sc430cs *sc430cs,
 	return 0;
 }
 
-static int sc430cs_configure_regulators(struct sc430cs *sc430cs)
+static int sc401ai_configure_regulators(struct sc401ai *sc401ai)
 {
 	unsigned int i;
 
-	for (i = 0; i < SC430CS_NUM_SUPPLIES; i++)
-		sc430cs->supplies[i].supply = sc430cs_supply_names[i];
+	for (i = 0; i < SC401AI_NUM_SUPPLIES; i++)
+		sc401ai->supplies[i].supply = sc401ai_supply_names[i];
 
-	return devm_regulator_bulk_get(&sc430cs->client->dev,
-				       SC430CS_NUM_SUPPLIES,
-				       sc430cs->supplies);
+	return devm_regulator_bulk_get(&sc401ai->client->dev,
+				       SC401AI_NUM_SUPPLIES,
+				       sc401ai->supplies);
 }
 
-static int sc430cs_probe(struct i2c_client *client,
+static int sc401ai_probe(struct i2c_client *client,
 			 const struct i2c_device_id *id)
 {
 	struct device *dev = &client->dev;
 	struct device_node *node = dev->of_node;
-	struct sc430cs *sc430cs;
+	struct sc401ai *sc401ai;
 	struct v4l2_subdev *sd;
 	char facing[2];
 	int ret;
@@ -1331,109 +1331,109 @@ static int sc430cs_probe(struct i2c_client *client,
 		 (DRIVER_VERSION & 0xff00) >> 8,
 		 DRIVER_VERSION & 0x00ff);
 
-	sc430cs = devm_kzalloc(dev, sizeof(*sc430cs), GFP_KERNEL);
-	if (!sc430cs)
+	sc401ai = devm_kzalloc(dev, sizeof(*sc401ai), GFP_KERNEL);
+	if (!sc401ai)
 		return -ENOMEM;
 
 	of_property_read_u32(node, OF_CAMERA_HDR_MODE, &hdr_mode);
 	ret = of_property_read_u32(node, RKMODULE_CAMERA_MODULE_INDEX,
-				   &sc430cs->module_index);
+				   &sc401ai->module_index);
 	ret |= of_property_read_string(node, RKMODULE_CAMERA_MODULE_FACING,
-				       &sc430cs->module_facing);
+				       &sc401ai->module_facing);
 	ret |= of_property_read_string(node, RKMODULE_CAMERA_MODULE_NAME,
-				       &sc430cs->module_name);
+				       &sc401ai->module_name);
 	ret |= of_property_read_string(node, RKMODULE_CAMERA_LENS_NAME,
-				       &sc430cs->len_name);
+				       &sc401ai->len_name);
 	if (ret) {
 		dev_err(dev, "could not get module information!\n");
 		return -EINVAL;
 	}
 
-	sc430cs->client = client;
+	sc401ai->client = client;
 	for (i = 0; i < ARRAY_SIZE(supported_modes); i++) {
 		if (hdr_mode == supported_modes[i].hdr_mode) {
-			sc430cs->cur_mode = &supported_modes[i];
+			sc401ai->cur_mode = &supported_modes[i];
 			break;
 		}
 	}
 	if (i == ARRAY_SIZE(supported_modes))
-		sc430cs->cur_mode = &supported_modes[0];
+		sc401ai->cur_mode = &supported_modes[0];
 
-	sc430cs->xvclk = devm_clk_get(dev, "xvclk");
-	if (IS_ERR(sc430cs->xvclk)) {
+	sc401ai->xvclk = devm_clk_get(dev, "xvclk");
+	if (IS_ERR(sc401ai->xvclk)) {
 		dev_err(dev, "Failed to get xvclk\n");
 		return -EINVAL;
 	}
 
-	sc430cs->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
-	if (IS_ERR(sc430cs->reset_gpio))
+	sc401ai->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
+	if (IS_ERR(sc401ai->reset_gpio))
 		dev_warn(dev, "Failed to get reset-gpios\n");
 
-	sc430cs->pwdn_gpio = devm_gpiod_get(dev, "pwdn", GPIOD_OUT_LOW);
-	if (IS_ERR(sc430cs->pwdn_gpio))
+	sc401ai->pwdn_gpio = devm_gpiod_get(dev, "pwdn", GPIOD_OUT_LOW);
+	if (IS_ERR(sc401ai->pwdn_gpio))
 		dev_warn(dev, "Failed to get pwdn-gpios\n");
 
-	sc430cs->pinctrl = devm_pinctrl_get(dev);
-	if (!IS_ERR(sc430cs->pinctrl)) {
-		sc430cs->pins_default =
-			pinctrl_lookup_state(sc430cs->pinctrl,
+	sc401ai->pinctrl = devm_pinctrl_get(dev);
+	if (!IS_ERR(sc401ai->pinctrl)) {
+		sc401ai->pins_default =
+			pinctrl_lookup_state(sc401ai->pinctrl,
 					     OF_CAMERA_PINCTRL_STATE_DEFAULT);
-		if (IS_ERR(sc430cs->pins_default))
+		if (IS_ERR(sc401ai->pins_default))
 			dev_err(dev, "could not get default pinstate\n");
 
-		sc430cs->pins_sleep =
-			pinctrl_lookup_state(sc430cs->pinctrl,
+		sc401ai->pins_sleep =
+			pinctrl_lookup_state(sc401ai->pinctrl,
 					     OF_CAMERA_PINCTRL_STATE_SLEEP);
-		if (IS_ERR(sc430cs->pins_sleep))
+		if (IS_ERR(sc401ai->pins_sleep))
 			dev_err(dev, "could not get sleep pinstate\n");
 	} else {
 		dev_err(dev, "no pinctrl\n");
 	}
 
-	ret = sc430cs_configure_regulators(sc430cs);
+	ret = sc401ai_configure_regulators(sc401ai);
 	if (ret) {
 		dev_err(dev, "Failed to get power regulators\n");
 		return ret;
 	}
 
-	mutex_init(&sc430cs->mutex);
+	mutex_init(&sc401ai->mutex);
 
-	sd = &sc430cs->subdev;
-	v4l2_i2c_subdev_init(sd, client, &sc430cs_subdev_ops);
-	ret = sc430cs_initialize_controls(sc430cs);
+	sd = &sc401ai->subdev;
+	v4l2_i2c_subdev_init(sd, client, &sc401ai_subdev_ops);
+	ret = sc401ai_initialize_controls(sc401ai);
 	if (ret)
 		goto err_destroy_mutex;
 
-	ret = __sc430cs_power_on(sc430cs);
+	ret = __sc401ai_power_on(sc401ai);
 	if (ret)
 		goto err_free_handler;
 
-	ret = sc430cs_check_sensor_id(sc430cs, client);
+	ret = sc401ai_check_sensor_id(sc401ai, client);
 	if (ret)
 		goto err_power_off;
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
-	sd->internal_ops = &sc430cs_internal_ops;
+	sd->internal_ops = &sc401ai_internal_ops;
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
 		     V4L2_SUBDEV_FL_HAS_EVENTS;
 #endif
 #if defined(CONFIG_MEDIA_CONTROLLER)
-	sc430cs->pad.flags = MEDIA_PAD_FL_SOURCE;
+	sc401ai->pad.flags = MEDIA_PAD_FL_SOURCE;
 	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
-	ret = media_entity_pads_init(&sd->entity, 1, &sc430cs->pad);
+	ret = media_entity_pads_init(&sd->entity, 1, &sc401ai->pad);
 	if (ret < 0)
 		goto err_power_off;
 #endif
 
 	memset(facing, 0, sizeof(facing));
-	if (strcmp(sc430cs->module_facing, "back") == 0)
+	if (strcmp(sc401ai->module_facing, "back") == 0)
 		facing[0] = 'b';
 	else
 		facing[0] = 'f';
 
 	snprintf(sd->name, sizeof(sd->name), "m%02d_%s_%s %s",
-		 sc430cs->module_index, facing,
-		 SC430CS_NAME, dev_name(sd->dev));
+		 sc401ai->module_index, facing,
+		 SC401AI_NAME, dev_name(sd->dev));
 	ret = v4l2_async_register_subdev_sensor_common(sd);
 	if (ret) {
 		dev_err(dev, "v4l2 async register subdev failed\n");
@@ -1451,71 +1451,71 @@ err_clean_entity:
 	media_entity_cleanup(&sd->entity);
 #endif
 err_power_off:
-	__sc430cs_power_off(sc430cs);
+	__sc401ai_power_off(sc401ai);
 err_free_handler:
-	v4l2_ctrl_handler_free(&sc430cs->ctrl_handler);
+	v4l2_ctrl_handler_free(&sc401ai->ctrl_handler);
 err_destroy_mutex:
-	mutex_destroy(&sc430cs->mutex);
+	mutex_destroy(&sc401ai->mutex);
 
 	return ret;
 }
 
-static int sc430cs_remove(struct i2c_client *client)
+static int sc401ai_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct sc430cs *sc430cs = to_sc430cs(sd);
+	struct sc401ai *sc401ai = to_sc401ai(sd);
 
 	v4l2_async_unregister_subdev(sd);
 #if defined(CONFIG_MEDIA_CONTROLLER)
 	media_entity_cleanup(&sd->entity);
 #endif
-	v4l2_ctrl_handler_free(&sc430cs->ctrl_handler);
-	mutex_destroy(&sc430cs->mutex);
+	v4l2_ctrl_handler_free(&sc401ai->ctrl_handler);
+	mutex_destroy(&sc401ai->mutex);
 
 	pm_runtime_disable(&client->dev);
 	if (!pm_runtime_status_suspended(&client->dev))
-		__sc430cs_power_off(sc430cs);
+		__sc401ai_power_off(sc401ai);
 	pm_runtime_set_suspended(&client->dev);
 
 	return 0;
 }
 
 #if IS_ENABLED(CONFIG_OF)
-static const struct of_device_id sc430cs_of_match[] = {
-	{ .compatible = "smartsens,sc430cs" },
+static const struct of_device_id sc401ai_of_match[] = {
+	{ .compatible = "smartsens,sc401ai" },
 	{},
 };
-MODULE_DEVICE_TABLE(of, sc430cs_of_match);
+MODULE_DEVICE_TABLE(of, sc401ai_of_match);
 #endif
 
-static const struct i2c_device_id sc430cs_match_id[] = {
-	{ "smartsens,sc430cs", 0 },
+static const struct i2c_device_id sc401ai_match_id[] = {
+	{ "smartsens,sc401ai", 0 },
 	{ },
 };
 
-static struct i2c_driver sc430cs_i2c_driver = {
+static struct i2c_driver sc401ai_i2c_driver = {
 	.driver = {
-		.name = SC430CS_NAME,
-		.pm = &sc430cs_pm_ops,
-		.of_match_table = of_match_ptr(sc430cs_of_match),
+		.name = SC401AI_NAME,
+		.pm = &sc401ai_pm_ops,
+		.of_match_table = of_match_ptr(sc401ai_of_match),
 	},
-	.probe		= &sc430cs_probe,
-	.remove		= &sc430cs_remove,
-	.id_table	= sc430cs_match_id,
+	.probe		= &sc401ai_probe,
+	.remove		= &sc401ai_remove,
+	.id_table	= sc401ai_match_id,
 };
 
 static int __init sensor_mod_init(void)
 {
-	return i2c_add_driver(&sc430cs_i2c_driver);
+	return i2c_add_driver(&sc401ai_i2c_driver);
 }
 
 static void __exit sensor_mod_exit(void)
 {
-	i2c_del_driver(&sc430cs_i2c_driver);
+	i2c_del_driver(&sc401ai_i2c_driver);
 }
 
 device_initcall_sync(sensor_mod_init);
 module_exit(sensor_mod_exit);
 
-MODULE_DESCRIPTION("smartsens sc430cs sensor driver");
+MODULE_DESCRIPTION("smartsens sc401ai sensor driver");
 MODULE_LICENSE("GPL v2");

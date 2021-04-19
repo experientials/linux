@@ -1045,6 +1045,9 @@ static void rkispp_start_3a_run(struct rkispp_device *dev)
 	};
 	int ret;
 
+	if (!params_vdev->is_subs_evt)
+		return;
+
 	v4l2_event_queue(vdev, &ev);
 	ret = wait_event_timeout(dev->sync_onoff,
 			params_vdev->streamon && !params_vdev->first_params,
@@ -1065,6 +1068,9 @@ static void rkispp_stop_3a_run(struct rkispp_device *dev)
 		.type = CIFISP_V4L2_EVENT_STREAM_STOP,
 	};
 	int ret;
+
+	if (!params_vdev->is_subs_evt)
+		return;
 
 	v4l2_event_queue(vdev, &ev);
 	ret = wait_event_timeout(dev->sync_onoff, !params_vdev->streamon,
@@ -2010,6 +2016,18 @@ static const struct v4l2_file_operations rkispp_fops = {
 	.mmap = vb2_fop_mmap,
 };
 
+static int rkispp_enum_input(struct file *file, void *priv,
+			struct v4l2_input *input)
+{
+	if (input->index > 0)
+		return -EINVAL;
+
+	input->type = V4L2_INPUT_TYPE_CAMERA;
+	strscpy(input->name, "Camera", sizeof(input->name));
+
+	return 0;
+}
+
 static int rkispp_try_fmt_vid_mplane(struct file *file, void *fh,
 					 struct v4l2_format *f)
 {
@@ -2087,6 +2105,7 @@ static const struct v4l2_ioctl_ops rkispp_v4l2_ioctl_ops = {
 	.vidioc_prepare_buf = vb2_ioctl_prepare_buf,
 	.vidioc_streamon = vb2_ioctl_streamon,
 	.vidioc_streamoff = vb2_ioctl_streamoff,
+	.vidioc_enum_input = rkispp_enum_input,
 	.vidioc_try_fmt_vid_cap_mplane = rkispp_try_fmt_vid_mplane,
 	.vidioc_enum_fmt_vid_cap_mplane = rkispp_enum_fmt_vid_mplane,
 	.vidioc_s_fmt_vid_cap_mplane = rkispp_s_fmt_vid_mplane,
