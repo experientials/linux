@@ -202,9 +202,9 @@
 &pmu_io_domains {
 	status = "okay";
 
-	pmuio0-supply = <&vcc3v3_sys>;
+	pmuio0-supply = <&vcc_1v8>;
 	pmuio1-supply = <&vcc3v3_sys>;
-	vccio2-supply = <&vcc3v3_sys>;
+	vccio3-supply = <&vcc_1v8>;
 	vccio4-supply = <&vcc_1v8>;
 	vccio5-supply = <&vcc3v3_sys>;
 	vccio6-supply = <&vcc3v3_sys>;
