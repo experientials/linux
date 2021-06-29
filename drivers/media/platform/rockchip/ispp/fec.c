@@ -42,7 +42,7 @@ static int fec_running(struct rkispp_fec_dev *fec,
 		 buf->out_fourcc >> 16, buf->out_fourcc >> 24);
 
 	if (clk_get_rate(fec->hw->clks[0]) <= fec->hw->core_clk_min)
-		clk_set_rate(fec->hw->clks[0], fec->hw->core_clk_max);
+		rkispp_set_clk_rate(fec->hw->clks[0], fec->hw->core_clk_max);
 
 	init_completion(&fec->cmpl);
 	density = w > 1920 ? SW_MESH_DENSITY : 0;
@@ -295,7 +295,8 @@ static int fec_running(struct rkispp_fec_dev *fec,
 		 RKISPP_FEC_CORE_CTRL, readl(base + RKISPP_FEC_CORE_CTRL),
 		 RKISPP_FEC_PIC_SIZE, readl(base + RKISPP_FEC_PIC_SIZE),
 		 RKISPP_FEC_MESH_SIZE, readl(base + RKISPP_FEC_MESH_SIZE));
-	writel(FEC_ST, base + RKISPP_CTRL_STRT);
+	if (!fec->hw->is_shutdown)
+		writel(FEC_ST, base + RKISPP_CTRL_STRT);
 
 	ret = wait_for_completion_timeout(&fec->cmpl, msecs_to_jiffies(300));
 	if (!ret) {

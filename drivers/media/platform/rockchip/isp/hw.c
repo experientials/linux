@@ -568,7 +568,10 @@ static void isp_config_clk(struct rkisp_hw_dev *dev, int on)
 		      CLK_CTRL_MI_Y12 | CLK_CTRL_MI_SP |
 		      CLK_CTRL_MI_RAW0 | CLK_CTRL_MI_RAW1 |
 		      CLK_CTRL_MI_READ | CLK_CTRL_MI_RAWRD |
-		      CLK_CTRL_ISP_3A | CLK_CTRL_ISP_RAW;
+		      CLK_CTRL_ISP_RAW;
+
+		if (dev->isp_ver == ISP_V20 && on)
+			val |= CLK_CTRL_ISP_3A;
 		writel(val, dev->base_addr + CTRL_VI_ISP_CLK_CTRL);
 	}
 }
@@ -601,8 +604,8 @@ static int enable_sys_clk(struct rkisp_hw_dev *dev)
 		}
 	}
 
-	clk_set_rate(dev->clks[0], dev->clk_rate_tbl[0].clk_rate * 1000000UL);
-
+	rkisp_set_clk_rate(dev->clks[0],
+			   dev->clk_rate_tbl[0].clk_rate * 1000000UL);
 	rkisp_soft_reset(dev);
 	isp_config_clk(dev, true);
 
@@ -693,6 +696,12 @@ static int rkisp_hw_probe(struct platform_device *pdev)
 		hw_dev->reset = NULL;
 	}
 
+	ret = of_property_read_u64(node, "rockchip,iq-feature", &hw_dev->iq_feature);
+	if (!ret)
+		hw_dev->is_feature_on = true;
+	else
+		hw_dev->is_feature_on = false;
+
 	hw_dev->dev_num = 0;
 	hw_dev->cur_dev_id = 0;
 	hw_dev->mipi_dev_id = 0;
@@ -702,10 +711,13 @@ static int rkisp_hw_probe(struct platform_device *pdev)
 	atomic_set(&hw_dev->refcnt, 0);
 	spin_lock_init(&hw_dev->buf_lock);
 	INIT_LIST_HEAD(&hw_dev->list);
+	INIT_LIST_HEAD(&hw_dev->rpt_list);
 	hw_dev->is_idle = true;
 	hw_dev->is_single = true;
 	hw_dev->is_mi_update = false;
 	hw_dev->is_dma_contig = true;
+	hw_dev->is_buf_init = false;
+	hw_dev->is_shutdown = false;
 	hw_dev->is_mmu = is_iommu_enable(dev);
 	ret = of_reserved_mem_device_init(dev);
 	if (ret) {
@@ -735,6 +747,16 @@ static int rkisp_hw_remove(struct platform_device *pdev)
 	pm_runtime_disable(&pdev->dev);
 	mutex_destroy(&hw_dev->dev_lock);
 	return 0;
+}
+
+static void rkisp_hw_shutdown(struct platform_device *pdev)
+{
+	struct rkisp_hw_dev *hw_dev = platform_get_drvdata(pdev);
+
+	hw_dev->is_shutdown = true;
+	if (pm_runtime_active(&pdev->dev))
+		writel(0xffff, hw_dev->base_addr + CIF_IRCL);
+	dev_info(&pdev->dev, "%s\n", __func__);
 }
 
 static int __maybe_unused rkisp_runtime_suspend(struct device *dev)
@@ -782,6 +804,7 @@ static struct platform_driver rkisp_hw_drv = {
 	},
 	.probe = rkisp_hw_probe,
 	.remove = rkisp_hw_remove,
+	.shutdown = rkisp_hw_shutdown,
 };
 
 #if IS_BUILTIN(CONFIG_VIDEO_ROCKCHIP_ISP) && IS_BUILTIN(CONFIG_VIDEO_ROCKCHIP_ISPP)
