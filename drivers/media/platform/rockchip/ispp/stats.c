@@ -46,7 +46,7 @@ static int rkispp_stats_frame_end(struct rkispp_stats_vdev *stats_vdev)
 	if (stats_vdev->curr_buf) {
 		u64 ns = ktime_get_ns();
 		u32 total_num = readl(base + RKISPP_ORB_TOTAL_NUM);
-		u32 cur_frame_id = atomic_read(&dev->ispp_sdev.frm_sync_seq) - 1;
+		u32 cur_frame_id = dev->ispp_sdev.frm_sync_seq;
 		void *vaddr;
 
 		curr_buf = stats_vdev->curr_buf;
@@ -214,6 +214,7 @@ static void rkispp_stats_vb2_buf_queue(struct vb2_buffer *vb)
 	struct rkispp_stats_vdev *stats_dev = vq->drv_priv;
 	unsigned long lock_flags = 0;
 
+	vb2_plane_vaddr(vb, 0);
 	if (stats_dev->dev->hw_dev->is_mmu) {
 		struct sg_table *sgt = vb2_dma_sg_plane_desc(vb, 0);
 

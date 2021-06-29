@@ -427,16 +427,27 @@ config VIDEO_TC35874X
 	  To compile this driver as a module, choose M here: the
 	  module will be called tc35874x.
 
-config VIDEO_TP2855
-	tristate "TechPoint TP2855 sensor support"
+config VIDEO_RK628_CSI
+	tristate "Rockchip RK628_CSI decoder"
+	depends on VIDEO_V4L2 && I2C && VIDEO_V4L2_SUBDEV_API
+	select HDMI
+	select V4L2_FWNODE
+	help
+	  Support for the Rockchip RK628 HDMI to MIPI CSI-2 bridge.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called rk628-csi.
+
+config VIDEO_TECHPOINT
+	tristate "TechPoint decoder"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
 	depends on MEDIA_CAMERA_SUPPORT
 	help
-	  This is a Video4Linux2 sensor driver for the TechPoint
-	  TP2855 camera.
+	  Support for the TechPoint Multichannel digital decode to
+	  MIPI CSI-2 bridge.
 
 	  To compile this driver as a module, choose M here: the
-	  module will be called tp2855.
+	  module will be called TechPoint.
 
 config VIDEO_TVP514X
 	tristate "Texas Instruments TVP514x video decoder"
@@ -779,6 +790,15 @@ config VIDEO_IMX415
 	  To compile this driver as a module, choose M here: the
 	  module will be called imx415.
 
+config VIDEO_OS02G10
+	tristate "OmniVision OS02G10 sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the OmniVision
+	  OS02G10 camera.
+
 config VIDEO_OS04A10
 	tristate "OmniVision OS04A10 sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
@@ -787,6 +807,15 @@ config VIDEO_OS04A10
 	help
 	  This is a Video4Linux2 sensor driver for the OmniVision
 	  OS04A10 camera.
+
+config VIDEO_OS04C10
+	tristate "OmniVision OS04C10 sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  This is a Video4Linux2 sensor driver for the OmniVision
+	  OS04C10 camera.
 
 config VIDEO_OS05A20
 	tristate "OmniVision OS05A20 sensor support"
@@ -1327,6 +1356,17 @@ config VIDEO_S5C73M3
 	  This is a V4L2 sensor driver for Samsung S5C73M3
 	  8 Mpixel camera.
 
+config VIDEO_GC02M2
+	tristate "GalaxyCore GC02M2 sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  Support for the GalaxyCore GC02M2 sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called gc02m2.
+
 config VIDEO_GC0312
 	tristate "GalaxyCore GC0312 sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
@@ -1646,6 +1686,17 @@ config VIDEO_SC2310
 	  To compile this driver as a module, choose M here: the
 	  module will be called sc2310.
 
+config VIDEO_SC401AI
+	tristate "SmartSens SC401AI sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	depends on MEDIA_CAMERA_SUPPORT
+	select V4L2_FWNODE
+	help
+	  Support for the SmartSens SC401AI sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called SC401AI.
+
 config VIDEO_SC4238
 	tristate "SmartSens SC4238 sensor support"
 	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
@@ -1807,6 +1858,15 @@ config VIDEO_NVP6188
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called nvp6188.
+
+config VIDEO_NVP6324
+	tristate "NEXTCHIP nvp6324 driver support"
+	depends on VIDEO_V4L2 && I2C
+	---help---
+	  Support for the NVP6324.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called jaguar1_drv.
 
 config VIDEO_HALL_DC_MOTOR
 	tristate "Hall dc-motor driver for camera iris"
