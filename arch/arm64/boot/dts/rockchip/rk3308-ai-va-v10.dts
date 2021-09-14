@@ -176,6 +176,15 @@
 		regulator-max-microvolt = <3300000>;
 	};
 
+	vccio_flash: vccio-flash {
+		compatible = "regulator-fixed";
+		regulator-name = "vccio_flash";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+	};
+
 	wireless-bluetooth {
 		compatible = "bluetooth-platdata";
 		uart_rts_gpios = <&gpio4 RK_PA7 GPIO_ACTIVE_LOW>;
@@ -226,7 +235,7 @@
 	vccio0-supply = <&vcc_io>;
 	vccio1-supply = <&vcc_io>;
 	vccio2-supply = <&vcc_1v8>;
-	vccio3-supply = <&vcc_io>;
+	vccio3-supply = <&vccio_flash>;
 	vccio4-supply = <&vccio_sdio>;
 	vccio5-supply = <&vcc_io>;
 };
@@ -595,19 +604,19 @@
 
 	buttons {
 		mic_mute: mic-mute {
-			rockchip,pins = <0 RK_PC0 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <0 RK_PC0 0 &pcfg_pull_up>;
 		};
 	};
 	rotary {
 		rotary_gpio: rotary-gpio {
 			rockchip,pins =
-				<2 RK_PB3 RK_FUNC_GPIO &pcfg_pull_none>,
-				<2 RK_PB4 RK_FUNC_GPIO &pcfg_pull_none>;
+				<2 RK_PB3 0 &pcfg_pull_none>,
+				<2 RK_PB4 0 &pcfg_pull_none>;
 		};
 	};
 	sdio-pwrseq {
 		wifi_enable_h: wifi-enable-h {
-			rockchip,pins = <0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <0 RK_PA2 0 &pcfg_pull_none>;
 		};
 	};
 };

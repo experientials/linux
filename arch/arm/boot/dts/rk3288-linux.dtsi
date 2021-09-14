@@ -8,7 +8,7 @@
 
 / {
 	chosen {
-		bootargs = "earlyprintk console=ttyFIQ0 rw root=PARTUUID=614e0000-0000 rootfstype=ext4 rootwait";
+		bootargs = "earlycon=uart8250,mmio32,0xff690000 vmalloc=496M rw root=PARTUUID=614e0000-0000 rootfstype=ext4 rootwait";
 	};
 
 	/delete-node/ dmc@ff610000;
@@ -84,15 +84,6 @@
 		};
 	};
 
-	ramoops {
-		compatible = "ramoops";
-		record-size = <0x0 0x20000>;
-		console-size = <0x0 0x80000>;
-		ftrace-size = <0x0 0x00000>;
-		pmsg-size = <0x0 0x50000>;
-		memory-region = <&ramoops_mem>;
-	};
-
 	fiq-debugger {
 		compatible = "rockchip,fiq-debugger";
 		interrupts = <GIC_SPI 155 IRQ_TYPE_LEVEL_HIGH>;
@@ -109,6 +100,8 @@
 		compatible = "arm,psci-1.0";
 		method = "smc";
 	};
+
+	/delete-node/ timer@ff810000;
 
 	display-subsystem {
 		status = "okay";
@@ -190,31 +183,32 @@
 	compatible = "rockchip,rk3288-secure-efuse";
 };
 
-/* HACK: keep MALI version on linux */
-&gpu_power_model {
-	// for DDK r14.
-	voltage = <900>;
-	frequency = <500>;
-	static-power = <300>;
-	dynamic-power = <396>;
-};
-
-&rga {
-	compatible = "rockchip,rga2";
-	clocks = <&cru ACLK_RGA>, <&cru HCLK_RGA>, <&cru SCLK_RGA>;
-	clock-names = "aclk_rga", "hclk_rga", "clk_rga";
-	assigned-clocks = <&cru ACLK_RGA>, <&cru SCLK_RGA>;
-	assigned-clock-rates = <300000000>, <300000000>;
-	dma-coherent;
+&mpp_srv {
 	status = "okay";
 };
 
-&rockchip_suspend {
+&hevc {
+	status = "okay";
+};
+
+&hevc_mmu {
 	status = "okay";
 };
 
 &uart2 {
 	status = "disabled";
+};
+
+&vdpu {
+	status = "okay";
+};
+
+&vepu {
+	status = "okay";
+};
+
+&vpu_mmu {
+	status = "okay";
 };
 
 &video_phy {

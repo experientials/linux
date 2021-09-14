@@ -24,6 +24,8 @@
 #include <video/videomode.h>
 #include <asm/unaligned.h>
 
+#include "../rockchip_drm_drv.h"
+
 #define HOSTREG(x)		((x) + 0x1000)
 #define DSI_VERSION		HOSTREG(0x0000)
 #define DSI_PWR_UP		HOSTREG(0x0004)
@@ -235,6 +237,7 @@ struct rk618_dsi {
 	struct rk618 *parent;
 	struct regmap *regmap;
 	struct clk *clock;
+	struct rockchip_drm_sub_dev sub_dev;
 };
 
 enum {
@@ -293,13 +296,9 @@ static void rk618_dsi_set_hs_clk(struct rk618_dsi *dsi)
 
 		bandwidth = (u64)mode->clock * 1000 * bpp;
 		do_div(bandwidth, lanes);
-
-		/* take 1 / 0.9, since mbps must big than bandwidth of RGB */
-		bandwidth *= 10;
-		do_div(bandwidth, 9);
-
-		do_div(bandwidth, USEC_PER_SEC);
-		bandwidth *= USEC_PER_SEC;
+		bandwidth = div_u64(bandwidth * 10, 9);
+		bandwidth = div_u64(bandwidth, USEC_PER_SEC);
+		bandwidth = bandwidth * USEC_PER_SEC;
 		fout = bandwidth;
 	}
 
@@ -658,6 +657,9 @@ static int rk618_dsi_pre_enable(struct rk618_dsi *dsi)
 	regmap_update_bits(dsi->regmap, DSI_PHY_RSTZ,
 			   PHY_ENABLECLK, PHY_ENABLECLK);
 
+	regmap_write(dsi->regmap, DSI_INT_MSK0, 0);
+	regmap_write(dsi->regmap, DSI_INT_MSK1, 0);
+
 	regmap_update_bits(dsi->regmap, DSI_VID_MODE_CFG, EN_VIDEO_MODE, 0);
 	regmap_update_bits(dsi->regmap, DSI_CMD_MODE_CFG,
 			   EN_CMD_MODE, EN_CMD_MODE);
@@ -758,7 +760,6 @@ static void rk618_dsi_connector_destroy(struct drm_connector *connector)
 }
 
 static const struct drm_connector_funcs rk618_dsi_connector_funcs = {
-	.dpms = drm_atomic_helper_connector_dpms,
 	.detect = rk618_dsi_connector_detect,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.destroy = rk618_dsi_connector_destroy,
@@ -806,12 +807,9 @@ static void rk618_dsi_bridge_mode_set(struct drm_bridge *bridge,
 static int rk618_dsi_bridge_attach(struct drm_bridge *bridge)
 {
 	struct rk618_dsi *dsi = bridge_to_dsi(bridge);
-	struct device *dev = dsi->dev;
 	struct drm_connector *connector = &dsi->connector;
 	struct drm_device *drm = bridge->dev;
 	int ret;
-
-	connector->port = dev->of_node;
 
 	ret = drm_connector_init(drm, connector, &rk618_dsi_connector_funcs,
 				 DRM_MODE_CONNECTOR_DSI);
@@ -821,19 +819,30 @@ static int rk618_dsi_bridge_attach(struct drm_bridge *bridge)
 	}
 
 	drm_connector_helper_add(connector, &rk618_dsi_connector_helper_funcs);
-	drm_mode_connector_attach_encoder(connector, bridge->encoder);
+	drm_connector_attach_encoder(connector, bridge->encoder);
 
 	ret = drm_panel_attach(dsi->panel, connector);
 	if (ret) {
 		dev_err(dsi->dev, "Failed to attach panel\n");
 		return ret;
 	}
+	dsi->sub_dev.connector = &dsi->connector;
+	dsi->sub_dev.of_node = dsi->dev->of_node;
+	rockchip_drm_register_sub_dev(&dsi->sub_dev);
 
 	return 0;
 }
 
+static void rk618_dsi_bridge_detach(struct drm_bridge *bridge)
+{
+	struct rk618_dsi *dsi = bridge_to_dsi(bridge);
+
+	rockchip_drm_unregister_sub_dev(&dsi->sub_dev);
+}
+
 static const struct drm_bridge_funcs rk618_dsi_bridge_funcs = {
 	.attach = rk618_dsi_bridge_attach,
+	.detach = rk618_dsi_bridge_detach,
 	.mode_set = rk618_dsi_bridge_mode_set,
 	.enable = rk618_dsi_bridge_enable,
 	.disable = rk618_dsi_bridge_disable,
@@ -1137,10 +1146,6 @@ static int rk618_dsi_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	/* Mask all interrupts */
-	regmap_write(dsi->regmap, DSI_INT_MSK0, 0xffffffff);
-	regmap_write(dsi->regmap, DSI_INT_MSK1, 0xffffffff);
-
 	dsi->phy.regmap = devm_regmap_init_i2c(rk618->client,
 					       &rk618_dsi_phy_regmap_config);
 	if (IS_ERR(dsi->phy.regmap)) {
@@ -1151,11 +1156,7 @@ static int rk618_dsi_probe(struct platform_device *pdev)
 
 	dsi->base.funcs = &rk618_dsi_bridge_funcs;
 	dsi->base.of_node = dev->of_node;
-	ret = drm_bridge_add(&dsi->base);
-	if (ret) {
-		dev_err(dev, "failed to add drm_bridge: %d\n", ret);
-		return ret;
-	}
+	drm_bridge_add(&dsi->base);
 
 	dsi->host.dev = dev;
 	dsi->host.ops = &rk618_dsi_host_ops;

@@ -1,8 +1,7 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Broadcom device-specific manifest constants.
  *
- * Copyright (C) 1999-2018, Broadcom Corporation
+ * Copyright (C) 1999-2017, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -25,7 +24,7 @@
  *
  * <<Broadcom-WL-IPTag/Open:>>
  *
- * $Id: bcmdevs.h 708808 2018-11-27 03:12:35Z $
+ * $Id: bcmdevs.h 596448 2015-11-01 13:29:01Z $
  */
 
 #ifndef	_BCMDEVS_H
@@ -56,7 +55,6 @@
 #define	VENDOR_BROADCOM_SDIO	0x00BF
 
 /* DONGLE VID/PIDs */
-#define CY_DNGL_VID             0x04b4
 #define BCM_DNGL_VID		0x0a5c
 #define BCM_DNGL_BL_PID_4328	0xbd12
 #define BCM_DNGL_BL_PID_4322	0xbd13
@@ -79,7 +77,6 @@
 #define BCM_DNGL_BL_PID_4354	0xbd26
 #define BCM_DNGL_BL_PID_43569   0xbd27
 #define BCM_DNGL_BL_PID_43909	0xbd28
-#define BCM_DNGL_BL_PID_4373    0xbd29
 
 #define BCM_DNGL_BDC_PID	0x0bdc
 #define BCM_DNGL_JTAG_PID	0x4a44
@@ -278,10 +275,6 @@
 #define BCM4356_D11AC2G_ID	0x43ed		/* 4356 802.11ac 2.4G device */
 #define BCM4356_D11AC5G_ID	0x43ee		/* 4356 802.11ac 5G device */
 
-#define BCM4373_D11AC_ID	0x4418		/* 4373 802.11ac dualband device */
-#define BCM4373_D11AC2G_ID	0x4419		/* 4373 802.11ac 2.4G device */
-#define BCM4373_D11AC5G_ID	0x441a		/* 4373 802.11ac 5G device */
-
 #define	BCMGPRS_UART_ID		0x4333		/* Uart id used by 4306/gprs card */
 #define	BCMGPRS2_UART_ID	0x4344		/* Uart id used by 4306/gprs card */
 #define FPGA_JTAGM_ID		0x43f0		/* FPGA jtagm device id */
@@ -320,7 +313,6 @@
 #define	BCM4716_DEVICE_ID	0x4722		/* 4716 base devid */
 #define	BCM47XX_USB30H_ID	0x472a		/* 47xx usb 3.0 host */
 #define	BCM47XX_USB30D_ID	0x472b		/* 47xx usb 3.0 device */
-#define BCM47XX_USBHUB_ID	0x472c		/* 47xx usb hub */
 #define BCM47XX_SMBUS_EMU_ID	0x47fe		/* 47xx emulated SMBus device */
 #define	BCM47XX_XOR_EMU_ID	0x47ff		/* 47xx emulated XOR engine */
 #define	EPI41210_DEVICE_ID	0xa0fa		/* bcm4210 */
@@ -487,7 +479,6 @@
 #define BCM53573_CHIP(chipid)	(CHIPID(chipid) == BCM53573_CHIP_ID)
 #define BCM53573_CHIP_GRPID	BCM53573_CHIP_ID
 #define	BCM43012_CHIP_ID	0xA804		/* 43012 chipcommon chipid */
-#define BCM4373_CHIP_ID		0x4373		/* 4373 chipcommon chipid */
 
 /* Package IDs */
 #define	BCM4303_PKG_ID		2		/* 4303 package id */

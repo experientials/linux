@@ -59,7 +59,7 @@ static char chip_type;
 	#include "gsl3680_tab106.h"
 	#define TP_SIZE_1366X768
 	#define Y_POL
-#elif defined(CONFIG_TOUCHSCREEN_GSL3673)
+#elif IS_ENABLED(CONFIG_TOUCHSCREEN_GSL3673)
 	#include "gsl3673.h"
 #else
 	#include "gsl3680b_zm97f.h"
@@ -238,8 +238,18 @@ static int gsl3673_init(void)
 
 	this_ts->irq = of_get_named_gpio_flags(np, "irq_gpio_number", 0,
 				(enum of_gpio_flags *)&irq_flags);
+	if (!gpio_is_valid(this_ts->irq)) {
+		dev_err(&this_ts->client->dev, "irq pin invalid\n");
+		return -EINVAL;
+	}
+
 	this_ts->rst = of_get_named_gpio_flags(np, "rst_gpio_number", 0,
 				&rst_flags);
+	if (!gpio_is_valid(this_ts->rst)) {
+		dev_err(&this_ts->client->dev, "rst pin invalid\n");
+		return -EINVAL;
+	}
+
 	if (devm_gpio_request(&this_ts->client->dev, this_ts->rst, NULL) != 0) {
 		dev_err(&this_ts->client->dev, "gpio_request this_ts->rst error\n");
 		return -EIO;

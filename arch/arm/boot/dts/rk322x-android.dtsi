@@ -43,7 +43,7 @@
 #include <dt-bindings/input/input.h>
 
 / {
-	chosen {
+	chosen: chosen {
 		bootargs = "earlycon=uart8250,mmio32,0x11030000";
 	};
 
@@ -78,18 +78,14 @@
 			reg = <0x80000000 0x0>;
 		};
 
-		ramoops_mem: ramoops@62e00000 {
+		ramoops: ramoops@62e00000 {
+			compatible = "ramoops";
 			reg = <0x62e00000 0xf0000>;
+			record-size = <0x20000>;
+			console-size = <0x80000>;
+			ftrace-size = <0x00000>;
+			pmsg-size = <0x50000>;
 		};
-	};
-
-	ramoops {
-		compatible = "ramoops";
-		record-size = <0x0 0x20000>;
-		console-size = <0x0 0x80000>;
-		ftrace-size = <0x0 0x00000>;
-		pmsg-size = <0x0 0x50000>;
-		memory-region = <&ramoops_mem>;
 	};
 
 	psci {
@@ -210,5 +206,9 @@
 };
 
 &rockchip_suspend {
+	status = "okay";
+};
+
+&rng {
 	status = "okay";
 };

@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
- * Copyright (c) 2019-2020 Fuzhou Rockchip Electronics Co., Ltd.
+ * Copyright (c) 2019 Fuzhou Rockchip Electronics Co., Ltd
  */
 
 #include "dt-bindings/pwm/pwm.h"
-#include <dt-bindings/soc/rockchip-io-domain.h>
 #include "rk3399.dtsi"
 #include "rk3399-opp.dtsi"
 #include <dt-bindings/sensor-dev.h>
@@ -14,11 +13,77 @@
 / {
 	compatible = "rockchip,rk3399-evb-ind", "rockchip,rk3399";
 
+	adc_keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 1>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+
+		vol-up-key {
+			label = "volume up";
+			linux,code = <KEY_VOLUMEUP>;
+			press-threshold-microvolt = <1000>;
+		};
+
+		vol-down-key {
+			label = "volume down";
+			linux,code = <KEY_VOLUMEDOWN>;
+			press-threshold-microvolt = <170000>;
+		};
+	};
+
+	backlight: backlight {
+		status = "okay";
+		compatible = "pwm-backlight";
+		pwms = <&pwm2 0 25000 0>;
+		brightness-levels = <
+			  0   1   2   3   4   5   6   7
+			  8   9  10  11  12  13  14  15
+			 16  17  18  19  20  21  22  23
+			 24  25  26  27  28  29  30  31
+			 32  33  34  35  36  37  38  39
+			 40  41  42  43  44  45  46  47
+			 48  49  50  51  52  53  54  55
+			 56  57  58  59  60  61  62  63
+			 64  65  66  67  68  69  70  71
+			 72  73  74  75  76  77  78  79
+			 80  81  82  83  84  85  86  87
+			 88  89  90  91  92  93  94  95
+			 96  97  98  99 100 101 102 103
+			104 105 106 107 108 109 110 111
+			112 113 114 115 116 117 118 119
+			120 121 122 123 124 125 126 127
+			128 129 130 131 132 133 134 135
+			136 137 138 139 140 141 142 143
+			144 145 146 147 148 149 150 151
+			152 153 154 155 156 157 158 159
+			160 161 162 163 164 165 166 167
+			168 169 170 171 172 173 174 175
+			176 177 178 179 180 181 182 183
+			184 185 186 187 188 189 190 191
+			192 193 194 195 196 197 198 199
+			200 201 202 203 204 205 206 207
+			208 209 210 211 212 213 214 215
+			216 217 218 219 220 221 222 223
+			224 225 226 227 228 229 230 231
+			232 233 234 235 236 237 238 239
+			240 241 242 243 244 245 246 247
+			248 249 250 251 252 253 254 255>;
+		default-brightness-level = <200>;
+	};
+
 	clkin_gmac: external-gmac-clock {
 		compatible = "fixed-clock";
 		clock-frequency = <125000000>;
 		clock-output-names = "clkin_gmac";
 		#clock-cells = <0>;
+	};
+
+	dw_hdmi_audio: dw-hdmi-audio {
+		status = "disabled";
+		compatible = "rockchip,dw-hdmi-audio";
+		#sound-dai-cells = <0>;
 	};
 
 	rk809_sound: rk809-sound {
@@ -40,12 +105,6 @@
 		simple-audio-card,codec {
 			sound-dai = <&rk809_codec>;
 		};
-	};
-
-	dw_hdmi_audio: dw-hdmi-audio {
-		status = "disabled";
-		compatible = "rockchip,dw-hdmi-audio";
-		#sound-dai-cells = <0>;
 	};
 
 	dp_sound: dp-sound {
@@ -70,7 +129,7 @@
 		};
 	};
 
-	rk_headset {
+	rk_headset: rk-headset {
 		compatible = "rockchip_headset";
 		headset_gpio = <&gpio0 11 GPIO_ACTIVE_HIGH>;
 		pinctrl-names = "default";
@@ -132,12 +191,12 @@
 		pinctrl-1 = <&uart0_gpios>;
 		//BT,power_gpio  = <&gpio3 19 GPIO_ACTIVE_HIGH>; /* GPIOx_xx */
 		BT,reset_gpio    = <&gpio0 9 GPIO_ACTIVE_HIGH>; /* GPIO0_B1 */
-		BT,wake_gpio     = <&gpio2 26 GPIO_ACTIVE_HIGH>; /* GPIO2_D2 */
-		BT,wake_host_irq = <&gpio0 4 GPIO_ACTIVE_HIGH>; /* GPIO0_A4 */
+		BT,wake_gpio     = <&gpio0 4 GPIO_ACTIVE_HIGH>; /* GPIO0_A4 */
+		BT,wake_host_irq = <&gpio2 27 GPIO_ACTIVE_HIGH>; /* GPIO2_D3 */
 		status = "okay";
 	};
 
-	4G-Modem {
+	rk_modem: rk-modem {
 		compatible="4g-modem-platdata";
 		pinctrl-names = "default";
 		pinctrl-0 = <&lte_vbat &lte_power_en &lte_reset>;
@@ -207,16 +266,12 @@
 	};
 
 	vdd_log: vdd-log {
-		compatible = "pwm-regulator";
+		compatible = "regulator-fixed";
 		regulator-name = "vdd_log";
-		regulator-min-microvolt = <800000>;
-		regulator-max-microvolt = <1400000>;
+		regulator-min-microvolt = <950000>;
+		regulator-max-microvolt = <950000>;
 		regulator-always-on;
 		regulator-boot-on;
-
-		/* for rockchip boot on */
-		rockchip,pwm_id= <2>;
-		rockchip,pwm_voltage = <900000>;
 	};
 };
 
@@ -265,8 +320,8 @@
 	downdifferential = <20>;
 	system-status-freq = <
 		/*system status         freq(KHz)*/
-		SYS_STATUS_NORMAL       666000
-		SYS_STATUS_REBOOT       666000
+		SYS_STATUS_NORMAL       856000
+		SYS_STATUS_REBOOT       856000
 		SYS_STATUS_SUSPEND      328000
 		SYS_STATUS_VIDEO_1080P  666000
 		SYS_STATUS_VIDEO_4K     856000
@@ -281,6 +336,11 @@
 		0       762      416000
 		763     3012     666000
 		3013    99999    856000
+	>;
+
+	vop-pn-msch-readlatency = <
+		0	0x20
+		4	0x20
 	>;
 
 	auto-min-freq = <328000>;
@@ -335,6 +395,11 @@
 		opp-856000000 {
 			opp-hz = /bits/ 64 <856000000>;
 			opp-microvolt = <900000>;
+		};
+		opp-928000000 {
+			opp-hz = /bits/ 64 <928000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
 		};
 };
 
@@ -503,8 +568,8 @@
 			vcc_ddr: DCDC_REG3 {
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-initial-mode = <0x2>;
 				regulator-name = "vcc_ddr";
+				regulator-initial-mode = <0x2>;
 				regulator-state-mem {
 					regulator-on-in-suspend;
 				};
@@ -667,10 +732,9 @@
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};
+			};
 		};
-
-	};
-
+		/*
 		battery {
 			compatible = "rk817,battery";
 			ocv_table = <7000 7250 7370 7384 7436 7470 7496
@@ -690,9 +754,8 @@
 			virtual_power = <0>;
 			bat_res_up = <140>;
 			bat_res_down = <20>;
-			status = "disabled";
 		};
-
+		*/
 		rk809_codec: codec {
 			#sound-dai-cells = <0>;
 			compatible = "rockchip,rk809-codec", "rockchip,rk817-codec";
@@ -743,7 +806,7 @@
 	i2c-scl-falling-time-ns = <26>;
 
 	mpu6500@68 {
-		status = "okay";
+		status = "disabled";
 		compatible = "invensense,mpu6500";
 		reg = <0x68>;
 		irq-gpio = <&gpio1 22 IRQ_TYPE_EDGE_RISING>;
@@ -756,6 +819,25 @@
 		orientation-y= <0>;
 		orientation-z= <0>;
 		mpu-debug = <1>;
+	};
+
+	mpu6500_acc: mpu_acc@68 {
+		compatible = "mpu6500_acc";
+		reg = <0x68>;
+		irq-gpio = <&gpio1 22 IRQ_TYPE_EDGE_RISING>;
+		irq_enable = <0>;
+		poll_delay_ms = <30>;
+		type = <SENSOR_TYPE_ACCEL>;
+		layout = <8>;
+	};
+
+	mpu6500_gyro: mpu_gyro@68 {
+		compatible = "mpu6500_gyro";
+		reg = <0x68>;
+		irq_enable = <0>;
+		poll_delay_ms = <30>;
+		type = <SENSOR_TYPE_GYROSCOPE>;
+		layout = <8>;
 	};
 
 	fusb0: fusb30x@22 {
@@ -778,7 +860,7 @@
 		irq-gpio = <&gpio1 0 IRQ_TYPE_EDGE_RISING>;
 		irq_enable = <0>;
 		poll_delay_ms = <30>;
-		layout = <3>;
+		layout = <6>;
 	};
 
 	bq25700: bq25700@6b {//6a
@@ -846,32 +928,16 @@
 
 &io_domains {
 	status = "okay";
-	/*
-	 * If the uboot use rkdevelop branch, the io-domain is not set
-	 * during uboot phase, it will cause the io voltage is not suit for
-	 * the hardware,maybe will damage the io of rk3399, so we add
-	 * uboot-set value to make sure the value is same with the kernel,
-	 * ofcause you must make sure firstly the value here is suit for your
-	 * hardware. The available value is defined in
-	 * include/dt-bindings/soc/rockchip-io-domain.h, they are
-	 * also list here for more convenient configuration:
-	 * bt656-supply: RK3399_BT656_VDD_1V8 or RK3399_BT656_VDD_3V3
-	 * audio-supply: RK3399_AUDIO_VDD_1V8 or RK3399_AUDIO_VDD_3V3
-	 * gpio1830-supply: RK3399_GPIO1833_VDD_1V8 or RK3399_GPIO1833_VDD_3V3
-	 * sdmmc-supply: don't need to configure because the voltage
-	 *                       is set in source code during runtime.
-	 * NOTE:
-	 * 1. The value in uboot-set must be enclosed in "()", otherwise will
-	 *     cause compile error.
-	 * 2. The uboot-set configuration must be cooperated with submit
-	 *     in u-boot.
-	 */
-	uboot-set = <(RK3399_BT656_VDD_3V3 | RK3399_AUDIO_VDD_1V8 |
-				RK3399_GPIO1833_VDD_3V3)>;
+
 	bt656-supply = <&vcc_3v0>;		/* bt656_gpio2ab_ms */
 	audio-supply = <&vcca_1v8>;	/* audio_gpio3d4a_ms */
 	sdmmc-supply = <&vccio_sd>;		/* sdmmc_gpio4b_ms */
 	gpio1830-supply = <&vcc_3v0>;		/* gpio1833_gpio4cd_ms */
+};
+
+&pmu_io_domains {
+	pmu1830-supply = <&vcc_1v8>;
+	status = "okay";
 };
 
 &isp0_mmu {
@@ -884,18 +950,6 @@
 
 &pmu_io_domains {
 	status = "okay";
-	/*
-	 * If the uboot use rkdevelop branch, the pmu_io_domain is not set
-	 * during uboot phase, it will cause the io voltage is not suit for
-	 * the hardware,maybe will damage the io of rk3399, so we add
-	 * uboot-set value to make sure the value is same with the kernel,
-	 * ofcause you must make sure firstly the value here is suit for your
-	 * hardware. The available value is defined in
-	 * include/dt-bindings/soc/rockchip-io-domain.h, they are
-	 * also list here for more convenient configuration:
-	 * pmu1830-supply: RK3399_PMU1830_VDD_1V8 or RK3399_PMU1830_VDD_3V0
-	 */
-	uboot-set = <RK3399_PMU1830_VDD_1V8>;
 	pmu1830-supply = <&vcc_1v8>;
 };
 
@@ -907,7 +961,7 @@
 	ep-gpios = <&gpio2 RK_PA4 GPIO_ACTIVE_HIGH>;
 	num-lanes = <4>;
 	pinctrl-names = "default";
-	pinctrl-0 = <&pcie_clkreqn>;
+	pinctrl-0 = <&pcie_clkreqn_cpm>;
 	status = "okay";
 };
 
@@ -917,6 +971,8 @@
 
 &pwm2 {
 	status = "okay";
+	pinctrl-names = "active";
+	pinctrl-0 = <&pwm2_pin_pull_down>;
 };
 
 &pwm3 {
@@ -1127,7 +1183,6 @@
 &tsadc {
 	/* tshut mode 0:CRU 1:GPIO */
 	rockchip,hw-tshut-mode = <1>;
-
 	/* tshut polarity 0:LOW 1:HIGH */
 	rockchip,hw-tshut-polarity = <1>;
 	status = "okay";
@@ -1171,7 +1226,6 @@
 
 &usbdrd3_0 {
 	status = "okay";
-	extcon = <&fusb0>;
 };
 
 &usbdrd3_1 {
@@ -1180,6 +1234,7 @@
 
 &usbdrd_dwc3_0 {
 	status = "okay";
+	extcon = <&fusb0>;
 };
 
 &usbdrd_dwc3_1 {
@@ -1275,7 +1330,7 @@
 	fusb30x {
 		fusb0_int: fusb0-int {
 			rockchip,pins = <1 2 RK_FUNC_GPIO &pcfg_pull_up>,
-							<1 18 RK_FUNC_GPIO &pcfg_pull_up>;
+					<1 18 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 
@@ -1326,7 +1381,7 @@
 		};
 	};
 
-	4G-Modem {
+	rk-modem {
 		lte_vbat: lte-vbat {
 			rockchip,pins = <4 RK_PD0 RK_FUNC_GPIO &pcfg_pull_none>;
 		};

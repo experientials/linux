@@ -1,42 +1,4 @@
-/*
- * This file is dual-licensed: you can use it either under the terms
- * of the GPL or the X11 license, at your option. Note that this dual
- * licensing only applies to this file, and not this project as a
- * whole.
- *
- *  a) This file is free software; you can redistribute it and/or
- *     modify it under the terms of the GNU General Public License as
- *     published by the Free Software Foundation; either version 2 of the
- *     License, or (at your option) any later version.
- *
- *     This file is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- * Or, alternatively,
- *
- *  b) Permission is hereby granted, free of charge, to any person
- *     obtaining a copy of this software and associated documentation
- *     files (the "Software"), to deal in the Software without
- *     restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or
- *     sell copies of the Software, and to permit persons to whom the
- *     Software is furnished to do so, subject to the following
- *     conditions:
- *
- *     The above copyright notice and this permission notice shall be
- *     included in all copies or substantial portions of the Software.
- *
- *     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
- *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- *     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- *     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- *     OTHER DEALINGS IN THE SOFTWARE.
- */
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/interrupt-controller/irq.h>
@@ -45,9 +7,11 @@
 #include <dt-bindings/clock/rk3036-cru.h>
 #include <dt-bindings/power/rk3036-power.h>
 #include <dt-bindings/soc/rockchip,boot-mode.h>
-#include "skeleton.dtsi"
 
 / {
+	#address-cells = <1>;
+	#size-cells = <1>;
+
 	compatible = "rockchip,rk3036";
 
 	interrupt-parent = <&gic>;
@@ -122,7 +86,7 @@
 	};
 
 	amba {
-		compatible = "arm,amba-bus";
+		compatible = "simple-bus";
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;
@@ -134,7 +98,7 @@
 				     <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>;
 			#dma-cells = <1>;
 			arm,pl330-broken-no-flushp;
-			peripherals-req-type-burst;
+			arm,pl330-periph-burst;
 			clocks = <&cru ACLK_DMAC2>;
 			clock-names = "apb_pclk";
 		};
@@ -188,36 +152,23 @@
 	};
 
 	gpu: gpu@10090000 {
-		compatible = "arm,mali400";
-
-		reg = <0x10091000 0x200>,
-		      <0x10090000 0x100>,
-		      <0x10093000 0x100>,
-		      <0x10098000 0x1100>,
-		      <0x10094000 0x100>;
-
-		reg-names = "Mali_L2",
-			    "Mali_GP",
-			    "Mali_GP_MMU",
-			    "Mali_PP0",
-			    "Mali_PP0_MMU";
-
+		compatible = "rockchip,rk3036-mali", "arm,mali-400";
+		reg = <0x10090000 0x10000>;
 		interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 5 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "Mali_GP_IRQ",
-				  "Mali_GP_MMU_IRQ",
-				  "Mali_PP0_IRQ",
-				  "Mali_PP0_MMU_IRQ";
-
-		clocks = <&cru  SCLK_GPU>;
-		clock-names = "clk_mali";
+		interrupt-names = "gp",
+				  "gpmmu",
+				  "pp0",
+				  "ppmmu0";
 		assigned-clocks = <&cru SCLK_GPU>;
 		assigned-clock-rates = <400000000>;
 		assigned-clock-parents = <&cru PLL_DPLL>;
 		operating-points-v2 = <&gpu_opp_table>;
-
+		clocks = <&cru SCLK_GPU>, <&cru SCLK_GPU>;
+		clock-names = "core", "bus";
+		resets = <&cru SRST_GPU>;
 		status = "disabled";
 	};
 
@@ -342,6 +293,8 @@
 		reg = <0x10118300 0x100>;
 		interrupts = <GIC_SPI 43 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "vop_mmu";
+		clocks = <&cru ACLK_LCDC>, <&cru HCLK_LCDC>;
+		clock-names = "aclk", "iface";
 		#iommu-cells = <0>;
 		status = "disabled";
 	};
@@ -375,7 +328,6 @@
 		g-np-tx-fifo-size = <16>;
 		g-rx-fifo-size = <280>;
 		g-tx-fifo-size = <256 128 128 64 32 16>;
-		g-use-dma;
 		status = "disabled";
 	};
 
@@ -417,8 +369,6 @@
 		interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&cru SCLK_SFC>, <&cru HCLK_SFC>;
 		clock-names = "clk_sfc", "hclk_sfc";
-		assigned-clocks = <&cru SCLK_SFC>;
-		assigned-clock-rates = <100000000>;
 		status = "disabled";
 	};
 
@@ -426,23 +376,27 @@
 		compatible = "rockchip,rk3036-dw-mshc", "rockchip,rk3288-dw-mshc";
 		reg = <0x10214000 0x4000>;
 		clock-frequency = <37500000>;
-		clock-freq-min-max = <400000 37500000>;
+		max-frequency = <37500000>;
 		clocks = <&cru HCLK_SDMMC>, <&cru SCLK_SDMMC>;
 		clock-names = "biu", "ciu";
 		fifo-depth = <0x100>;
 		interrupts = <GIC_SPI 14 IRQ_TYPE_LEVEL_HIGH>;
+		resets = <&cru SRST_MMC0>;
+		reset-names = "reset";
 		status = "disabled";
 	};
 
 	sdio: dwmmc@10218000 {
 		compatible = "rockchip,rk3036-dw-mshc", "rockchip,rk3288-dw-mshc";
 		reg = <0x10218000 0x4000>;
-		clock-freq-min-max = <400000 37500000>;
+		max-frequency = <37500000>;
 		clocks = <&cru HCLK_SDIO>, <&cru SCLK_SDIO>,
 			 <&cru SCLK_SDIO_DRV>, <&cru SCLK_SDIO_SAMPLE>;
-		clock-names = "biu", "ciu", "ciu_drv", "ciu_sample";
+		clock-names = "biu", "ciu", "ciu-drive", "ciu-sample";
 		fifo-depth = <0x100>;
 		interrupts = <GIC_SPI 15 IRQ_TYPE_LEVEL_HIGH>;
+		resets = <&cru SRST_SDIO>;
+		reset-names = "reset";
 		status = "disabled";
 	};
 
@@ -453,18 +407,21 @@
 		bus-width = <8>;
 		cap-mmc-highspeed;
 		clock-frequency = <37500000>;
-		clock-freq-min-max = <400000 37500000>;
+		max-frequency = <37500000>;
 		clocks = <&cru HCLK_EMMC>, <&cru SCLK_EMMC>,
 			 <&cru SCLK_EMMC_DRV>, <&cru SCLK_EMMC_SAMPLE>;
-		clock-names = "biu", "ciu", "ciu_drv", "ciu_sample";
+		clock-names = "biu", "ciu", "ciu-drive", "ciu-sample";
 		default-sample-phase = <158>;
 		disable-wp;
 		dmas = <&pdma 12>;
 		dma-names = "rx-tx";
 		fifo-depth = <0x100>;
 		non-removable;
-		num-slots = <1>;
 		supports-emmc;
+		pinctrl-names = "default";
+		pinctrl-0 = <&emmc_clk &emmc_cmd &emmc_bus8>;
+		resets = <&cru SRST_EMMC>;
+		reset-names = "reset";
 		status = "disabled";
 	};
 
@@ -487,16 +444,6 @@
 		status = "disabled";
 	};
 
-	nandc: nandc@10500000 {
-		compatible = "rockchip,rk-nandc";
-		reg = <0x10500000 0x4000>;
-		interrupts = <GIC_SPI 18 IRQ_TYPE_LEVEL_HIGH>;
-		nandc_id = <0>;
-		clocks = <&cru SCLK_NANDC>, <&cru HCLK_NANDC>;
-		clock-names = "clk_nandc", "hclk_nandc";
-		status = "disabled";
-	};
-
 	cru: clock-controller@20000000 {
 		compatible = "rockchip,rk3036-cru";
 		reg = <0x20000000 0x1000>;
@@ -510,6 +457,7 @@
 	grf: syscon@20008000 {
 		compatible = "rockchip,rk3036-grf", "syscon", "simple-mfd";
 		reg = <0x20008000 0x1000>;
+
 		reboot-mode {
 			compatible = "syscon-reboot-mode";
 			offset = <0x1d8>;
@@ -831,7 +779,7 @@
 				rockchip,pins = <1 15 RK_FUNC_1 &pcfg_pull_default>;
 			};
 
-			sdmmc_cd: sdmcc-cd {
+			sdmmc_cd: sdmmc-cd {
 				rockchip,pins = <1 17 RK_FUNC_1 &pcfg_pull_default>;
 			};
 
@@ -934,15 +882,12 @@
 
 		i2s {
 			i2s_bus: i2s-bus {
-				rockchip,pins = <1 1 RK_FUNC_1 &pcfg_pull_default>,
+				rockchip,pins = <1 0 RK_FUNC_1 &pcfg_pull_default>,
+						<1 1 RK_FUNC_1 &pcfg_pull_default>,
 						<1 2 RK_FUNC_1 &pcfg_pull_default>,
 						<1 3 RK_FUNC_1 &pcfg_pull_default>,
 						<1 4 RK_FUNC_1 &pcfg_pull_default>,
 						<1 5 RK_FUNC_1 &pcfg_pull_default>;
-			};
-
-			i2s_mclk: i2s-mclk {
-				rockchip,pins = <1 0 RK_FUNC_1 &pcfg_pull_default>;
 			};
 		};
 
@@ -986,7 +931,7 @@
 			/* no rts / cts for uart2 */
 		};
 
-		spi {
+		spi-pins {
 			spi_txd:spi-txd {
 				rockchip,pins = <1 29 RK_FUNC_3 &pcfg_pull_default>;
 			};

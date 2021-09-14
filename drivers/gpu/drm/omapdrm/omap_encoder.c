@@ -1,7 +1,5 @@
 /*
- * drivers/gpu/drm/omapdrm/omap_encoder.c
- *
- * Copyright (C) 2011 Texas Instruments
+ * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
  * Author: Rob Clark <rob@ti.com>
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -103,7 +101,7 @@ static void omap_encoder_disable(struct drm_encoder *encoder)
 
 static int omap_encoder_update(struct drm_encoder *encoder,
 			       enum omap_channel channel,
-			       struct omap_video_timings *timings)
+			       struct videomode *vm)
 {
 	struct drm_device *dev = encoder->dev;
 	struct omap_encoder *omap_encoder = to_omap_encoder(encoder);
@@ -111,16 +109,14 @@ static int omap_encoder_update(struct drm_encoder *encoder,
 	struct omap_dss_driver *dssdrv = dssdev->driver;
 	int ret;
 
-	dssdev->src->manager = omap_dss_get_overlay_manager(channel);
-
 	if (dssdrv->check_timings) {
-		ret = dssdrv->check_timings(dssdev, timings);
+		ret = dssdrv->check_timings(dssdev, vm);
 	} else {
-		struct omap_video_timings t = {0};
+		struct videomode t = {0};
 
 		dssdrv->get_timings(dssdev, &t);
 
-		if (memcmp(timings, &t, sizeof(struct omap_video_timings)))
+		if (memcmp(vm, &t, sizeof(*vm)))
 			ret = -EINVAL;
 		else
 			ret = 0;
@@ -132,7 +128,7 @@ static int omap_encoder_update(struct drm_encoder *encoder,
 	}
 
 	if (dssdrv->set_timings)
-		dssdrv->set_timings(dssdev, timings);
+		dssdrv->set_timings(dssdev, vm);
 
 	return 0;
 }
@@ -142,11 +138,16 @@ static void omap_encoder_enable(struct drm_encoder *encoder)
 	struct omap_encoder *omap_encoder = to_omap_encoder(encoder);
 	struct omap_dss_device *dssdev = omap_encoder->dssdev;
 	struct omap_dss_driver *dssdrv = dssdev->driver;
+	int r;
 
 	omap_encoder_update(encoder, omap_crtc_channel(encoder->crtc),
 			    omap_crtc_timings(encoder->crtc));
 
-	dssdrv->enable(dssdev);
+	r = dssdrv->enable(dssdev);
+	if (r)
+		dev_err(encoder->dev->dev,
+			"Failed to enable display '%s': %d\n",
+			dssdev->name, r);
 }
 
 static int omap_encoder_atomic_check(struct drm_encoder *encoder,

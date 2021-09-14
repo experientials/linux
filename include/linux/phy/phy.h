@@ -24,14 +24,27 @@ struct phy;
 
 enum phy_mode {
 	PHY_MODE_INVALID,
-	PHY_MODE_PCIE_EP,
-	PHY_MODE_PCIE_RC,
 	PHY_MODE_USB_HOST,
+	PHY_MODE_USB_HOST_LS,
+	PHY_MODE_USB_HOST_FS,
+	PHY_MODE_USB_HOST_HS,
+	PHY_MODE_USB_HOST_SS,
 	PHY_MODE_USB_DEVICE,
+	PHY_MODE_USB_DEVICE_LS,
+	PHY_MODE_USB_DEVICE_FS,
+	PHY_MODE_USB_DEVICE_HS,
+	PHY_MODE_USB_DEVICE_SS,
 	PHY_MODE_USB_OTG,
+	PHY_MODE_SGMII,
+	PHY_MODE_2500SGMII,
+	PHY_MODE_10GKR,
+	PHY_MODE_UFS_HS_A,
+	PHY_MODE_UFS_HS_B,
 	PHY_MODE_VIDEO_MIPI,
 	PHY_MODE_VIDEO_LVDS,
 	PHY_MODE_VIDEO_TTL,
+	PHY_MODE_PCIE_RC,
+	PHY_MODE_PCIE_EP,
 };
 
 /**
@@ -41,9 +54,8 @@ enum phy_mode {
  * @power_on: powering on the phy
  * @power_off: powering off the phy
  * @set_mode: set the mode of the phy
- * @set_vbusdet: usb disconnect of the phy
  * @reset: resetting the phy
- * @cp_test: prepare for the phy compliance test
+ * @calibrate: calibrate the phy
  * @owner: the module owner containing the ops
  */
 struct phy_ops {
@@ -52,9 +64,8 @@ struct phy_ops {
 	int	(*power_on)(struct phy *phy);
 	int	(*power_off)(struct phy *phy);
 	int	(*set_mode)(struct phy *phy, enum phy_mode mode);
-        int (*set_vbusdet)(struct phy *phy, bool level);
 	int	(*reset)(struct phy *phy);
-	int	(*cp_test)(struct phy *phy);
+	int	(*calibrate)(struct phy *phy);
 	struct module *owner;
 };
 
@@ -64,6 +75,7 @@ struct phy_ops {
  */
 struct phy_attrs {
 	u32			bus_width;
+	enum phy_mode		mode;
 };
 
 /**
@@ -75,7 +87,8 @@ struct phy_attrs {
  * @mutex: mutex to protect phy_ops
  * @init_count: used to protect when the PHY is used by multiple consumers
  * @power_count: used to protect when the PHY is used by multiple consumers
- * @phy_attrs: used to specify PHY specific attributes
+ * @attrs: used to specify PHY specific attributes
+ * @pwr: power regulator associated with the phy
  */
 struct phy {
 	struct device		dev;
@@ -91,18 +104,27 @@ struct phy {
 /**
  * struct phy_provider - represents the phy provider
  * @dev: phy provider device
+ * @children: can be used to override the default (dev->of_node) child node
  * @owner: the module owner having of_xlate
- * @of_xlate: function pointer to obtain phy instance from phy pointer
  * @list: to maintain a linked list of PHY providers
+ * @of_xlate: function pointer to obtain phy instance from phy pointer
  */
 struct phy_provider {
 	struct device		*dev;
+	struct device_node	*children;
 	struct module		*owner;
 	struct list_head	list;
 	struct phy * (*of_xlate)(struct device *dev,
 		struct of_phandle_args *args);
 };
 
+/**
+ * struct phy_lookup - PHY association in list of phys managed by the phy driver
+ * @node: list node
+ * @dev_id: the device of the association
+ * @con_id: connection ID string on device
+ * @phy: the phy of the association
+ */
 struct phy_lookup {
 	struct list_head node;
 	const char *dev_id;
@@ -113,10 +135,16 @@ struct phy_lookup {
 #define	to_phy(a)	(container_of((a), struct phy, dev))
 
 #define	of_phy_provider_register(dev, xlate)	\
-	__of_phy_provider_register((dev), THIS_MODULE, (xlate))
+	__of_phy_provider_register((dev), NULL, THIS_MODULE, (xlate))
 
 #define	devm_of_phy_provider_register(dev, xlate)	\
-	__devm_of_phy_provider_register((dev), THIS_MODULE, (xlate))
+	__devm_of_phy_provider_register((dev), NULL, THIS_MODULE, (xlate))
+
+#define of_phy_provider_register_full(dev, children, xlate) \
+	__of_phy_provider_register(dev, children, THIS_MODULE, xlate)
+
+#define devm_of_phy_provider_register_full(dev, children, xlate) \
+	__devm_of_phy_provider_register(dev, children, THIS_MODULE, xlate)
 
 static inline void phy_set_drvdata(struct phy *phy, void *data)
 {
@@ -140,9 +168,12 @@ int phy_exit(struct phy *phy);
 int phy_power_on(struct phy *phy);
 int phy_power_off(struct phy *phy);
 int phy_set_mode(struct phy *phy, enum phy_mode mode);
-int phy_set_vbusdet(struct phy *phy, bool level);
+static inline enum phy_mode phy_get_mode(struct phy *phy)
+{
+	return phy->attrs.mode;
+}
 int phy_reset(struct phy *phy);
-int phy_cp_test(struct phy *phy);
+int phy_calibrate(struct phy *phy);
 static inline int phy_get_bus_width(struct phy *phy)
 {
 	return phy->attrs.bus_width;
@@ -171,11 +202,13 @@ struct phy *devm_phy_create(struct device *dev, struct device_node *node,
 void phy_destroy(struct phy *phy);
 void devm_phy_destroy(struct device *dev, struct phy *phy);
 struct phy_provider *__of_phy_provider_register(struct device *dev,
-	struct module *owner, struct phy * (*of_xlate)(struct device *dev,
-	struct of_phandle_args *args));
+	struct device_node *children, struct module *owner,
+	struct phy * (*of_xlate)(struct device *dev,
+				 struct of_phandle_args *args));
 struct phy_provider *__devm_of_phy_provider_register(struct device *dev,
-	struct module *owner, struct phy * (*of_xlate)(struct device *dev,
-	struct of_phandle_args *args));
+	struct device_node *children, struct module *owner,
+	struct phy * (*of_xlate)(struct device *dev,
+				 struct of_phandle_args *args));
 void of_phy_provider_unregister(struct phy_provider *phy_provider);
 void devm_of_phy_provider_unregister(struct device *dev,
 	struct phy_provider *phy_provider);
@@ -255,11 +288,9 @@ static inline int phy_set_mode(struct phy *phy, enum phy_mode mode)
 	return -ENOSYS;
 }
 
-static inline int phy_set_vbusdet(struct phy *phy, bool level)
+static inline enum phy_mode phy_get_mode(struct phy *phy)
 {
-    if (!phy)
-        return 0;
-    return -ENOSYS;
+	return PHY_MODE_INVALID;
 }
 
 static inline int phy_reset(struct phy *phy)
@@ -269,7 +300,7 @@ static inline int phy_reset(struct phy *phy)
 	return -ENOSYS;
 }
 
-static inline int phy_cp_test(struct phy *phy)
+static inline int phy_calibrate(struct phy *phy)
 {
 	if (!phy)
 		return 0;
@@ -305,7 +336,7 @@ static inline struct phy *devm_phy_get(struct device *dev, const char *string)
 static inline struct phy *devm_phy_optional_get(struct device *dev,
 						const char *string)
 {
-	return ERR_PTR(-ENOSYS);
+	return NULL;
 }
 
 static inline struct phy *devm_of_phy_get(struct device *dev,
@@ -364,15 +395,17 @@ static inline void devm_phy_destroy(struct device *dev, struct phy *phy)
 }
 
 static inline struct phy_provider *__of_phy_provider_register(
-	struct device *dev, struct module *owner, struct phy * (*of_xlate)(
-	struct device *dev, struct of_phandle_args *args))
+	struct device *dev, struct device_node *children, struct module *owner,
+	struct phy * (*of_xlate)(struct device *dev,
+				 struct of_phandle_args *args))
 {
 	return ERR_PTR(-ENOSYS);
 }
 
 static inline struct phy_provider *__devm_of_phy_provider_register(struct device
-	*dev, struct module *owner, struct phy * (*of_xlate)(struct device *dev,
-	struct of_phandle_args *args))
+	*dev, struct device_node *children, struct module *owner,
+	struct phy * (*of_xlate)(struct device *dev,
+				 struct of_phandle_args *args))
 {
 	return ERR_PTR(-ENOSYS);
 }

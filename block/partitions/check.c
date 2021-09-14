@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  fs/partitions/check.c
  *
@@ -20,7 +21,6 @@
 
 #include "check.h"
 
-#include "rk.h"
 #include "acorn.h"
 #include "amiga.h"
 #include "atari.h"
@@ -67,9 +67,6 @@ static int (*check_part[])(struct parsed_partitions *) = {
 	adfspart_check_ADFS,
 #endif
 
-#ifdef CONFIG_RK_PARTITION
-	rkpart_partition,
-#endif
 #ifdef CONFIG_CMDLINE_PARTITION
 	cmdline_partition,
 #endif
@@ -125,7 +122,7 @@ static struct parsed_partitions *allocate_partitions(struct gendisk *hd)
 		return NULL;
 
 	nr = disk_max_parts(hd);
-	state->parts = vzalloc(nr * sizeof(state->parts[0]));
+	state->parts = vzalloc(array_size(nr, sizeof(state->parts[0])));
 	if (!state->parts) {
 		kfree(state);
 		return NULL;

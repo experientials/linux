@@ -275,6 +275,10 @@ static int set_next_request(void);
 #define fd_dma_mem_alloc(size) __get_dma_pages(GFP_KERNEL, get_order(size))
 #endif
 
+#ifndef fd_cacheflush
+#define fd_cacheflush(addr, size) /* nothing... */
+#endif
+
 static inline void fallback_on_nodma_alloc(char **addr, size_t l)
 {
 #ifdef FLOPPY_CAN_FALLBACK_ON_NODMA
@@ -848,14 +852,17 @@ static void reset_fdc_info(int mode)
 /* selects the fdc and drive, and enables the fdc's input/dma. */
 static void set_fdc(int drive)
 {
+	unsigned int new_fdc = fdc;
+
 	if (drive >= 0 && drive < N_DRIVE) {
-		fdc = FDC(drive);
+		new_fdc = FDC(drive);
 		current_drive = drive;
 	}
-	if (fdc != 1 && fdc != 0) {
+	if (new_fdc >= N_FDC) {
 		pr_info("bad fdc value\n");
 		return;
 	}
+	fdc = new_fdc;
 	set_dor(fdc, ~0, 8);
 #if N_FDC > 1
 	set_dor(1 - fdc, ~8, 0);
@@ -867,7 +874,7 @@ static void set_fdc(int drive)
 }
 
 /* locks the driver */
-static int lock_fdc(int drive, bool interruptible)
+static int lock_fdc(int drive)
 {
 	if (WARN(atomic_read(&usage_count) == 0,
 		 "Trying to lock fdc while usage count=0\n"))
@@ -899,9 +906,13 @@ static void unlock_fdc(void)
 }
 
 /* switches the motor off after a given timeout */
-static void motor_off_callback(unsigned long nr)
+static void motor_off_callback(struct timer_list *t)
 {
+	unsigned long nr = t - motor_off_timer;
 	unsigned char mask = ~(0x10 << UNIT(nr));
+
+	if (WARN_ON_ONCE(nr >= N_DRIVE))
+		return;
 
 	set_dor(FDC(nr), mask, 0);
 }
@@ -1453,7 +1464,6 @@ static void setup_rw_floppy(void)
 	int i;
 	int r;
 	int flags;
-	int dflags;
 	unsigned long ready_date;
 	void (*function)(void);
 
@@ -1477,8 +1487,6 @@ static void setup_rw_floppy(void)
 		if (fd_wait_for_completion(ready_date, function))
 			return;
 	}
-	dflags = DRS->flags;
-
 	if ((flags & FD_RAW_READ) || (flags & FD_RAW_WRITE))
 		setup_DMA();
 
@@ -2177,7 +2185,7 @@ static int do_format(int drive, struct format_descr *tmp_format_req)
 {
 	int ret;
 
-	if (lock_fdc(drive, true))
+	if (lock_fdc(drive))
 		return -EINTR;
 
 	set_floppy(drive);
@@ -2206,7 +2214,7 @@ static int do_format(int drive, struct format_descr *tmp_format_req)
  * =============================
  */
 
-static void floppy_end_request(struct request *req, int error)
+static void floppy_end_request(struct request *req, blk_status_t error)
 {
 	unsigned int nr_sectors = current_count_sectors;
 	unsigned int drive = (unsigned long)req->rq_disk->private_data;
@@ -2267,7 +2275,7 @@ static void request_done(int uptodate)
 			DRWE->last_error_generation = DRS->generation;
 		}
 		spin_lock_irqsave(q->queue_lock, flags);
-		floppy_end_request(req, -EIO);
+		floppy_end_request(req, BLK_STS_IOERR);
 		spin_unlock_irqrestore(q->queue_lock, flags);
 	}
 }
@@ -2809,8 +2817,10 @@ static int set_next_request(void)
 			fdc_queue = 0;
 		if (q) {
 			current_req = blk_fetch_request(q);
-			if (current_req)
+			if (current_req) {
+				current_req->error_count = 0;
 				break;
+			}
 		}
 	} while (fdc_queue != old_pos);
 
@@ -2870,7 +2880,7 @@ do_request:
 		_floppy = floppy_type + DP->autodetect[DRS->probed_format];
 	} else
 		probing = 0;
-	errors = &(current_req->errors);
+	errors = &(current_req->error_count);
 	tmp = make_raw_rw_request();
 	if (tmp < 2) {
 		request_done(tmp);
@@ -2904,8 +2914,8 @@ static void do_fd_request(struct request_queue *q)
 		return;
 
 	if (WARN(atomic_read(&usage_count) == 0,
-		 "warning: usage count=0, current_req=%p sect=%ld type=%x flags=%llx\n",
-		 current_req, (long)blk_rq_pos(current_req), current_req->cmd_type,
+		 "warning: usage count=0, current_req=%p sect=%ld flags=%llx\n",
+		 current_req, (long)blk_rq_pos(current_req),
 		 (unsigned long long) current_req->cmd_flags))
 		return;
 
@@ -2964,7 +2974,7 @@ static int user_reset_fdc(int drive, int arg, bool interruptible)
 {
 	int ret;
 
-	if (lock_fdc(drive, interruptible))
+	if (lock_fdc(drive))
 		return -EINTR;
 
 	if (arg == FD_RESET_ALWAYS)
@@ -3044,7 +3054,7 @@ static void raw_cmd_done(int flag)
 		else
 			raw_cmd->flags &= ~FD_RAW_DISK_CHANGE;
 		if (raw_cmd->flags & FD_RAW_NO_MOTOR_AFTER)
-			motor_off_callback(current_drive);
+			motor_off_callback(&motor_off_timer[current_drive]);
 
 		if (raw_cmd->next &&
 		    (!(raw_cmd->flags & FD_RAW_FAILURE) ||
@@ -3123,7 +3133,7 @@ static int raw_cmd_copyin(int cmd, void __user *param,
 	*rcmd = NULL;
 
 loop:
-	ptr = kmalloc(sizeof(struct floppy_raw_cmd), GFP_USER);
+	ptr = kmalloc(sizeof(struct floppy_raw_cmd), GFP_KERNEL);
 	if (!ptr)
 		return -ENOMEM;
 	*rcmd = ptr;
@@ -3251,7 +3261,7 @@ static int set_geometry(unsigned int cmd, struct floppy_struct *g,
 		if (!capable(CAP_SYS_ADMIN))
 			return -EPERM;
 		mutex_lock(&open_lock);
-		if (lock_fdc(drive, true)) {
+		if (lock_fdc(drive)) {
 			mutex_unlock(&open_lock);
 			return -EINTR;
 		}
@@ -3271,7 +3281,7 @@ static int set_geometry(unsigned int cmd, struct floppy_struct *g,
 	} else {
 		int oldStretch;
 
-		if (lock_fdc(drive, true))
+		if (lock_fdc(drive))
 			return -EINTR;
 		if (cmd != FDDEFPRM) {
 			/* notice a disk change immediately, else
@@ -3357,7 +3367,7 @@ static int get_floppy_geometry(int drive, int type, struct floppy_struct **g)
 	if (type)
 		*g = &floppy_type[type];
 	else {
-		if (lock_fdc(drive, false))
+		if (lock_fdc(drive))
 			return -EINTR;
 		if (poll_drive(false, 0) == -EINTR)
 			return -EINTR;
@@ -3459,7 +3469,7 @@ static int fd_locked_ioctl(struct block_device *bdev, fmode_t mode, unsigned int
 		if (UDRS->fd_ref != 1)
 			/* somebody else has this drive open */
 			return -EBUSY;
-		if (lock_fdc(drive, true))
+		if (lock_fdc(drive))
 			return -EINTR;
 
 		/* do the actual eject. Fails on
@@ -3471,7 +3481,7 @@ static int fd_locked_ioctl(struct block_device *bdev, fmode_t mode, unsigned int
 		process_fd_request();
 		return ret;
 	case FDCLRPRM:
-		if (lock_fdc(drive, true))
+		if (lock_fdc(drive))
 			return -EINTR;
 		current_type[drive] = NULL;
 		floppy_sizes[drive] = MAX_DISK_SIZE << 1;
@@ -3496,7 +3506,7 @@ static int fd_locked_ioctl(struct block_device *bdev, fmode_t mode, unsigned int
 		UDP->flags &= ~FTD_MSG;
 		return 0;
 	case FDFMTBEG:
-		if (lock_fdc(drive, true))
+		if (lock_fdc(drive))
 			return -EINTR;
 		if (poll_drive(true, FD_RAW_NEED_DISK) == -EINTR)
 			return -EINTR;
@@ -3513,7 +3523,7 @@ static int fd_locked_ioctl(struct block_device *bdev, fmode_t mode, unsigned int
 		return do_format(drive, &inparam.f);
 	case FDFMTEND:
 	case FDFLUSH:
-		if (lock_fdc(drive, true))
+		if (lock_fdc(drive))
 			return -EINTR;
 		return invalidate_drive(bdev);
 	case FDSETEMSGTRESH:
@@ -3539,7 +3549,7 @@ static int fd_locked_ioctl(struct block_device *bdev, fmode_t mode, unsigned int
 		outparam = UDP;
 		break;
 	case FDPOLLDRVSTAT:
-		if (lock_fdc(drive, true))
+		if (lock_fdc(drive))
 			return -EINTR;
 		if (poll_drive(true, FD_RAW_NEED_DISK) == -EINTR)
 			return -EINTR;
@@ -3562,7 +3572,7 @@ static int fd_locked_ioctl(struct block_device *bdev, fmode_t mode, unsigned int
 	case FDRAWCMD:
 		if (type)
 			return -EINVAL;
-		if (lock_fdc(drive, true))
+		if (lock_fdc(drive))
 			return -EINTR;
 		set_floppy(drive);
 		i = raw_cmd_ioctl(cmd, (void __user *)param);
@@ -3571,7 +3581,7 @@ static int fd_locked_ioctl(struct block_device *bdev, fmode_t mode, unsigned int
 		process_fd_request();
 		return i;
 	case FDTWADDLE:
-		if (lock_fdc(drive, true))
+		if (lock_fdc(drive))
 			return -EINTR;
 		twaddle();
 		process_fd_request();
@@ -3798,7 +3808,7 @@ static int compat_getdrvstat(int drive, bool poll,
 	mutex_lock(&floppy_mutex);
 
 	if (poll) {
-		if (lock_fdc(drive, true))
+		if (lock_fdc(drive))
 			goto Eintr;
 		if (poll_drive(true, FD_RAW_NEED_DISK) == -EINTR)
 			goto Eintr;
@@ -3943,7 +3953,7 @@ static void __init config_types(void)
 		unsigned int type = UDP->cmos;
 		struct floppy_drive_params *params;
 		const char *name = NULL;
-		static char temparea[32];
+		char temparea[32];
 
 		if (type < ARRAY_SIZE(default_drive_params)) {
 			params = &default_drive_params[type].params;
@@ -3954,7 +3964,8 @@ static void __init config_types(void)
 				allowed_drive_mask &= ~(1 << drive);
 		} else {
 			params = &default_drive_params[0].params;
-			sprintf(temparea, "unknown type %d (usb?)", type);
+			snprintf(temparea, sizeof(temparea),
+				 "unknown type %d (usb?)", type);
 			name = temparea;
 		}
 		if (name) {
@@ -4105,7 +4116,8 @@ static unsigned int floppy_check_events(struct gendisk *disk,
 		return DISK_EVENT_MEDIA_CHANGE;
 
 	if (time_after(jiffies, UDRS->last_checked + UDP->checkfreq)) {
-		lock_fdc(drive, false);
+		if (lock_fdc(drive))
+			return 0;
 		poll_drive(false, 0);
 		process_fd_request();
 	}
@@ -4134,9 +4146,9 @@ static void floppy_rb0_cb(struct bio *bio)
 	struct rb0_cbdata *cbdata = (struct rb0_cbdata *)bio->bi_private;
 	int drive = cbdata->drive;
 
-	if (bio->bi_error) {
+	if (bio->bi_status) {
 		pr_info("floppy: error %d while reading block 0\n",
-			bio->bi_error);
+			bio->bi_status);
 		set_bit(FD_OPEN_SHOULD_FAIL_BIT, &UDRS->flags);
 	}
 	complete(&cbdata->complete);
@@ -4162,23 +4174,21 @@ static int __floppy_read_block_0(struct block_device *bdev, int drive)
 
 	cbdata.drive = drive;
 
-	bio_init(&bio);
-	bio.bi_io_vec = &bio_vec;
-	bio_vec.bv_page = page;
-	bio_vec.bv_len = size;
-	bio_vec.bv_offset = 0;
-	bio.bi_vcnt = 1;
-	bio.bi_iter.bi_size = size;
-	bio.bi_bdev = bdev;
+	bio_init(&bio, &bio_vec, 1);
+	bio_set_dev(&bio, bdev);
+	bio_add_page(&bio, page, size, 0);
+
 	bio.bi_iter.bi_sector = 0;
 	bio.bi_flags |= (1 << BIO_QUIET);
 	bio.bi_private = &cbdata;
 	bio.bi_end_io = floppy_rb0_cb;
-
-	submit_bio(READ, &bio);
-	process_fd_request();
+	bio_set_op_attrs(&bio, REQ_OP_READ, 0);
 
 	init_completion(&cbdata.complete);
+
+	submit_bio(&bio);
+	process_fd_request();
+
 	wait_for_completion(&cbdata.complete);
 
 	__free_page(page);
@@ -4204,7 +4214,9 @@ static int floppy_revalidate(struct gendisk *disk)
 			 "VFS: revalidate called on non-open device.\n"))
 			return -EFAULT;
 
-		lock_fdc(drive, false);
+		res = lock_fdc(drive);
+		if (res)
+			return res;
 		cf = (test_bit(FD_DISK_CHANGED_BIT, &UDRS->flags) ||
 		      test_bit(FD_VERIFY_BIT, &UDRS->flags));
 		if (!(cf || test_bit(drive, &fake_change) || drive_no_geom(drive))) {
@@ -4472,7 +4484,7 @@ static ssize_t floppy_cmos_show(struct device *dev,
 	return sprintf(buf, "%X\n", UDP->cmos);
 }
 
-static DEVICE_ATTR(cmos, S_IRUGO, floppy_cmos_show, NULL);
+static DEVICE_ATTR(cmos, 0444, floppy_cmos_show, NULL);
 
 static struct attribute *floppy_dev_attrs[] = {
 	&dev_attr_cmos.attr,
@@ -4527,7 +4539,7 @@ static struct kobject *floppy_find(dev_t dev, int *part, void *data)
 	if (((*part >> 2) & 0x1f) >= ARRAY_SIZE(floppy_type))
 		return NULL;
 	*part = 0;
-	return get_disk(disks[drive]);
+	return get_disk_and_module(disks[drive]);
 }
 
 static int __init do_floppy_init(void)
@@ -4561,15 +4573,14 @@ static int __init do_floppy_init(void)
 			goto out_put_disk;
 		}
 
+		blk_queue_bounce_limit(disks[drive]->queue, BLK_BOUNCE_HIGH);
 		blk_queue_max_hw_sectors(disks[drive]->queue, 64);
 		disks[drive]->major = FLOPPY_MAJOR;
 		disks[drive]->first_minor = TOMINOR(drive);
 		disks[drive]->fops = &floppy_fops;
 		sprintf(disks[drive]->disk_name, "fd%d", drive);
 
-		init_timer(&motor_off_timer[drive]);
-		motor_off_timer[drive].data = drive;
-		motor_off_timer[drive].function = motor_off_callback;
+		timer_setup(&motor_off_timer[drive], motor_off_callback, 0);
 	}
 
 	err = register_blkdev(FLOPPY_MAJOR, "fd");
@@ -4702,8 +4713,7 @@ static int __init do_floppy_init(void)
 		/* to be cleaned up... */
 		disks[drive]->private_data = (void *)(long)drive;
 		disks[drive]->flags |= GENHD_FL_REMOVABLE;
-		disks[drive]->driverfs_dev = &floppy_device[drive].dev;
-		add_disk(disks[drive]);
+		device_add_disk(&floppy_device[drive].dev, disks[drive]);
 	}
 
 	return 0;

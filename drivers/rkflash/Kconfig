@@ -44,7 +44,7 @@ config RK_SFC_NAND
 config RK_SFC_NAND_MTD
 	bool "RK SFC NAND mtd Interface Support"
 	default n
-	depends on RK_SFC_NAND
+	depends on RK_SFC_NAND && MTD
 	help
 	  Enable mtd interface for SFC_NAND device.
 
@@ -52,6 +52,7 @@ config RK_SFC_NAND_MTD
 
 config RK_SFC_NOR
 	tristate "Rockchip SFC Spi Nor Devices Support"
+	select CRYPTO_ARC4
 	default n
 	help
 	  This enables support for Rockchip SFC Spi Nor Devices.
@@ -64,7 +65,7 @@ config RK_SFC_NOR
 config RK_SFC_NOR_MTD
 	bool "RK SFC NOR mtd Interface Support"
 	default n
-	depends on RK_SFC_NOR
+	depends on RK_SFC_NOR && MTD
 	help
 	  Enable mtd interface for SFC_NOR device.
 

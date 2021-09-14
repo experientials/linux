@@ -1,5 +1,5 @@
 /*
- * drivers/input/touchscreen/gslX6801.c
+ * drivers/input/touchscreen/gslx6801.c
  *
  * Copyright (c) 2012 Shanghai Basewin
  *	Guan Yuwei<guanyuwei@basewin.com>
@@ -189,6 +189,9 @@ static int gslx680_set_pinctrl_state(struct gsl_ts *ts,
 {
 	int ret = 0;
 
+	if (!IS_ERR(ts->pinctrl))
+		return PTR_ERR(ts->pinctrl);
+
 	if (!IS_ERR(state)) {
 		ret = pinctrl_select_state(ts->pinctrl, state);
 		if (ret)
@@ -202,22 +205,21 @@ static int gslX680_init(struct gsl_ts *ts)
 {
 	struct device_node *np = ts->client->dev.of_node;
 	int err = 0;
-	int ret = 0;
 
 	ts->irq = of_get_named_gpio_flags(np, "touch-gpio", 0, NULL);
 	ts->rst = of_get_named_gpio_flags(np, "reset-gpio", 0, NULL);
 
 	/* pinctrl */
 	ts->pinctrl = devm_pinctrl_get(&ts->client->dev);
-	if (IS_ERR(ts->pinctrl))
-		ret = PTR_ERR(ts->pinctrl);
-
-	ts->pins_default =
-	    pinctrl_lookup_state(ts->pinctrl, PINCTRL_STATE_DEFAULT);
-
-	ts->pins_sleep = pinctrl_lookup_state(ts->pinctrl, PINCTRL_STATE_SLEEP);
-
-	ts->pins_inactive = pinctrl_lookup_state(ts->pinctrl, "inactive");
+	if (!IS_ERR(ts->pinctrl)) {
+		ts->pins_default =
+			pinctrl_lookup_state(ts->pinctrl, PINCTRL_STATE_DEFAULT);
+		ts->pins_sleep =
+			pinctrl_lookup_state(ts->pinctrl, PINCTRL_STATE_SLEEP);
+		ts->pins_inactive =
+			pinctrl_lookup_state(ts->pinctrl, "inactive");
+		gslx680_set_pinctrl_state(ts, ts->pins_default);
+	}
 
 	err = gpio_request(ts->rst, "tp reset");
 	if (err) {
@@ -225,7 +227,6 @@ static int gslX680_init(struct gsl_ts *ts)
 		return -1;
 	}
 
-	gslx680_set_pinctrl_state(ts, ts->pins_default);
 	gpio_direction_output(ts->rst, 1);
 	gpio_set_value(ts->rst, 1);
 
@@ -998,7 +999,7 @@ static void gslX680_ts_worker(struct work_struct *work)
 			record_point(x, y, id);
 #endif
 			report_data(ts, x, y, 10, id);
-			if (key_count <= 512) {
+			if (key_count < 512) {
 				key_x[key_count] = x_new;
 				key_y[key_count] = y_new;
 				key_count++;

@@ -104,7 +104,7 @@
 		rockchip,mclk-fs = <128>;
 		rockchip,cpu = <&i2s_2ch_0>;
 		rockchip,codec = <&dummy_codec>;
-		rockchip,format = "dsp_a";
+		rockchip,format = "dsp_b";
 		rockchip,wait-card-locked = <0>;
 	};
 
@@ -234,13 +234,10 @@
 	status = "okay";
 };
 
-&ramoops_mem {
-	reg = <0x0 0x30000 0x0 0x20000>;
-};
-
 &ramoops {
-	record-size = <0x0 0x00000>;
-	console-size = <0x0 0x20000>;
+	reg = <0x0 0x30000 0x0 0x20000>;
+	record-size = <0x00000>;
+	console-size = <0x20000>;
 };
 
 &rk_timer_rtc {

@@ -151,7 +151,7 @@ static int nand_dev_transfer(struct nand_blk_dev *dev,
 	if (dev->disable_access ||
 	    ((cmd == WRITE) && dev->readonly) ||
 	    ((cmd == READ) && dev->writeonly)) {
-		return -EIO;
+		return BLK_STS_IOERR;
 	}
 
 	start += dev->off_size;
@@ -163,7 +163,7 @@ static int nand_dev_transfer(struct nand_blk_dev *dev,
 		totle_read_count++;
 		ret = FtlRead(0, start, nsector, buf);
 		if (ret)
-			ret = -EIO;
+			ret = BLK_STS_IOERR;
 		break;
 
 	case WRITE:
@@ -171,11 +171,11 @@ static int nand_dev_transfer(struct nand_blk_dev *dev,
 		totle_write_count++;
 		ret = FtlWrite(0, start, nsector, buf);
 		if (ret)
-			ret = -EIO;
+			ret = BLK_STS_IOERR;
 		break;
 
 	default:
-		ret = -EIO;
+		ret = BLK_STS_IOERR;
 		break;
 	}
 
@@ -184,12 +184,12 @@ static int nand_dev_transfer(struct nand_blk_dev *dev,
 }
 
 static DECLARE_WAIT_QUEUE_HEAD(rknand_thread_wait);
-static void rk_ftl_gc_timeout_hack(unsigned long data);
-static DEFINE_TIMER(rk_ftl_gc_timeout, rk_ftl_gc_timeout_hack, 0, 0);
+static void rk_ftl_gc_timeout_hack(struct timer_list *unused);
+static DEFINE_TIMER(rk_ftl_gc_timeout, rk_ftl_gc_timeout_hack);
 static unsigned long rk_ftl_gc_jiffies;
 static unsigned long rk_ftl_gc_do;
 
-static void rk_ftl_gc_timeout_hack(unsigned long data)
+static void rk_ftl_gc_timeout_hack(struct timer_list *unused)
 {
 	del_timer(&rk_ftl_gc_timeout);
 	rk_ftl_gc_do++;
@@ -207,7 +207,13 @@ static int req_check_buffer_align(struct request *req, char **pbuf)
 	char *nextbuffer = 0;
 
 	rq_for_each_segment(bv, req, iter) {
+		/* high mem return 0 and using kernel buffer */
+		if (PageHighMem(bv.bv_page))
+			return 0;
+
 		buffer = page_address(bv.bv_page) + bv.bv_offset;
+		if (!buffer)
+			return 0;
 		if (!firstbuf)
 			firstbuf = buffer;
 		nr_vec++;
@@ -225,14 +231,14 @@ static int nand_blktrans_thread(void *arg)
 	struct request_queue *rq = nandr->rq;
 	struct request *req = NULL;
 	int ftl_gc_status = 0;
-	char *buf;
+	char *buf, *page_buf;
 	struct req_iterator rq_iter;
 	struct bio_vec bvec;
 	unsigned long long sector_index = ULLONG_MAX;
 	unsigned long totle_nsect;
-	unsigned long rq_len = 0;
 	int rw_flag = 0;
 	int req_empty_times = 0;
+	int op;
 
 	spin_lock_irq(rq->queue_lock);
 	rk_ftl_gc_jiffies = HZ / 10; /* do garbage collect after 100ms */
@@ -285,22 +291,22 @@ static int nand_blktrans_thread(void *arg)
 		dev = req->rq_disk->private_data;
 		totle_nsect = (req->__data_len) >> 9;
 		sector_index = blk_rq_pos(req);
-		rq_len = 0;
 		buf = 0;
 		res = 0;
 
-		if (req->cmd_flags & REQ_DISCARD) {
+		op = req_op(req);
+		if (op == REQ_OP_DISCARD) {
 			spin_unlock_irq(rq->queue_lock);
 			rknand_device_lock();
 			if (FtlDiscard(blk_rq_pos(req) +
 				       dev->off_size, totle_nsect))
-				res = -EIO;
+				res = BLK_STS_IOERR;
 			rknand_device_unlock();
 			spin_lock_irq(rq->queue_lock);
 			if (!__blk_end_request_cur(req, res))
 				req = NULL;
 			continue;
-		} else if (req->cmd_flags & REQ_FLUSH) {
+		} else if (op == REQ_OP_FLUSH) {
 			spin_unlock_irq(rq->queue_lock);
 			rknand_device_lock();
 			rk_ftl_cache_write_back();
@@ -309,12 +315,33 @@ static int nand_blktrans_thread(void *arg)
 			if (!__blk_end_request_cur(req, res))
 				req = NULL;
 			continue;
+		} else if (op == REQ_OP_READ) {
+			rw_flag = READ;
+		} else if (op == REQ_OP_WRITE) {
+			rw_flag = WRITE;
+		} else {
+			__blk_end_request_all(req, BLK_STS_IOERR);
+			req = NULL;
+			continue;
 		}
 
-		rw_flag = req->cmd_flags & REQ_WRITE;
-		if (rw_flag == READ && mtd_read_temp_buffer) {
+		if (mtd_read_temp_buffer) {
 			buf = mtd_read_temp_buffer;
 			req_check_buffer_align(req, &buf);
+
+			if (rw_flag == WRITE && buf == mtd_read_temp_buffer) {
+				char *p = buf;
+
+				rq_for_each_segment(bvec, req, rq_iter) {
+					page_buf = kmap_atomic(bvec.bv_page);
+					memcpy(p,
+					       page_buf + bvec.bv_offset,
+					       bvec.bv_len);
+					p += bvec.bv_len;
+					kunmap_atomic(page_buf);
+				}
+			}
+
 			spin_unlock_irq(rq->queue_lock);
 			res = nand_dev_transfer(dev,
 						sector_index,
@@ -323,61 +350,49 @@ static int nand_blktrans_thread(void *arg)
 						rw_flag,
 						totle_nsect);
 			spin_lock_irq(rq->queue_lock);
-			if (buf == mtd_read_temp_buffer) {
+
+			if (rw_flag == READ && buf == mtd_read_temp_buffer) {
 				char *p = buf;
 
 				rq_for_each_segment(bvec, req, rq_iter) {
-					memcpy(page_address(bvec.bv_page) +
-					       bvec.bv_offset,
+					page_buf = kmap_atomic(bvec.bv_page);
+
+					memcpy(page_buf + bvec.bv_offset,
 					       p,
 					       bvec.bv_len);
 					p += bvec.bv_len;
+					kunmap_atomic(page_buf);
 				}
 			}
+			__blk_end_request_all(req, res);
+			req = NULL;
 		} else {
-			rq_for_each_segment(bvec, req, rq_iter) {
-				if ((page_address(bvec.bv_page)
-					+ bvec.bv_offset)
-					== (buf + rq_len)) {
-					rq_len += bvec.bv_len;
-				} else {
-					if (rq_len) {
-						spin_unlock_irq(rq->queue_lock);
-						res = nand_dev_transfer(dev,
-								sector_index,
-								rq_len >> 9,
-								buf,
-								rw_flag,
-								totle_nsect);
-						spin_lock_irq(rq->queue_lock);
-					}
-					sector_index += rq_len >> 9;
-					buf = (page_address(bvec.bv_page) +
-						bvec.bv_offset);
-					rq_len = bvec.bv_len;
-				}
-			}
-			if (rq_len) {
+			while (req) {
+				sector_index = blk_rq_pos(req);
+				totle_nsect = blk_rq_cur_bytes(req);
+				buf = kmap_atomic(bio_page(req->bio)) +
+					   bio_offset(req->bio);
 				spin_unlock_irq(rq->queue_lock);
 				res = nand_dev_transfer(dev,
 							sector_index,
-							rq_len >> 9,
+							totle_nsect,
 							buf,
 							rw_flag,
 							totle_nsect);
 				spin_lock_irq(rq->queue_lock);
+				kunmap_atomic(buf);
+				if (!__blk_end_request_cur(req, res))
+					req = NULL;
 			}
 		}
-		__blk_end_request_all(req, res);
-		req = NULL;
 	}
 	pr_info("nand th quited\n");
 	nandr->nand_th_quited = 1;
 	if (req)
-		__blk_end_request_all(req, -EIO);
+		__blk_end_request_all(req, BLK_STS_IOERR);
 	rk_nand_schedule_enable_config(0);
 	while ((req = blk_fetch_request(rq)) != NULL)
-		__blk_end_request_all(req, -ENODEV);
+		__blk_end_request_all(req, BLK_STS_IOERR);
 	spin_unlock_irq(rq->queue_lock);
 	complete_and_exit(&nandr->thread_exit, 0);
 	return 0;
@@ -390,7 +405,7 @@ static void nand_blk_request(struct request_queue *rq)
 
 	if (nandr->nand_th_quited) {
 		while ((req = blk_fetch_request(rq)) != NULL)
-			__blk_end_request_all(req, -ENODEV);
+			__blk_end_request_all(req, BLK_STS_IOERR);
 		return;
 	}
 	rk_ftl_gc_do = 1;
@@ -587,7 +602,6 @@ static int nand_add_dev(struct nand_blk_ops *nandr, struct nand_part *part)
 			 part->name);
 	} else {
 		gd->flags = GENHD_FL_EXT_DEVT;
-		gd->driverfs_dev = g_nand_device;
 		gd->minors = 255;
 		snprintf(gd->disk_name,
 			 sizeof(gd->disk_name),
@@ -614,7 +628,10 @@ static int nand_add_dev(struct nand_blk_ops *nandr, struct nand_part *part)
 	if (dev->readonly)
 		set_disk_ro(gd, 1);
 
-	add_disk(gd);
+	if (gd->flags != GENHD_FL_EXT_DEVT)
+		add_disk(gd);
+	else
+		device_add_disk(g_nand_device, gd);
 
 	return 0;
 }
@@ -675,7 +692,7 @@ static int nand_blk_register(struct nand_blk_ops *nandr)
 	blk_queue_max_hw_sectors(nandr->rq, MTD_RW_SECTORS);
 	blk_queue_max_segments(nandr->rq, MTD_RW_SECTORS);
 
-	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, nandr->rq);
+	blk_queue_flag_set(QUEUE_FLAG_DISCARD, nandr->rq);
 	blk_queue_max_discard_sectors(nandr->rq, UINT_MAX >> 9);
 	/* discard_granularity config to one nand page size 32KB*/
 	nandr->rq->limits.discard_granularity = 64 << 9;

@@ -1,43 +1,46 @@
 * Omnivision OV2680 MIPI CSI-2 sensor
 
 Required Properties:
-- compatible: should be "ovti,ov2680"
-- clocks: reference to the 24M xvclk input clock.
+- compatible: should be "ovti,ov2680".
+- clocks: reference to the xvclk input clock.
 - clock-names: should be "xvclk".
-- dovdd-supply: Digital I/O voltage supply, 1.8 volts
-- avdd-supply: Analog voltage supply, 2.8 volts
-- dvdd-supply: Digital core voltage supply, 1.5 volts
-- powerdown-gpios: Low active powerdown gpio
+- DOVDD-supply: Digital I/O voltage supply.
+- DVDD-supply: Digital core voltage supply.
+- AVDD-supply: Analog voltage supply.
 
-Attention:
-OV2680 device address 0x6c(8bit) or 0x20(8bit) is decided by SID pin;
+Optional Properties:
+- reset-gpios: reference to the GPIO connected to the powerdown/reset pin,
+               if any. This is an active low signal to the OV2680.
 
 The device node must contain one 'port' child node for its digital output
-video port, in accordance with the video interface bindings defined in
+video port, and this port must have a single endpoint in accordance with
+ the video interface bindings defined in
 Documentation/devicetree/bindings/media/video-interfaces.txt.
 
-Example:
-	ov2680: ov2680@36 {  // or ov2680: ov2680@10
-		status = "okay";
-		compatible = "ovti,ov2680";
-		reg = <0x36>; //or reg = <0x10>;
-		clocks = <&cru SCLK_CIF_OUT>;
-		clock-names = "xvclk";
+Endpoint node required properties for CSI-2 connection are:
+- remote-endpoint: a phandle to the bus receiver's endpoint node.
+- clock-lanes: should be set to <0> (clock lane on hardware lane 0).
+- data-lanes: should be set to <1> (one CSI-2 lane supported).
 
-		avdd-supply = <&vcc2v8_dvp>;
-		dovdd-supply = <&vcc1v8_dvp>;
-		dvdd-supply = <&vdd1v5_dvp>;
-		pinctrl-names = "rockchip,camera_default";
-		pinctrl-0 = <&cif_clkout_m0>;
-		pwdn-gpios = <&gpio2 13 GPIO_ACTIVE_LOW>;
-		rockchip,camera-module-index = <1>;
-		rockchip,camera-module-facing = "back";
-		rockchip,camera-module-name = "default";
-		rockchip,camera-module-lens-name = "default";
+Example:
+
+&i2c2 {
+	ov2680: camera-sensor@36 {
+		compatible = "ovti,ov2680";
+		reg = <0x36>;
+		clocks = <&osc>;
+		clock-names = "xvclk";
+		reset-gpios = <&gpio1 3 GPIO_ACTIVE_LOW>;
+		DOVDD-supply = <&sw2_reg>;
+		DVDD-supply = <&sw2_reg>;
+		AVDD-supply = <&reg_peri_3p15v>;
+
 		port {
-			ucam_out: endpoint {
-				remote-endpoint = <&mipi_in_ucam>;
+			ov2680_to_mipi: endpoint {
+				remote-endpoint = <&mipi_from_sensor>;
+				clock-lanes = <0>;
 				data-lanes = <1>;
 			};
 		};
 	};
+};

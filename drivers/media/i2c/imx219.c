@@ -635,7 +635,7 @@ static int imx219_enum_mbus_code(struct v4l2_subdev *sd,
 {
 	if (code->index != 0)
 		return -EINVAL;
-	code->code = MEDIA_BUS_FMT_SBGGR10_1X10;
+	code->code = MEDIA_BUS_FMT_SRGGB10_1X10;
 
 	return 0;
 }
@@ -1064,10 +1064,12 @@ static int imx219_probe(struct i2c_client *client,
 	if (ret < 0)
 		return ret;
 
-	priv->subdev.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	priv->subdev.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
+		     V4L2_SUBDEV_FL_HAS_EVENTS;
+
 	priv->pad.flags = MEDIA_PAD_FL_SOURCE;
-	priv->subdev.entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
-	ret = media_entity_init(&priv->subdev.entity, 1, &priv->pad, 0);
+	priv->subdev.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	ret = media_entity_pads_init(&priv->subdev.entity, 1, &priv->pad);
 	if (ret < 0)
 		return ret;
 

@@ -73,6 +73,15 @@
 		enable-gpios = <&gpio2 RK_PB6 GPIO_ACTIVE_HIGH>;
 	};
 
+	charge-animation {
+		compatible = "rockchip,uboot-charge";
+		rockchip,uboot-charge-on = <1>;
+		rockchip,android-charge-on = <0>;
+		rockchip,uboot-low-power-voltage = <3500>;
+		rockchip,screen-on-voltage = <3600>;
+		status = "okay";
+	};
+
 	rockchip_headset {
 		compatible = "rockchip_headset";
 		headset_gpio = <&gpio2 18 GPIO_ACTIVE_LOW>;
@@ -234,6 +243,30 @@
 				pixelclk-active = <0>;
 			};
 		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				panel_in_dsi: endpoint {
+					remote-endpoint = <&dsi_out_panel>;
+				};
+			};
+		};
+	};
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+			dsi_out_panel: endpoint {
+				remote-endpoint = <&panel_in_dsi>;
+			};
+		};
 	};
 };
 
@@ -278,12 +311,10 @@
 		dvdd-supply = <&vcc18_cif>;
 
 		pwdn-gpios = <&gpio3 RK_PB3 GPIO_ACTIVE_HIGH>;
-
 		rockchip,camera-module-index = <1>;
 		rockchip,camera-module-facing = "front";
-		rockchip,camera-module-name = "CameraKing";
-		rockchip,camera-module-lens-name = "Largan";
-
+		rockchip,camera-module-name = "default";
+		rockchip,camera-module-lens-name = "default";
 		port {
 			gc0329_out: endpoint {
 				remote-endpoint = <&cif_in_fcam>;
@@ -305,12 +336,10 @@
 		dvdd-supply = <&vcc18_cif>;
 
 		pwdn-gpios = <&gpio2 RK_PB7 GPIO_ACTIVE_HIGH>;
-
 		rockchip,camera-module-index = <0>;
 		rockchip,camera-module-facing = "back";
-		rockchip,camera-module-name = "CameraKing";
-		rockchip,camera-module-lens-name = "Largan";
-
+		rockchip,camera-module-name = "default";
+		rockchip,camera-module-lens-name = "default";
 		port {
 			gc2145_out: endpoint {
 				remote-endpoint = <&cif_in_bcam>;
@@ -419,7 +448,6 @@
 				regulator-name = "vcc_ddr";
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-initial-mode = <1>;
 			};
 
 			vcc_io: DCDC_REG4 {
@@ -527,6 +555,10 @@
 	status = "okay";
 };
 
+&mpp_srv {
+	status = "okay";
+};
+
 &nandc {
 	status = "okay";
 };
@@ -547,8 +579,8 @@
 			rockchip,pins =
 				/* depend on the hardware */
 				<2 RK_PB0 1 &pcfg_pull_none>, /* DCLK */
-				/* <2 RK_PB1 1 &pcfg_pull_none>, /* HSYNC */
-				/* <2 RK_PB2 1 &pcfg_pull_none>, /* VSYNC */
+				/* <2 RK_PB1 1 &pcfg_pull_none>, *//* HSYNC */
+				/* <2 RK_PB2 1 &pcfg_pull_none>, *//* VSYNC */
 				<2 RK_PB3 1 &pcfg_pull_none>, /* DEN */
 				<2 RK_PB4 1 &pcfg_pull_none>, /* DATA10 */
 				<2 RK_PB5 1 &pcfg_pull_none>, /* DATA11 */
@@ -558,12 +590,12 @@
 				<2 RK_PC1 1 &pcfg_pull_none>, /* DATA15 */
 				<2 RK_PC2 1 &pcfg_pull_none>, /* DATA16 */
 				<2 RK_PC3 1 &pcfg_pull_none>; /* DATA17 */
-				/* <2 RK_PC4 1 &pcfg_pull_none>, /* DATA18 */
-				/* <2 RK_PC5 1 &pcfg_pull_none>, /* DATA19 */
-				/* <2 RK_PC6 1 &pcfg_pull_none>, /* DATA20 */
-				/* <2 RK_PC7 1 &pcfg_pull_none>, /* DATA21 */
-				/* <2 RK_PD0 1 &pcfg_pull_none>, /* DATA22 */
-				/* <2 RK_PD1 1 &pcfg_pull_none>; /* DATA23 */
+				/* <2 RK_PC4 1 &pcfg_pull_none>, *//* DATA18 */
+				/* <2 RK_PC5 1 &pcfg_pull_none>, *//* DATA19 */
+				/* <2 RK_PC6 1 &pcfg_pull_none>, *//* DATA20 */
+				/* <2 RK_PC7 1 &pcfg_pull_none>, *//* DATA21 */
+				/* <2 RK_PD0 1 &pcfg_pull_none>, *//* DATA22 */
+				/* <2 RK_PD1 1 &pcfg_pull_none>; *//* DATA23 */
 		};
 	};
 
@@ -649,6 +681,14 @@
 	status = "okay";
 };
 
-&vpu {
+&vdpu {
+	status = "okay";
+};
+
+&vepu {
+	status = "okay";
+};
+
+&vpu_mmu {
 	status = "okay";
 };

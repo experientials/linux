@@ -45,7 +45,6 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/regmap.h>
 #include <media/videobuf2-dma-contig.h>
-#include <linux/dma-iommu.h>
 #include <dt-bindings/soc/rockchip-system-status.h>
 #include <soc/rockchip/rockchip-system-status.h>
 #include "regs.h"
@@ -80,6 +79,30 @@ MODULE_PARM_DESC(version, "version number");
 
 static DEFINE_MUTEX(rkisp1_dev_mutex);
 static LIST_HEAD(rkisp1_device_list);
+
+static int __maybe_unused __rkisp1_clr_unready_dev(void)
+{
+	struct rkisp1_device *isp_dev;
+
+	mutex_lock(&rkisp1_dev_mutex);
+	list_for_each_entry(isp_dev, &rkisp1_device_list, list)
+		v4l2_async_notifier_clr_unready_dev(&isp_dev->notifier);
+	mutex_unlock(&rkisp1_dev_mutex);
+
+	return 0;
+}
+
+static int rkisp1_clr_unready_dev_param_set(const char *val, const struct kernel_param *kp)
+{
+#ifdef MODULE
+	__rkisp1_clr_unready_dev();
+#endif
+
+	return 0;
+}
+
+module_param_call(clr_unready_dev, rkisp1_clr_unready_dev_param_set, NULL, NULL, 0200);
+MODULE_PARM_DESC(clr_unready_dev, "clear unready devices");
 
 /**************************** pipeline operations *****************************/
 
@@ -145,7 +168,7 @@ static int __isp_pipeline_s_isp_clk(struct rkisp1_pipeline *p)
 	sd = p->subdevs[0];
 	for (i = 0; i < p->num_subdevs; i++) {
 		sd = p->subdevs[i];
-		if (sd->entity.type == MEDIA_ENT_T_V4L2_SUBDEV_SENSOR)
+		if (sd->entity.function == MEDIA_ENT_F_CAM_SENSOR)
 			break;
 	}
 
@@ -260,125 +283,6 @@ err_stream_off:
 	return ret;
 }
 
-static int rkisp1_pipeline_pm_use_count(struct media_entity *entity)
-{
-	struct media_entity_graph graph;
-	int use = 0;
-
-	media_entity_graph_walk_start(&graph, entity);
-
-	while ((entity = media_entity_graph_walk_next(&graph))) {
-		if (media_entity_type(entity) == MEDIA_ENT_T_DEVNODE)
-			use += entity->use_count;
-	}
-
-	return use;
-}
-
-static int rkisp1_pipeline_pm_power_one(struct media_entity *entity, int change)
-{
-	struct v4l2_subdev *subdev;
-	int ret;
-
-	subdev = media_entity_type(entity) == MEDIA_ENT_T_V4L2_SUBDEV
-	       ? media_entity_to_v4l2_subdev(entity) : NULL;
-
-	if (entity->use_count == 0 && change > 0 && subdev) {
-		ret = v4l2_subdev_call(subdev, core, s_power, 1);
-		if (ret < 0 && ret != -ENOIOCTLCMD)
-			return ret;
-	}
-
-	entity->use_count += change;
-	WARN_ON(entity->use_count < 0);
-
-	if (entity->use_count == 0 && change < 0 && subdev)
-		v4l2_subdev_call(subdev, core, s_power, 0);
-
-	return 0;
-}
-
-static int rkisp1_pipeline_pm_power(struct media_entity *entity, int change)
-{
-	struct media_entity_graph graph;
-	struct media_entity *first = entity;
-	int ret = 0;
-
-	if (!change)
-		return 0;
-
-	media_entity_graph_walk_start(&graph, entity);
-
-	while (!ret && (entity = media_entity_graph_walk_next(&graph)))
-		if (media_entity_type(entity) != MEDIA_ENT_T_DEVNODE)
-			ret = rkisp1_pipeline_pm_power_one(entity, change);
-
-	if (!ret)
-		return 0;
-
-	media_entity_graph_walk_start(&graph, first);
-
-	while ((first = media_entity_graph_walk_next(&graph)) && first != entity)
-		if (media_entity_type(first) != MEDIA_ENT_T_DEVNODE)
-			rkisp1_pipeline_pm_power_one(first, -change);
-
-	return ret;
-}
-
-static int rkisp1_pipeline_pm_use(struct media_entity *entity, int use)
-{
-	int change = use ? 1 : -1;
-	int ret;
-
-	mutex_lock(&entity->parent->graph_mutex);
-
-	/* Apply use count to node. */
-	entity->use_count += change;
-	WARN_ON(entity->use_count < 0);
-
-	/* Apply power change to connected non-nodes. */
-	ret = rkisp1_pipeline_pm_power(entity, change);
-	if (ret < 0)
-		entity->use_count -= change;
-
-	mutex_unlock(&entity->parent->graph_mutex);
-
-	return ret;
-}
-
-static int rkisp1_pipeline_link_notify(struct media_link *link, u32 flags,
-				    unsigned int notification)
-{
-	struct media_entity *source = link->source->entity;
-	struct media_entity *sink = link->sink->entity;
-	int source_use = rkisp1_pipeline_pm_use_count(source);
-	int sink_use = rkisp1_pipeline_pm_use_count(sink);
-	int ret;
-
-	if (notification == MEDIA_DEV_NOTIFY_POST_LINK_CH &&
-	    !(flags & MEDIA_LNK_FL_ENABLED)) {
-		/* Powering off entities is assumed to never fail. */
-		rkisp1_pipeline_pm_power(source, -sink_use);
-		rkisp1_pipeline_pm_power(sink, -source_use);
-		return 0;
-	}
-
-	if (notification == MEDIA_DEV_NOTIFY_PRE_LINK_CH &&
-		(flags & MEDIA_LNK_FL_ENABLED)) {
-		ret = rkisp1_pipeline_pm_power(source, sink_use);
-		if (ret < 0)
-			return ret;
-
-		ret = rkisp1_pipeline_pm_power(sink, source_use);
-		if (ret < 0)
-			rkisp1_pipeline_pm_power(source, -sink_use);
-
-		return ret;
-	}
-
-	return 0;
-}
-
 /***************************** media controller *******************************/
 /* See http://opensource.rock-chips.com/wiki_Rockchip-isp1 for Topology */
 
@@ -405,7 +309,7 @@ static int rkisp1_create_links(struct rkisp1_device *dev)
 			return -ENXIO;
 		}
 
-		ret = media_entity_create_link(
+		ret = media_create_pad_link(
 				&sensor->sd->entity, pad,
 				&dev->isp_sdev.sd.entity,
 				RKISP1_ISP_PAD_SINK,
@@ -422,7 +326,7 @@ static int rkisp1_create_links(struct rkisp1_device *dev)
 	source = &dev->params_vdev.vnode.vdev.entity;
 	sink = &dev->isp_sdev.sd.entity;
 	flags = MEDIA_LNK_FL_ENABLED;
-	ret = media_entity_create_link(source, 0, sink,
+	ret = media_create_pad_link(source, 0, sink,
 				       RKISP1_ISP_PAD_SINK_PARAMS, flags);
 	if (ret < 0)
 		return ret;
@@ -432,9 +336,9 @@ static int rkisp1_create_links(struct rkisp1_device *dev)
 		/* SP links */
 		source = &dev->isp_sdev.sd.entity;
 		sink = &dev->stream[RKISP1_STREAM_SP].vnode.vdev.entity;
-		ret = media_entity_create_link(source,
-					       RKISP1_ISP_PAD_SOURCE_PATH,
-					       sink, 0, flags);
+		ret = media_create_pad_link(source,
+					    RKISP1_ISP_PAD_SOURCE_PATH,
+					    sink, 0, flags);
 		if (ret < 0)
 			return ret;
 	}
@@ -442,7 +346,7 @@ static int rkisp1_create_links(struct rkisp1_device *dev)
 	/* MP links */
 	source = &dev->isp_sdev.sd.entity;
 	sink = &dev->stream[RKISP1_STREAM_MP].vnode.vdev.entity;
-	ret = media_entity_create_link(source, RKISP1_ISP_PAD_SOURCE_PATH,
+	ret = media_create_pad_link(source, RKISP1_ISP_PAD_SOURCE_PATH,
 				       sink, 0, flags);
 	if (ret < 0)
 		return ret;
@@ -456,7 +360,7 @@ static int rkisp1_create_links(struct rkisp1_device *dev)
 		/* MIPI RAW links */
 		source = &dev->isp_sdev.sd.entity;
 		sink = &dev->stream[RKISP1_STREAM_RAW].vnode.vdev.entity;
-		ret = media_entity_create_link(source,
+		ret = media_create_pad_link(source,
 			RKISP1_ISP_PAD_SOURCE_PATH, sink, 0, flags);
 		if (ret < 0)
 			return ret;
@@ -465,7 +369,7 @@ static int rkisp1_create_links(struct rkisp1_device *dev)
 	/* 3A stats links */
 	source = &dev->isp_sdev.sd.entity;
 	sink = &dev->stats_vdev.vnode.vdev.entity;
-	return media_entity_create_link(source, RKISP1_ISP_PAD_SOURCE_STATS,
+	return media_create_pad_link(source, RKISP1_ISP_PAD_SOURCE_STATS,
 					sink, 0, flags);
 }
 
@@ -475,7 +379,7 @@ static int _set_pipeline_default_fmt(struct rkisp1_device *dev)
 	struct v4l2_subdev_format fmt;
 	struct v4l2_subdev_selection sel;
 	struct v4l2_subdev_pad_config cfg;
-	u32 width, height, max_width, max_height;
+	u32 width, height;
 	u32 ori_width, ori_height, ori_code;
 
 	isp = &dev->isp_sdev.sd;
@@ -485,31 +389,28 @@ static int _set_pipeline_default_fmt(struct rkisp1_device *dev)
 	ori_height = fmt.format.height;
 	ori_code = fmt.format.code;
 
-	if ((fmt.format.code & RKISP1_MEDIA_BUS_FMT_MASK) !=
-	    RKISP1_MEDIA_BUS_FMT_BAYER) {
-		max_width = CIF_ISP_INPUT_W_MAX;
-		max_height = CIF_ISP_INPUT_H_MAX;
+	if (dev->isp_ver == ISP_V12) {
+		fmt.format.width  = clamp_t(u32, fmt.format.width,
+					CIF_ISP_INPUT_W_MIN,
+					CIF_ISP_INPUT_W_MAX_V12);
+		fmt.format.height = clamp_t(u32, fmt.format.height,
+					CIF_ISP_INPUT_H_MIN,
+					CIF_ISP_INPUT_H_MAX_V12);
+	} else if (dev->isp_ver == ISP_V13) {
+		fmt.format.width  = clamp_t(u32, fmt.format.width,
+					CIF_ISP_INPUT_W_MIN,
+					CIF_ISP_INPUT_W_MAX_V13);
+		fmt.format.height = clamp_t(u32, fmt.format.height,
+					CIF_ISP_INPUT_H_MIN,
+					CIF_ISP_INPUT_H_MAX_V13);
 	} else {
-		switch (dev->isp_ver) {
-		case ISP_V12:
-			max_width = CIF_ISP_INPUT_W_MAX_V12;
-			max_height = CIF_ISP_INPUT_H_MAX_V12;
-			break;
-		case ISP_V13:
-			max_width = CIF_ISP_INPUT_W_MAX_V13;
-			max_height = CIF_ISP_INPUT_H_MAX_V13;
-			break;
-		default:
-			max_width = CIF_ISP_INPUT_W_MAX;
-			max_height = CIF_ISP_INPUT_H_MAX;
-		}
+		fmt.format.width  = clamp_t(u32, fmt.format.width,
+					CIF_ISP_INPUT_W_MIN,
+					CIF_ISP_INPUT_W_MAX);
+		fmt.format.height = clamp_t(u32, fmt.format.height,
+					CIF_ISP_INPUT_H_MIN,
+					CIF_ISP_INPUT_H_MAX);
 	}
-	fmt.format.width  = clamp_t(u32, fmt.format.width,
-				CIF_ISP_INPUT_W_MIN,
-				max_width);
-	fmt.format.height = clamp_t(u32, fmt.format.height,
-				CIF_ISP_INPUT_H_MIN,
-				max_height);
 
 	sel.r.left = 0;
 	sel.r.top = 0;
@@ -662,11 +563,9 @@ static int rkisp1_register_platform_subdevs(struct rkisp1_device *dev)
 {
 	int ret;
 
-	dev->alloc_ctx = vb2_dma_contig_init_ctx(dev->v4l2_dev.dev);
-
 	ret = rkisp1_register_isp_subdev(dev, &dev->v4l2_dev);
 	if (ret < 0)
-		goto err_cleanup_ctx;
+		return ret;
 
 	ret = rkisp1_register_stream_vdevs(dev);
 	if (ret < 0)
@@ -703,8 +602,6 @@ err_unreg_stream_vdev:
 	rkisp1_unregister_stream_vdevs(dev);
 err_unreg_isp_subdev:
 	rkisp1_unregister_isp_subdev(dev);
-err_cleanup_ctx:
-	vb2_dma_contig_cleanup_ctx(dev->alloc_ctx);
 
 	return ret;
 }
@@ -985,66 +882,6 @@ err:
 	return ret;
 }
 
-static int rkisp1_iommu_init(struct rkisp1_device *rkisp1_dev)
-{
-	struct device *dev = rkisp1_dev->dev;
-	struct iommu_domain *domain;
-	struct iommu_group *group;
-	int ret = 0;
-
-	rkisp1_dev->domain = iommu_domain_alloc(&platform_bus_type);
-	if (!rkisp1_dev->domain) {
-		ret = -ENOMEM;
-		goto err;
-	}
-
-	domain = rkisp1_dev->domain;
-	ret = iommu_get_dma_cookie(rkisp1_dev->domain);
-	if (ret)
-		goto err;
-
-	group = iommu_group_get(rkisp1_dev->dev);
-	if (!group) {
-		group = iommu_group_alloc();
-		if (IS_ERR(group))
-			goto err;
-		ret = iommu_group_add_device(group, rkisp1_dev->dev);
-		iommu_group_put(group);
-		if (ret)
-			goto err;
-	}
-
-	ret = iommu_attach_device(domain, dev);
-	if (ret) {
-		dev_err(dev, "Failed to attach iommu device\n");
-		goto err;
-	}
-
-	if (!common_iommu_setup_dma_ops(dev, 0x10000000, SZ_2G, domain->ops)) {
-		dev_err(dev, "Failed to set dma_ops\n");
-		iommu_detach_device(domain, dev);
-		ret = -ENODEV;
-	}
-
-	return ret;
-
-err:
-	dev_err(rkisp1_dev->dev, "Failed to setup IOMMU\n");
-
-	return ret;
-}
-
-static void rkisp1_iommu_cleanup(struct rkisp1_device *rkisp1_dev)
-{
-	struct iommu_domain *domain = rkisp1_dev->domain;
-	struct device *dev = rkisp1_dev->dev;
-
-	if (domain) {
-		iommu_detach_device(domain, dev);
-		iommu_domain_free(domain);
-	}
-}
-
 static inline bool is_iommu_enable(struct device *dev)
 {
 	struct device_node *iommu;
@@ -1105,6 +942,10 @@ static int rkisp1_vs_irq_parse(struct platform_device *pdev)
 
 	return 0;
 }
+
+static const struct media_device_ops rkisp1_media_ops = {
+	.link_notify = v4l2_pipeline_link_notify,
+};
 
 static int rkisp1_plat_probe(struct platform_device *pdev)
 {
@@ -1215,7 +1056,6 @@ static int rkisp1_plat_probe(struct platform_device *pdev)
 	isp_dev->pipe.open = rkisp1_pipeline_open;
 	isp_dev->pipe.close = rkisp1_pipeline_close;
 	isp_dev->pipe.set_stream = rkisp1_pipeline_set_stream;
-	isp_dev->pipe.pm_use = rkisp1_pipeline_pm_use;
 
 	rkisp1_stream_init(isp_dev, RKISP1_STREAM_SP);
 	rkisp1_stream_init(isp_dev, RKISP1_STREAM_MP);
@@ -1224,6 +1064,7 @@ static int rkisp1_plat_probe(struct platform_device *pdev)
 	strlcpy(isp_dev->media_dev.model, "rkisp1",
 		sizeof(isp_dev->media_dev.model));
 	isp_dev->media_dev.dev = &pdev->dev;
+	isp_dev->media_dev.ops = &rkisp1_media_ops;
 	v4l2_dev = &isp_dev->v4l2_dev;
 	v4l2_dev->mdev = &isp_dev->media_dev;
 	strlcpy(v4l2_dev->name, "rkisp1", sizeof(v4l2_dev->name));
@@ -1237,7 +1078,7 @@ static int rkisp1_plat_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	isp_dev->media_dev.link_notify = rkisp1_pipeline_link_notify;
+	media_device_init(&isp_dev->media_dev);
 	ret = media_device_register(&isp_dev->media_dev);
 	if (ret < 0) {
 		v4l2_err(v4l2_dev, "Failed to register media device: %d\n",
@@ -1250,26 +1091,18 @@ static int rkisp1_plat_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto err_unreg_media_dev;
 
-	if (is_iommu_enable(dev)) {
-		rkisp1_iommu_init(isp_dev);
-	} else {
+	if (!is_iommu_enable(dev)) {
 		ret = of_reserved_mem_device_init(dev);
 		if (ret)
 			v4l2_warn(v4l2_dev,
 				  "No reserved memory region assign to isp\n");
 	}
+
 	pm_runtime_enable(&pdev->dev);
 
 	ret = rkisp1_vs_irq_parse(pdev);
 	if (ret)
 		goto err_runtime_disable;
-
-	if (isp_dev->isp_ver == ISP_V12 || isp_dev->isp_ver == ISP_V13) {
-		writel(0, isp_dev->base_addr + CIF_ISP_CSI0_CTRL0);
-		writel(0, isp_dev->base_addr + CIF_ISP_CSI0_MASK1);
-		writel(0, isp_dev->base_addr + CIF_ISP_CSI0_MASK2);
-		writel(0, isp_dev->base_addr + CIF_ISP_CSI0_MASK3);
-	}
 
 	mutex_lock(&rkisp1_dev_mutex);
 	list_add_tail(&isp_dev->list, &rkisp1_device_list);
@@ -1278,7 +1111,6 @@ static int rkisp1_plat_probe(struct platform_device *pdev)
 
 err_runtime_disable:
 	pm_runtime_disable(&pdev->dev);
-	rkisp1_iommu_cleanup(isp_dev);
 err_unreg_media_dev:
 	media_device_unregister(&isp_dev->media_dev);
 err_unreg_v4l2_dev:
@@ -1292,7 +1124,6 @@ static int rkisp1_plat_remove(struct platform_device *pdev)
 	struct rkisp1_device *isp_dev = platform_get_drvdata(pdev);
 
 	pm_runtime_disable(&pdev->dev);
-	rkisp1_iommu_cleanup(isp_dev);
 
 	media_device_unregister(&isp_dev->media_dev);
 	v4l2_device_unregister(&isp_dev->v4l2_dev);
@@ -1300,28 +1131,9 @@ static int rkisp1_plat_remove(struct platform_device *pdev)
 	rkisp1_unregister_stats_vdev(&isp_dev->stats_vdev);
 	rkisp1_unregister_stream_vdevs(isp_dev);
 	rkisp1_unregister_isp_subdev(isp_dev);
-	vb2_dma_contig_cleanup_ctx(isp_dev->alloc_ctx);
+	media_device_cleanup(&isp_dev->media_dev);
 
 	return 0;
-}
-
-static int __maybe_unused rkisp1_suspend(struct device *dev)
-{
-	struct rkisp1_device *isp_dev = dev_get_drvdata(dev);
-
-	rkisp1_dma_detach_device(isp_dev);
-	return pm_runtime_force_suspend(dev);
-}
-
-static int __maybe_unused rkisp1_resume(struct device *dev)
-{
-	struct rkisp1_device *isp_dev = dev_get_drvdata(dev);
-	int ret;
-
-	ret = pm_runtime_force_resume(dev);
-	if (ret < 0)
-		return ret;
-	return rkisp1_dma_attach_device(isp_dev);
 }
 
 static int __maybe_unused rkisp1_runtime_suspend(struct device *dev)
@@ -1357,21 +1169,18 @@ static int __maybe_unused rkisp1_runtime_resume(struct device *dev)
 	return 0;
 }
 
+#ifndef MODULE
 static int __init rkisp1_clr_unready_dev(void)
 {
-	struct rkisp1_device *isp_dev;
-
-	mutex_lock(&rkisp1_dev_mutex);
-	list_for_each_entry(isp_dev, &rkisp1_device_list, list)
-		v4l2_async_notifier_clr_unready_dev(&isp_dev->notifier);
-	mutex_unlock(&rkisp1_dev_mutex);
-
+	__rkisp1_clr_unready_dev();
 	return 0;
 }
 late_initcall_sync(rkisp1_clr_unready_dev);
+#endif
 
 static const struct dev_pm_ops rkisp1_plat_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(rkisp1_suspend, rkisp1_resume)
+	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
+				pm_runtime_force_resume)
 	SET_RUNTIME_PM_OPS(rkisp1_runtime_suspend, rkisp1_runtime_resume, NULL)
 };
 

@@ -13,11 +13,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
- * USA
- *
  * Special thanks to:
  *   Sami R. <maesesami@gmail.com> for lot of help in debugging and therefore
  *    bringing to life support for transmission & learning mode.
@@ -331,6 +326,8 @@ static int ene_rx_get_sample_reg(struct ene_device *dev)
 /* Sense current received carrier */
 static void ene_rx_sense_carrier(struct ene_device *dev)
 {
+	DEFINE_IR_RAW_EVENT(ev);
+
 	int carrier, duty_cycle;
 	int period = ene_read_reg(dev, ENE_CIRCAR_PRD);
 	int hperiod = ene_read_reg(dev, ENE_CIRCAR_HPRD);
@@ -351,11 +348,9 @@ static void ene_rx_sense_carrier(struct ene_device *dev)
 	dbg("RX: sensed carrier = %d Hz, duty cycle %d%%",
 						carrier, duty_cycle);
 	if (dev->carrier_detect_enabled) {
-		struct ir_raw_event ev = {
-			.carrier_report = true,
-			.carrier = carrier,
-			.duty_cycle = duty_cycle
-		};
+		ev.carrier_report = true;
+		ev.carrier = carrier;
+		ev.duty_cycle = duty_cycle;
 		ir_raw_event_store(dev->rdev, &ev);
 	}
 }
@@ -738,7 +733,7 @@ static irqreturn_t ene_isr(int irq, void *data)
 	unsigned long flags;
 	irqreturn_t retval = IRQ_NONE;
 	struct ene_device *dev = (struct ene_device *)data;
-	struct ir_raw_event ev = {};
+	DEFINE_IR_RAW_EVENT(ev);
 
 	spin_lock_irqsave(&dev->hw_lock, flags);
 
@@ -904,7 +899,7 @@ static int ene_set_tx_carrier(struct rc_dev *rdev, u32 carrier)
 
 		dbg("TX: out of range %d-%d kHz carrier",
 			2000 / ENE_CIRMOD_PRD_MIN, 2000 / ENE_CIRMOD_PRD_MAX);
-		return -1;
+		return -EINVAL;
 	}
 
 	dev->tx_period = period;

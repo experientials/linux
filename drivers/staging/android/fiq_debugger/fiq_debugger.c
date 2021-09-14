@@ -27,13 +27,12 @@
 #include <linux/irq.h>
 #include <linux/delay.h>
 #include <linux/reboot.h>
-#include <linux/sched.h>
+#include <linux/sched/signal.h>
 #include <linux/slab.h>
 #include <linux/smp.h>
 #include <linux/timer.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
-#include <linux/wakelock.h>
 #include <linux/ptrace.h>
 #include <linux/proc_fs.h>
 
@@ -54,6 +53,10 @@
 #include "fiq_debugger.h"
 #include "fiq_debugger_priv.h"
 #include "fiq_debugger_ringbuf.h"
+
+#ifdef CONFIG_ROCKCHIP_DEBUG
+#include "../../../soc/rockchip/rockchip_debug.h"
+#endif
 
 #define DEBUG_MAX 64
 #define CMD_COUNT 0x0f
@@ -99,7 +102,7 @@ struct fiq_debugger_state {
 	struct timer_list sleep_timer;
 	spinlock_t sleep_timer_lock;
 	bool uart_enabled;
-	struct wake_lock debugger_wake_lock;
+	struct wakeup_source debugger_wake_src;
 	bool console_enable;
 	int current_cpu;
 	atomic_t unhandled_fiq_count;
@@ -490,6 +493,9 @@ static char cmd_buf[][16] = {
 		{"reboot"},
 		{"irqs"},
 		{"kmsg"},
+#ifdef CONFIG_ROCKCHIP_DEBUG
+		{"pcsr"},
+#endif
 		{"version"},
 		{"sleep"},
 		{"nosleep"},
@@ -516,6 +522,9 @@ static void fiq_debugger_help(struct fiq_debugger_state *state)
 				" reset [<c>]   Hard reset with command <c>\n"
 				" irqs          Interupt status\n");
 	fiq_debugger_printf(&state->output,
+#ifdef CONFIG_ROCKCHIP_DEBUG
+				" pcsr          Dump all cpus pc by DBGPCSR\n"
+#endif
 				" kmsg          Kernel log\n"
 				" version       Kernel version\n");
 	fiq_debugger_printf(&state->output,
@@ -624,6 +633,10 @@ static bool fiq_debugger_fiq_exec(struct fiq_debugger_state *state,
 		fiq_debugger_dump_irqs(state);
 	} else if (!strcmp(cmd, "kmsg")) {
 		fiq_debugger_dump_kernel_log(state);
+#ifdef CONFIG_ROCKCHIP_DEBUG
+	} else if (!strcmp(cmd, "pcsr")) {
+		rockchip_debug_dump_pcsr(&state->output);
+#endif
 	} else if (!strcmp(cmd, "version")) {
 		fiq_debugger_printf(&state->output, "%s\n", linux_banner);
 	} else if (!strcmp(cmd, "sleep")) {
@@ -670,9 +683,9 @@ static bool fiq_debugger_fiq_exec(struct fiq_debugger_state *state,
 	return signal_helper;
 }
 
-static void fiq_debugger_sleep_timer_expired(unsigned long data)
+static void fiq_debugger_sleep_timer_expired(struct timer_list *t)
 {
-	struct fiq_debugger_state *state = (struct fiq_debugger_state *)data;
+	struct fiq_debugger_state *state = from_timer(state, t, sleep_timer);
 	unsigned long flags;
 
 	spin_lock_irqsave(&state->sleep_timer_lock, flags);
@@ -687,7 +700,7 @@ static void fiq_debugger_sleep_timer_expired(unsigned long data)
 		state->uart_enabled = false;
 		fiq_debugger_enable_wakeup_irq(state);
 	}
-	wake_unlock(&state->debugger_wake_lock);
+	__pm_relax(&state->debugger_wake_src);
 	spin_unlock_irqrestore(&state->sleep_timer_lock, flags);
 }
 
@@ -699,7 +712,7 @@ static void fiq_debugger_handle_wakeup(struct fiq_debugger_state *state)
 	if (state->wakeup_irq >= 0 && state->ignore_next_wakeup_irq) {
 		state->ignore_next_wakeup_irq = false;
 	} else if (!state->uart_enabled) {
-		wake_lock(&state->debugger_wake_lock);
+		__pm_stay_awake(&state->debugger_wake_src);
 		fiq_debugger_uart_enable(state);
 		state->uart_enabled = true;
 		fiq_debugger_disable_wakeup_irq(state);
@@ -743,7 +756,7 @@ static void fiq_debugger_handle_irq_context(struct fiq_debugger_state *state)
 		unsigned long flags;
 
 		spin_lock_irqsave(&state->sleep_timer_lock, flags);
-		wake_lock(&state->debugger_wake_lock);
+		__pm_stay_awake(&state->debugger_wake_src);
 		mod_timer(&state->sleep_timer, jiffies + HZ * 5);
 		spin_unlock_irqrestore(&state->sleep_timer_lock, flags);
 	}
@@ -870,6 +883,9 @@ static bool fiq_debugger_handle_uart_interrupt(struct fiq_debugger_state *state,
 	static int last_c;
 	int count = 0;
 	bool signal_helper = false;
+
+	if (state->current_cpu == -1)
+		state->current_cpu = this_cpu;
 
 	if (this_cpu != state->current_cpu) {
 		if (state->in_fiq)
@@ -1230,19 +1246,6 @@ static int fiq_tty_proc_show(struct seq_file *m, void *v)
 	}
 	return 0;
 }
-
-static int fiq_tty_proc_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, fiq_tty_proc_show, PDE_DATA(inode));
-}
-
-static const struct file_operations fiq_tty_proc_fops = {
-	.owner		= THIS_MODULE,
-	.open		= fiq_tty_proc_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
 #endif
 
 static const struct tty_port_operations fiq_tty_port_ops;
@@ -1258,7 +1261,7 @@ static const struct tty_operations fiq_tty_driver_ops = {
 	.poll_put_char = fiq_tty_poll_put_char,
 #endif
 #ifdef CONFIG_PROC_FS
-	.proc_fops = &fiq_tty_proc_fops,
+	.proc_show = fiq_tty_proc_show,
 #endif
 };
 
@@ -1403,13 +1406,13 @@ static int fiq_debugger_probe(struct platform_device *pdev)
 #endif
 	state = kzalloc(sizeof(*state), GFP_KERNEL);
 	state->output.printf = fiq_debugger_printf;
-	setup_timer(&state->sleep_timer, fiq_debugger_sleep_timer_expired,
-		    (unsigned long)state);
+	timer_setup(&state->sleep_timer, fiq_debugger_sleep_timer_expired, 0);
 	state->pdata = pdata;
 	state->pdev = pdev;
 	state->no_sleep = initial_no_sleep;
 	state->debug_enable = initial_debug_enable;
 	state->console_enable = initial_console_enable;
+	state->current_cpu = -1;
 
 	state->fiq = fiq;
 	state->uart_irq = uart_irq;
@@ -1427,12 +1430,14 @@ static int fiq_debugger_probe(struct platform_device *pdev)
 		state->no_sleep = true;
 	state->ignore_next_wakeup_irq = !state->no_sleep;
 
-	wake_lock_init(&state->debugger_wake_lock,
-			WAKE_LOCK_SUSPEND, "serial-debug");
+	state->debugger_wake_src.name = "serial-debug";
+	wakeup_source_add(&state->debugger_wake_src);
+
 #ifdef CONFIG_ARCH_ROCKCHIP
 	if (uart_irq < 0 && fiq < 0)
 		goto console_out;
 #endif
+
 	state->clk = clk_get(&pdev->dev, NULL);
 	if (IS_ERR(state->clk))
 		state->clk = NULL;
@@ -1537,6 +1542,10 @@ console_out:
 	register_console(&state->console);
 	fiq_debugger_tty_init_one(state);
 #endif
+
+	/* switch to cpu0 default */
+	fiq_debugger_switch_cpu(state, 0);
+
 	return 0;
 
 err_register_irq:
@@ -1547,7 +1556,8 @@ err_uart_init:
 		clk_disable(state->clk);
 	if (state->clk)
 		clk_put(state->clk);
-	wake_lock_destroy(&state->debugger_wake_lock);
+	wakeup_source_remove(&state->debugger_wake_src);
+	__pm_relax(&state->debugger_wake_src);
 	platform_set_drvdata(pdev, NULL);
 	kfree(state);
 	return ret;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *  bootmem - A boot-time physical memory allocator and configurator
  *
@@ -11,33 +12,57 @@
 #include <linux/init.h>
 #include <linux/pfn.h>
 #include <linux/slab.h>
-#include <linux/bootmem.h>
 #include <linux/export.h>
 #include <linux/kmemleak.h>
 #include <linux/range.h>
 #include <linux/memblock.h>
+#include <linux/bootmem.h>
 
 #include <asm/bug.h>
 #include <asm/io.h>
-#include <asm/processor.h>
 
 #include "internal.h"
+
+#ifndef CONFIG_HAVE_MEMBLOCK
+#error CONFIG_HAVE_MEMBLOCK not defined
+#endif
 
 #ifndef CONFIG_NEED_MULTIPLE_NODES
 struct pglist_data __refdata contig_page_data;
 EXPORT_SYMBOL(contig_page_data);
 #endif
 
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+static unsigned long defer_start __initdata;
+static unsigned long defer_end __initdata;
+
+#define DEFAULT_DEFER_FREE_BLOCK_SIZE SZ_256M
+static unsigned long defer_free_block_size __initdata =
+	DEFAULT_DEFER_FREE_BLOCK_SIZE;
+
+static int __init early_defer_free_block_size(char *p)
+{
+	defer_free_block_size = memparse(p, &p);
+
+	pr_debug("defer_free_block_size = 0x%lx\n", defer_free_block_size);
+
+	return 0;
+}
+
+early_param("defer_free_block_size", early_defer_free_block_size);
+#endif
+
 unsigned long max_low_pfn;
 unsigned long min_low_pfn;
 unsigned long max_pfn;
+unsigned long long max_possible_pfn;
 
 static void * __init __alloc_memory_core_early(int nid, u64 size, u64 align,
 					u64 goal, u64 limit)
 {
 	void *ptr;
 	u64 addr;
-	ulong flags = choose_memblock_flags();
+	enum memblock_flags flags = choose_memblock_flags();
 
 	if (limit > memblock.current_limit)
 		limit = memblock.current_limit;
@@ -67,7 +92,7 @@ again:
 	return ptr;
 }
 
-/*
+/**
  * free_bootmem_late - free bootmem pages directly to page allocator
  * @addr: starting address of the range
  * @size: size of the range in bytes
@@ -80,7 +105,7 @@ void __init free_bootmem_late(unsigned long addr, unsigned long size)
 {
 	unsigned long cursor, end;
 
-	kmemleak_free_part(__va(addr), size);
+	kmemleak_free_part_phys(addr, size);
 
 	cursor = PFN_UP(addr);
 	end = PFN_DOWN(addr + size);
@@ -107,6 +132,28 @@ static void __init __free_pages_memory(unsigned long start, unsigned long end)
 	}
 }
 
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+int __init defer_free_bootmem(void *unused)
+{
+	if (defer_start == 0)
+		return 0;
+
+	pr_debug("start = %ld, end = %ld\n", defer_start, defer_end);
+
+	__free_pages_memory(defer_start, defer_end);
+
+	totalram_pages += defer_end - defer_start;
+
+	pr_info("%s: size %luM free %luM [%luM - %luM] total %luM\n", __func__,
+		defer_free_block_size >> 20,
+		(defer_end - defer_start) >> (20 - PAGE_SHIFT),
+		defer_end >> (20 - PAGE_SHIFT),
+		defer_start >> (20 - PAGE_SHIFT),
+		totalram_pages >> (20 - PAGE_SHIFT));
+	return 0;
+}
+#endif
+
 static unsigned long __init __free_memory_core(phys_addr_t start,
 				 phys_addr_t end)
 {
@@ -114,9 +161,17 @@ static unsigned long __init __free_memory_core(phys_addr_t start,
 	unsigned long end_pfn = min_t(unsigned long,
 				      PFN_DOWN(end), max_low_pfn);
 
-	if (start_pfn > end_pfn)
+	if (start_pfn >= end_pfn)
 		return 0;
 
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+	if ((end - start) > defer_free_block_size) {
+		defer_start = start_pfn;
+		defer_end = end_pfn;
+
+		return 0;
+	}
+#endif
 	__free_pages_memory(start_pfn, end_pfn);
 
 	return end_pfn - start_pfn;
@@ -133,25 +188,14 @@ static unsigned long __init free_low_memory_core_early(void)
 	for_each_reserved_mem_region(i, &start, &end)
 		reserve_bootmem_region(start, end);
 
+	/*
+	 * We need to use NUMA_NO_NODE instead of NODE_DATA(0)->node_id
+	 *  because in some case like Node0 doesn't have RAM installed
+	 *  low ram will be on Node1
+	 */
 	for_each_free_mem_range(i, NUMA_NO_NODE, MEMBLOCK_NONE, &start, &end,
 				NULL)
 		count += __free_memory_core(start, end);
-
-#ifdef CONFIG_ARCH_DISCARD_MEMBLOCK
-	{
-		phys_addr_t size;
-
-		/* Free memblock.reserved array if it was allocated */
-		size = get_allocated_memblock_reserved_regions_info(&start);
-		if (size)
-			count += __free_memory_core(start, start + size);
-
-		/* Free memblock.memory array if it was allocated */
-		size = get_allocated_memblock_memory_regions_info(&start);
-		if (size)
-			count += __free_memory_core(start, start + size);
-	}
-#endif
 
 	return count;
 }
@@ -182,7 +226,7 @@ void __init reset_all_zones_managed_pages(void)
 /**
  * free_all_bootmem - release free pages to the buddy allocator
  *
- * Returns the number of pages actually released.
+ * Return: the number of pages actually released.
  */
 unsigned long __init free_all_bootmem(void)
 {
@@ -190,11 +234,6 @@ unsigned long __init free_all_bootmem(void)
 
 	reset_all_zones_managed_pages();
 
-	/*
-	 * We need to use NUMA_NO_NODE instead of NODE_DATA(0)->node_id
-	 *  because in some case like Node0 doesn't have RAM installed
-	 *  low ram will be on Node1
-	 */
 	pages = free_low_memory_core_early();
 	totalram_pages += pages;
 
@@ -204,7 +243,7 @@ unsigned long __init free_all_bootmem(void)
 /**
  * free_bootmem_node - mark a page range as usable
  * @pgdat: node the range resides on
- * @physaddr: starting address of the range
+ * @physaddr: starting physical address of the range
  * @size: size of the range in bytes
  *
  * Partial pages will be considered reserved and left as they are.
@@ -219,7 +258,7 @@ void __init free_bootmem_node(pg_data_t *pgdat, unsigned long physaddr,
 
 /**
  * free_bootmem - mark a page range as usable
- * @addr: starting address of the range
+ * @addr: starting physical address of the range
  * @size: size of the range in bytes
  *
  * Partial pages will be considered reserved and left as they are.
@@ -267,7 +306,7 @@ restart:
  *
  * Allocation may happen on any node in the system.
  *
- * Returns NULL on failure.
+ * Return: address of the allocated region or %NULL on failure.
  */
 void * __init __alloc_bootmem_nopanic(unsigned long size, unsigned long align,
 					unsigned long goal)
@@ -287,7 +326,7 @@ static void * __init ___alloc_bootmem(unsigned long size, unsigned long align,
 	/*
 	 * Whoops, we cannot satisfy the allocation request.
 	 */
-	printk(KERN_ALERT "bootmem alloc of %lu bytes failed!\n", size);
+	pr_alert("bootmem alloc of %lu bytes failed!\n", size);
 	panic("Out of memory");
 	return NULL;
 }
@@ -304,6 +343,8 @@ static void * __init ___alloc_bootmem(unsigned long size, unsigned long align,
  * Allocation may happen on any node in the system.
  *
  * The function panics if the request can not be satisfied.
+ *
+ * Return: address of the allocated region.
  */
 void * __init __alloc_bootmem(unsigned long size, unsigned long align,
 			      unsigned long goal)
@@ -359,7 +400,7 @@ static void * __init ___alloc_bootmem_node(pg_data_t *pgdat, unsigned long size,
 	if (ptr)
 		return ptr;
 
-	printk(KERN_ALERT "bootmem alloc of %lu bytes failed!\n", size);
+	pr_alert("bootmem alloc of %lu bytes failed!\n", size);
 	panic("Out of memory");
 	return NULL;
 }
@@ -378,6 +419,8 @@ static void * __init ___alloc_bootmem_node(pg_data_t *pgdat, unsigned long size,
  * can not hold the requested memory.
  *
  * The function panics if the request can not be satisfied.
+ *
+ * Return: address of the allocated region.
  */
 void * __init __alloc_bootmem_node(pg_data_t *pgdat, unsigned long size,
 				   unsigned long align, unsigned long goal)
@@ -394,9 +437,6 @@ void * __init __alloc_bootmem_node_high(pg_data_t *pgdat, unsigned long size,
 	return __alloc_bootmem_node(pgdat, size, align, goal);
 }
 
-#ifndef ARCH_LOW_ADDRESS_LIMIT
-#define ARCH_LOW_ADDRESS_LIMIT	0xffffffffUL
-#endif
 
 /**
  * __alloc_bootmem_low - allocate low boot memory
@@ -410,6 +450,8 @@ void * __init __alloc_bootmem_node_high(pg_data_t *pgdat, unsigned long size,
  * Allocation may happen on any node in the system.
  *
  * The function panics if the request can not be satisfied.
+ *
+ * Return: address of the allocated region.
  */
 void * __init __alloc_bootmem_low(unsigned long size, unsigned long align,
 				  unsigned long goal)
@@ -439,6 +481,8 @@ void * __init __alloc_bootmem_low_nopanic(unsigned long size,
  * can not hold the requested memory.
  *
  * The function panics if the request can not be satisfied.
+ *
+ * Return: address of the allocated region.
  */
 void * __init __alloc_bootmem_low_node(pg_data_t *pgdat, unsigned long size,
 				       unsigned long align, unsigned long goal)

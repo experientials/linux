@@ -22,10 +22,14 @@
 #include <linux/seq_file.h>
 #include <linux/mutex.h>
 #include <linux/miscdevice.h>
+#include <linux/module.h>
+#include "../core/block.h"
+#include "../core/card.h"
+#include "../core/core.h"
+#include "../core/mmc_ops.h"
 
 #define BLKSZ		512
 
-struct mmc_card	*this_card = NULL;
 enum emmc_area_type {
 	MMC_DATA_AREA_MAIN,
 	MMC_DATA_AREA_BOOT1,
@@ -186,3 +190,5 @@ exit:
 	return ret;
 }
 EXPORT_SYMBOL(rk_emmc_transfer);
+
+MODULE_LICENSE("GPL");

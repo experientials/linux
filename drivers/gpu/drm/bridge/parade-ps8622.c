@@ -16,24 +16,20 @@
 #include <linux/backlight.h>
 #include <linux/delay.h>
 #include <linux/err.h>
-#include <linux/fb.h>
 #include <linux/gpio.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/of_graph.h>
 #include <linux/pm.h>
 #include <linux/regulator/consumer.h>
-
-#include <drm/drm_panel.h>
+#include <drm/drm_atomic_helper.h>
+#include <drm/drm_crtc.h>
+#include <drm/drm_crtc_helper.h>
 #include <drm/drm_of.h>
-
-#include "drmP.h"
-#include "drm_crtc.h"
-#include "drm_crtc_helper.h"
-#include "drm_atomic_helper.h"
+#include <drm/drm_panel.h>
+#include <drm/drmP.h>
 
 /* Brightness scale on the Parade chip */
 #define PS8622_MAX_BRIGHTNESS 0xff
@@ -65,8 +61,6 @@ struct ps8622_bridge {
 
 	u32 max_lane_count;
 	u32 lane_count;
-	u32 bus_format;
-	bool dual_channel;
 
 	bool enabled;
 };
@@ -105,7 +99,6 @@ static int ps8622_set(struct i2c_client *client, u8 page, u8 reg, u8 val)
 static int ps8622_send_config(struct ps8622_bridge *ps8622)
 {
 	struct i2c_client *cl = ps8622->client;
-	u8 format;
 	int err = 0;
 
 	/* HPD low */
@@ -309,22 +302,8 @@ static int ps8622_send_config(struct ps8622_bridge *ps8622)
 			goto error;
 	}
 
-	switch (ps8622->bus_format) {
-	case MEDIA_BUS_FMT_RGB666_1X7X3_SPWG:
-		format = 0x03;
-		break;
-	case MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA:
-		format = 0x01;
-		break;
-	case MEDIA_BUS_FMT_RGB888_1X7X4_SPWG:
-	default:
-		format = 0x00;
-		break;
-	}
-
-	/* Set LVDS color depth, data mapping and single/dual link */
-	err = ps8622_set(cl, 0x01, 0xcc, 0x10 | (ps8622->dual_channel << 2) |
-			 format);
+	/* Set LVDS output as 6bit-VESA mapping, single LVDS channel */
+	err = ps8622_set(cl, 0x01, 0xcc, 0x13);
 	if (err)
 		goto error;
 
@@ -485,54 +464,20 @@ static void ps8622_post_disable(struct drm_bridge *bridge)
 
 static int ps8622_get_modes(struct drm_connector *connector)
 {
-	struct ps8622_bridge *ps8622 = connector_to_ps8622(connector);
-	struct drm_display_info *info = &connector->display_info;
-	u32 bus_format = MEDIA_BUS_FMT_RGB888_1X24;
-	int num_modes = 0;
-
-	num_modes = drm_panel_get_modes(ps8622->panel);
-
-	if (info->num_bus_formats)
-		ps8622->bus_format = info->bus_formats[0];
-	else
-		ps8622->bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG;
-
-	drm_display_info_set_bus_formats(&connector->display_info,
-					 &bus_format, 1);
-
-	return num_modes;
-}
-
-static struct drm_encoder *ps8622_best_encoder(struct drm_connector *connector)
-{
 	struct ps8622_bridge *ps8622;
 
 	ps8622 = connector_to_ps8622(connector);
 
-	return ps8622->bridge.encoder;
+	return drm_panel_get_modes(ps8622->panel);
 }
 
 static const struct drm_connector_helper_funcs ps8622_connector_helper_funcs = {
 	.get_modes = ps8622_get_modes,
-	.best_encoder = ps8622_best_encoder,
 };
 
-static enum drm_connector_status ps8622_detect(struct drm_connector *connector,
-								bool force)
-{
-	return connector_status_connected;
-}
-
-static void ps8622_connector_destroy(struct drm_connector *connector)
-{
-	drm_connector_cleanup(connector);
-}
-
 static const struct drm_connector_funcs ps8622_connector_funcs = {
-	.dpms = drm_atomic_helper_connector_dpms,
 	.fill_modes = drm_helper_probe_single_connector_modes,
-	.detect = ps8622_detect,
-	.destroy = ps8622_connector_destroy,
+	.destroy = drm_connector_cleanup,
 	.reset = drm_atomic_helper_connector_reset,
 	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
@@ -548,7 +493,6 @@ static int ps8622_attach(struct drm_bridge *bridge)
 		return -ENODEV;
 	}
 
-	ps8622->connector.port = ps8622->client->dev.of_node;
 	ps8622->connector.polled = DRM_CONNECTOR_POLL_HPD;
 	ret = drm_connector_init(bridge->dev, &ps8622->connector,
 			&ps8622_connector_funcs, DRM_MODE_CONNECTOR_LVDS);
@@ -558,7 +502,8 @@ static int ps8622_attach(struct drm_bridge *bridge)
 	}
 	drm_connector_helper_add(&ps8622->connector,
 					&ps8622_connector_helper_funcs);
-	drm_mode_connector_attach_encoder(&ps8622->connector,
+	drm_connector_register(&ps8622->connector);
+	drm_connector_attach_encoder(&ps8622->connector,
 							bridge->encoder);
 
 	if (ps8622->panel)
@@ -595,15 +540,11 @@ static int ps8622_probe(struct i2c_client *client,
 	if (!ps8622)
 		return -ENOMEM;
 
-	ret = drm_of_find_panel_or_bridge(dev->of_node, 1, -1,
-					  &ps8622->panel, NULL);
+	ret = drm_of_find_panel_or_bridge(dev->of_node, 0, 0, &ps8622->panel, NULL);
 	if (ret)
 		return ret;
 
 	ps8622->client = client;
-
-	ps8622->dual_channel = of_property_read_bool(dev->of_node,
-						     "dual-channel");
 
 	ps8622->v12 = devm_regulator_get(dev, "vdd12");
 	if (IS_ERR(ps8622->v12)) {
@@ -656,11 +597,7 @@ static int ps8622_probe(struct i2c_client *client,
 
 	ps8622->bridge.funcs = &ps8622_bridge_funcs;
 	ps8622->bridge.of_node = dev->of_node;
-	ret = drm_bridge_add(&ps8622->bridge);
-	if (ret) {
-		DRM_ERROR("Failed to add bridge\n");
-		return ret;
-	}
+	drm_bridge_add(&ps8622->bridge);
 
 	i2c_set_clientdata(client, ps8622);
 
@@ -671,9 +608,7 @@ static int ps8622_remove(struct i2c_client *client)
 {
 	struct ps8622_bridge *ps8622 = i2c_get_clientdata(client);
 
-	if (ps8622->bl)
-		backlight_device_unregister(ps8622->bl);
-
+	backlight_device_unregister(ps8622->bl);
 	drm_bridge_remove(&ps8622->bridge);
 
 	return 0;

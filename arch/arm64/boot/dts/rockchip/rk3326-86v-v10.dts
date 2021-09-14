@@ -11,7 +11,7 @@
 #include <dt-bindings/sensor-dev.h>
 #include "rk3326.dtsi"
 #include "rk3326-863-cif-sensor.dtsi"
-#include "rk3326-android.dtsi"
+#include "px30-android.dtsi"
 
 / {
 	model = "Rockchip rk3326 86v board";
@@ -139,7 +139,7 @@
 		};
 	};
 
-	rk_headset {
+	rk_headset: rk-headset {
 		compatible = "rockchip_headset";
 		headset_gpio = <&gpio2 RK_PC6 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";
@@ -497,7 +497,6 @@
 			};
 
 			otg_switch: OTG_SWITCH {
-				regulator-boot-on;
 				regulator-name = "otg_switch";
 			};
 		};
@@ -784,7 +783,35 @@
 	status = "okay";
 };
 
-&vpu_combo {
+&vopl {
+	status = "okay";
+};
+
+&vopl_mmu {
+	status = "okay";
+};
+
+&mpp_srv {
+	status = "okay";
+};
+
+&vdpu {
+	status = "okay";
+};
+
+&vepu {
+	status = "okay";
+};
+
+&vpu_mmu {
+	status = "okay";
+};
+
+&hevc {
+	status = "okay";
+};
+
+&hevc_mmu {
 	status = "okay";
 };
 

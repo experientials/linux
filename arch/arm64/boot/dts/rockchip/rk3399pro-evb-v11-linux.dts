@@ -2,7 +2,6 @@
 // Copyright (c) 2018 Fuzhou Rockchip Electronics Co., Ltd
 
 /dts-v1/;
-#include <dt-bindings/soc/rockchip-io-domain.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/pinctrl/rockchip.h>
 #include <dt-bindings/input/input.h>
@@ -114,6 +113,21 @@
 		interrupts = <GIC_SPI 150 IRQ_TYPE_LEVEL_HIGH 0>;
 	};
 
+	hdmi_sound: hdmi-sound {
+		status = "okay";
+		compatible = "simple-audio-card";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,mclk-fs = <256>;
+		simple-audio-card,name = "rockchip,hdmi";
+
+		simple-audio-card,cpu {
+			sound-dai = <&i2s2>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&hdmi>;
+		};
+	};
+
 	panel: panel {
 		compatible = "simple-panel";
 		backlight = <&backlight>;
@@ -158,22 +172,7 @@
 		rockchip,codec = <&rk809_codec>;
 	};
 
-	hdmi_sound: hdmi-sound {
-		status = "okay";
-		compatible = "simple-audio-card";
-		simple-audio-card,format = "i2s";
-		simple-audio-card,mclk-fs = <256>;
-		simple-audio-card,name = "rockchip,hdmi";
-
-		simple-audio-card,cpu {
-			sound-dai = <&i2s2>;
-		};
-		simple-audio-card,codec {
-			sound-dai = <&hdmi>;
-		};
-	};
-
-	rk_headset {
+	rk_headset: rk-headset {
 		compatible = "rockchip_headset";
 		headset_gpio = <&gpio0 RK_PB5 GPIO_ACTIVE_HIGH>;
 		pinctrl-names = "default";
@@ -281,7 +280,7 @@
 	center-supply = <&vdd_center>;
 };
 
-&dp_in_vopl {
+&dp_in_vopb {
 	status = "disabled";
 };
 
@@ -574,6 +573,7 @@
 			};
 
 			vcc_sd: LDO_REG9 {
+				regulator-always-on;
 				regulator-boot-on;
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
@@ -736,10 +736,7 @@
 		pwdn-gpios = <&gpio4 25 GPIO_ACTIVE_HIGH>;
 		pinctrl-names = "rockchip,camera_default";
 		pinctrl-0 = <&cif_clkout>;
-		rockchip,camera-module-index = <0>;
-		rockchip,camera-module-facing = "back";
-		rockchip,camera-module-name = "CMK-CT0116";
-		rockchip,camera-module-lens-name = "Largan-50013A1";
+
 		lens-focus = <&vm149c>;
 
 		port {
@@ -818,38 +815,8 @@
 	status = "okay";
 };
 
-&iep {
-	status = "okay";
-};
-
-&iep_mmu {
-	status = "okay";
-};
-
 &io_domains {
 	status = "okay";
-	/*
-	 * If the uboot use rkdevelop branch, the io-domain is not set
-	 * during uboot phase, it will cause the io voltage is not suit for
-	 * the hardware,maybe will damage the io of rk3399, so we add
-	 * uboot-set value to make sure the value is same with the kernel,
-	 * ofcause you must make sure firstly the value here is suit for your
-	 * hardware. The available value is defined in
-	 * include/dt-bindings/soc/rockchip-io-domain.h, they are
-	 * also list here for more convenient configuration:
-	 * bt656-supply: RK3399_BT656_VDD_1V8 or RK3399_BT656_VDD_3V3
-	 * audio-supply: RK3399_AUDIO_VDD_1V8 or RK3399_AUDIO_VDD_3V3
-	 * gpio1830-supply: RK3399_GPIO1833_VDD_1V8 or RK3399_GPIO1833_VDD_3V3
-	 * sdmmc-supply: don't need to configure because the voltage
-	 *                       is set in source code during runtime.
-	 * NOTE:
-	 * 1. The value in uboot-set must be enclosed in "()", otherwise will
-	 *     cause compile error.
-	 * 2. The uboot-set configuration must be cooperated with submit
-	 *     in u-boot.
-	 */
-	uboot-set = <(RK3399_BT656_VDD_1V8 | RK3399_AUDIO_VDD_1V8 |
-				RK3399_GPIO1833_VDD_3V3)>;
 	bt656-supply = <&vcca_1v8>;
 	audio-supply = <&vcca_1v8>;
 	sdmmc-supply = <&vccio_sd>;
@@ -945,18 +912,6 @@
 
 &pmu_io_domains {
 	status = "okay";
-	/*
-	 * If the uboot use rkdevelop branch, the pmu_io_domain is not set
-	 * during uboot phase, it will cause the io voltage is not suit for
-	 * the hardware,maybe will damage the io of rk3399, so we add
-	 * uboot-set value to make sure the value is same with the kernel,
-	 * ofcause you must make sure firstly the value here is suit for your
-	 * hardware. The available value is defined in
-	 * include/dt-bindings/soc/rockchip-io-domain.h, they are
-	 * also list here for more convenient configuration:
-	 * pmu1830-supply: RK3399_PMU1830_VDD_1V8 or RK3399_PMU1830_VDD_3V0
-	 */
-	uboot-set = <RK3399_PMU1830_VDD_1V8>;
 	pmu1830-supply = <&vcc_1v8>;
 };
 
@@ -972,6 +927,7 @@
 	status = "okay";
 	assigned-clocks = <&cru PLL_NPLL>, <&cru SCLK_CIF_OUT_SRC>, <&cru SCLK_CIF_OUT>;
 	assigned-clock-rates = <594000000>, <594000000>, <37125000>;
+
 	port {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -995,12 +951,6 @@
 			remote-endpoint = <&dphy_tx1rx1_out>;
 		};
 	};
-};
-
-&rkvdec {
-	status = "okay";
-	/* 0 means ion, 1 means drm */
-	//allocator = <0>;
 };
 
 &rockchip_suspend {
@@ -1033,12 +983,11 @@
 	vref-supply = <&vcc_1v8>;
 };
 
-&sdmmc {// Hardware issue, don't use uhs mode on evb board
-	//sd-uhs-sdr12;
-	//sd-uhs-sdr25;
-	//sd-uhs-sdr50;
-	//sd-uhs-sdr104;
-	status = "disabled";
+&sdmmc {
+	sd-uhs-sdr12;
+	sd-uhs-sdr25;
+	sd-uhs-sdr50;
+	sd-uhs-sdr104;
 };
 
 &spi1 {
@@ -1116,7 +1065,6 @@
 };
 
 &usbdrd3_0 {
-	extcon = <&fusb0>;
 	status = "okay";
 };
 
@@ -1126,6 +1074,7 @@
 
 &usbdrd_dwc3_0 {
 	status = "okay";
+	extcon = <&fusb0>;
 };
 
 &usbdrd_dwc3_1 {
@@ -1146,12 +1095,6 @@
 
 &vopl_mmu {
 	status = "okay";
-};
-
-&vpu {
-	status = "okay";
-	/* 0 means ion, 1 means drm */
-	//allocator = <0>;
 };
 
 &pinctrl {

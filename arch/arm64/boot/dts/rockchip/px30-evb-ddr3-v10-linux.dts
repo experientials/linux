@@ -10,7 +10,7 @@
 #include <dt-bindings/display/drm_mipi_dsi.h>
 #include <dt-bindings/sensor-dev.h>
 #include "px30.dtsi"
-#include "px30-linux.dtsi"
+#include "rk3326-linux.dtsi"
 
 / {
 	model = "Rockchip linux PX30 evb ddr3 board";
@@ -123,7 +123,7 @@
 		};
 	};
 
-	rk_headset {
+	rk_headset: rk-headset {
 		compatible = "rockchip_headset";
 		headset_gpio = <&gpio2 RK_PB0 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";
@@ -277,6 +277,30 @@
 				vsync-active = <0>;
 				de-active = <0>;
 				pixelclk-active = <0>;
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				panel_in_dsi: endpoint {
+					remote-endpoint = <&dsi_out_panel>;
+				};
+			};
+		};
+	};
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+			dsi_out_panel: endpoint {
+				remote-endpoint = <&panel_in_dsi>;
 			};
 		};
 	};
@@ -661,10 +685,6 @@
 		pwdn-gpios = <&gpio2 14 GPIO_ACTIVE_HIGH>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&cif_clkout_m0>;
-		rockchip,camera-module-index = <0>;
-		rockchip,camera-module-facing = "back";
-		rockchip,camera-module-name = "TongJu";
-		rockchip,camera-module-lens-name = "CHT842-MD";
 		port {
 			ucam_out: endpoint {
 				remote-endpoint = <&mipi_in_ucam>;
@@ -850,7 +870,27 @@
 	status = "okay";
 };
 
-&vpu_combo {
+&mpp_srv {
+	status = "okay";
+};
+
+&vdpu {
+	status = "okay";
+};
+
+&vepu {
+	status = "okay";
+};
+
+&vpu_mmu {
+	status = "okay";
+};
+
+&hevc {
+	status = "okay";
+};
+
+&hevc_mmu {
 	status = "okay";
 };
 

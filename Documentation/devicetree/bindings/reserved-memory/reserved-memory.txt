@@ -49,7 +49,7 @@ compatible (optional) - standard definition
     - may contain the following strings:
         - shared-dma-pool: This indicates a region of memory meant to be
           used as a shared pool of DMA buffers for a set of devices. It can
-          be used by an operating system to instanciate the necessary pool
+          be used by an operating system to instantiate the necessary pool
           management subsystem if necessary.
         - vendor specific string in the form <vendor>,[<device>-]<usage>
 no-map (optional) - empty property
@@ -63,10 +63,16 @@ reusable (optional) - empty property
       able to reclaim it back. Typically that means that the operating
       system can use that region to store volatile or cached data that
       can be otherwise regenerated or migrated elsewhere.
+inactive (optional) - empty property
+    - Indicates the operating system must not active the region. It's only
+      do active or inactive for region reusable.
 
 Linux implementation note:
 - If a "linux,cma-default" property is present, then Linux will use the
   region for the default pool of the contiguous memory allocator.
+
+- If a "linux,dma-default" property is present, then Linux will use the
+  region for the default pool of the consistent DMA allocator.
 
 Device node references to reserved memory
 -----------------------------------------

@@ -145,13 +145,13 @@ static int vm149c_get_pos(
 	unsigned int *cur_pos)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&dev_vcm->sd);
-	int ret;
-	unsigned char lsb;
-	unsigned char msb;
-	unsigned int abs_step;
+	int ret = 0;
+	unsigned char lsb = 0;
+	unsigned char msb = 0;
+	unsigned int abs_step = 0;
 
 	ret = vm149c_read_msg(client, &msb, &lsb);
-	if (IS_ERR_VALUE(ret))
+	if (ret != 0)
 		goto err;
 
 	abs_step = (((unsigned int)(msb & 0x3FU)) << 4U) |
@@ -178,10 +178,10 @@ static int vm149c_set_pos(
 	struct vm149c_device *dev_vcm,
 	unsigned int dest_pos)
 {
-	int ret;
-	unsigned char lsb;
-	unsigned char msb;
-	unsigned int position;
+	int ret = 0;
+	unsigned char lsb = 0;
+	unsigned char msb = 0;
+	unsigned int position = 0;
 	struct i2c_client *client = v4l2_get_subdevdata(&dev_vcm->sd);
 
 	if (dest_pos >= VCMDRV_MAX_LOG)
@@ -199,7 +199,7 @@ static int vm149c_set_pos(
 	lsb = (((dev_vcm->current_lens_pos & 0x0FU) << 4U) |
 		dev_vcm->step_mode);
 	ret = vm149c_write_msg(client, msb, lsb);
-	if (IS_ERR_VALUE(ret))
+	if (ret != 0)
 		goto err;
 
 	return ret;
@@ -234,28 +234,32 @@ static int vm149c_set_ctrl(struct v4l2_ctrl *ctrl)
 				"%s dest_pos is error. %d > %d\n",
 				__func__, dest_pos, VCMDRV_MAX_LOG);
 			return -EINVAL;
+		}
+		/* calculate move time */
+		move_pos = dev_vcm->current_related_pos - dest_pos;
+		if (move_pos < 0)
+			move_pos = -move_pos;
+
+		ret = vm149c_set_pos(dev_vcm, dest_pos);
+
+		dev_vcm->move_ms =
+			((dev_vcm->vcm_movefull_t *
+			(uint32_t)move_pos) /
+			VCMDRV_MAX_LOG);
+		dev_dbg(&client->dev, "dest_pos %d, move_ms %ld\n",
+				dest_pos, dev_vcm->move_ms);
+
+		dev_vcm->start_move_tv = ns_to_timeval(ktime_get_ns());
+		mv_us = dev_vcm->start_move_tv.tv_usec +
+				dev_vcm->move_ms * 1000;
+		if (mv_us >= 1000000) {
+			dev_vcm->end_move_tv.tv_sec =
+					dev_vcm->start_move_tv.tv_sec + 1;
+			dev_vcm->end_move_tv.tv_usec = mv_us - 1000000;
 		} else {
-			/* calculate move time */
-			move_pos = dev_vcm->current_related_pos - dest_pos;
-			if (move_pos < 0)
-				move_pos = -move_pos;
-
-			ret = vm149c_set_pos(dev_vcm, dest_pos);
-
-			dev_vcm->move_ms =
-				((dev_vcm->vcm_movefull_t * (uint32_t)move_pos) / VCMDRV_MAX_LOG);
-			dev_dbg(&client->dev,
-				"dest_pos %d, move_ms %ld\n", dest_pos, dev_vcm->move_ms);
-
-			dev_vcm->start_move_tv = ns_to_timeval(ktime_get_ns());
-			mv_us = dev_vcm->start_move_tv.tv_usec + dev_vcm->move_ms * 1000;
-			if (mv_us >= 1000000) {
-				dev_vcm->end_move_tv.tv_sec = dev_vcm->start_move_tv.tv_sec + 1;
-				dev_vcm->end_move_tv.tv_usec = mv_us - 1000000;
-			} else {
-				dev_vcm->end_move_tv.tv_sec = dev_vcm->start_move_tv.tv_sec;
-				dev_vcm->end_move_tv.tv_usec = mv_us;
-			}
+			dev_vcm->end_move_tv.tv_sec =
+					dev_vcm->start_move_tv.tv_sec;
+			dev_vcm->end_move_tv.tv_usec = mv_us;
 		}
 	}
 
@@ -404,27 +408,24 @@ static int vm149c_probe(struct i2c_client *client,
 		(DRIVER_VERSION & 0xff00) >> 8,
 		DRIVER_VERSION & 0x00ff);
 
-	if (of_property_read_u32(
-		np,
-		OF_CAMERA_VCMDRV_START_CURRENT,
+	if (of_property_read_u32(np,
+		 OF_CAMERA_VCMDRV_START_CURRENT,
 		(unsigned int *)&start_current)) {
 		start_current = VM149C_DEFAULT_START_CURRENT;
 		dev_info(&client->dev,
 			"could not get module %s from dts!\n",
 			OF_CAMERA_VCMDRV_START_CURRENT);
 	}
-	if (of_property_read_u32(
-		np,
-		OF_CAMERA_VCMDRV_RATED_CURRENT,
+	if (of_property_read_u32(np,
+		 OF_CAMERA_VCMDRV_RATED_CURRENT,
 		(unsigned int *)&rated_current)) {
 		rated_current = VM149C_DEFAULT_RATED_CURRENT;
 		dev_info(&client->dev,
 			"could not get module %s from dts!\n",
 			OF_CAMERA_VCMDRV_RATED_CURRENT);
 	}
-	if (of_property_read_u32(
-		np,
-		OF_CAMERA_VCMDRV_STEP_MODE,
+	if (of_property_read_u32(np,
+		 OF_CAMERA_VCMDRV_STEP_MODE,
 		(unsigned int *)&step_mode)) {
 		step_mode = VM149C_DEFAULT_STEP_MODE;
 		dev_info(&client->dev,
@@ -455,12 +456,12 @@ static int vm149c_probe(struct i2c_client *client,
 	if (ret)
 		goto err_cleanup;
 
-	ret = media_entity_init(&vm149c_dev->sd.entity, 0, NULL, 0);
+	ret = media_entity_pads_init(&vm149c_dev->sd.entity, 0, NULL);
 	if (ret < 0)
 		goto err_cleanup;
 
 	sd = &vm149c_dev->sd;
-	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV_LENS;
+	sd->entity.function = MEDIA_ENT_F_LENS;
 
 	memset(facing, 0, sizeof(facing));
 	if (strcmp(vm149c_dev->module_facing, "back") == 0)

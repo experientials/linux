@@ -62,7 +62,7 @@ static struct page *__get_meta_page(struct f2fs_sb_info *sbi, pgoff_t index,
 		.sbi = sbi,
 		.type = META,
 		.op = REQ_OP_READ,
-		.op_flags = REQ_SYNC | REQ_META | REQ_PRIO,
+		.op_flags = REQ_META | REQ_PRIO,
 		.old_blkaddr = index,
 		.new_blkaddr = index,
 		.encrypted_page = NULL,
@@ -217,8 +217,7 @@ int f2fs_ra_meta_pages(struct f2fs_sb_info *sbi, block_t start, int nrpages,
 		.sbi = sbi,
 		.type = META,
 		.op = REQ_OP_READ,
-		.op_flags = sync ? (REQ_SYNC | REQ_META | REQ_PRIO) :
-						REQ_RAHEAD,
+		.op_flags = sync ? (REQ_META | REQ_PRIO) : REQ_RAHEAD,
 		.encrypted_page = NULL,
 		.in_list = false,
 		.is_por = (type == META_POR),
@@ -373,7 +372,7 @@ long f2fs_sync_meta_pages(struct f2fs_sb_info *sbi, enum page_type type,
 	};
 	struct blk_plug plug;
 
-	pagevec_init(&pvec, 0);
+	pagevec_init(&pvec);
 
 	blk_start_plug(&plug);
 
@@ -582,7 +581,7 @@ int f2fs_acquire_orphan_inode(struct f2fs_sb_info *sbi)
 
 	if (time_to_inject(sbi, FAULT_ORPHAN)) {
 		spin_unlock(&im->ino_lock);
-		f2fs_show_injection_info(FAULT_ORPHAN);
+		f2fs_show_injection_info(sbi, FAULT_ORPHAN);
 		return -ENOSPC;
 	}
 
@@ -680,20 +679,20 @@ int f2fs_recover_orphan_inodes(struct f2fs_sb_info *sbi)
 		return 0;
 	}
 
-	if (s_flags & MS_RDONLY) {
+	if (s_flags & SB_RDONLY) {
 		f2fs_info(sbi, "orphan cleanup on readonly fs");
-		sbi->sb->s_flags &= ~MS_RDONLY;
+		sbi->sb->s_flags &= ~SB_RDONLY;
 	}
 
 #ifdef CONFIG_QUOTA
 	/* Needed for iput() to work correctly and not trash data */
-	sbi->sb->s_flags |= MS_ACTIVE;
+	sbi->sb->s_flags |= SB_ACTIVE;
 
 	/*
 	 * Turn on quotas which were not enabled for read-only mounts if
 	 * filesystem has quota feature, so that they are updated correctly.
 	 */
-	quota_enabled = f2fs_enable_quota_files(sbi, s_flags & MS_RDONLY);
+	quota_enabled = f2fs_enable_quota_files(sbi, s_flags & SB_RDONLY);
 #endif
 
 	start_blk = __start_cp_addr(sbi) + 1 + __cp_payload(sbi);
@@ -732,7 +731,7 @@ out:
 	if (quota_enabled)
 		f2fs_quota_off_umount(sbi->sb);
 #endif
-	sbi->sb->s_flags = s_flags; /* Restore MS_RDONLY status */
+	sbi->sb->s_flags = s_flags; /* Restore SB_RDONLY status */
 
 	return err;
 }
@@ -1510,10 +1509,10 @@ static int do_checkpoint(struct f2fs_sb_info *sbi, struct cp_control *cpc)
 	f2fs_wait_on_all_pages_writeback(sbi);
 
 	/*
-	 * invalidate intermediate page cache borrowed from meta inode
-	 * which are used for migration of encrypted inode's blocks.
+	 * invalidate intermediate page cache borrowed from meta inode which are
+	 * used for migration of encrypted or verity inode's blocks.
 	 */
-	if (f2fs_sb_has_encrypt(sbi))
+	if (f2fs_sb_has_encrypt(sbi) || f2fs_sb_has_verity(sbi))
 		invalidate_mapping_pages(META_MAPPING(sbi),
 				MAIN_BLKADDR(sbi), MAX_BLKADDR(sbi) - 1);
 

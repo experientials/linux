@@ -1,8 +1,7 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * SDIO access interface for drivers - linux specific (pci only)
  *
- * Copyright (C) 1999-2018, Broadcom Corporation
+ * Copyright (C) 1999-2017, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -85,7 +84,7 @@ typedef struct bcmsdh_os_info {
 } bcmsdh_os_info_t;
 
 /* debugging macros */
-#define SDLX_MSG(x)
+#define SDLX_MSG(x)		printf x
 
 /**
  * Checks to see if vendor and device IDs match a supported SDIO Host Controller.

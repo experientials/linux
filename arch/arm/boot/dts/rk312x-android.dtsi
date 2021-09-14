@@ -8,7 +8,7 @@
 #include <dt-bindings/display/media-bus-format.h>
 
 / {
-	chosen {
+	chosen: chosen {
 		bootargs = "earlycon=uart8250,mmio32,0x20068000";
 	};
 
@@ -45,23 +45,19 @@
 			reg = <0x88000000 0x1800000>;
 		};
 
-		ramoops_mem: ramoops@62e00000 {
+		ramoops: ramoops@62e00000 {
+			compatible = "ramoops";
 			reg = <0x62e00000 0xf0000>;
+			record-size = <0x20000>;
+			console-size = <0x80000>;
+			ftrace-size = <0x00000>;
+			pmsg-size = <0x50000>;
 		};
 
 		drm_logo: drm-logo@00000000 {
 			compatible = "rockchip,drm-logo";
 			reg = <0x0 0x0>;
 		};
-	};
-
-	ramoops {
-		compatible = "ramoops";
-		record-size = <0x0 0x20000>;
-		console-size = <0x0 0x80000>;
-		ftrace-size = <0x0 0x00000>;
-		pmsg-size = <0x0 0x50000>;
-		memory-region = <&ramoops_mem>;
 	};
 };
 
@@ -111,6 +107,38 @@
 &dmc {
 	vop-dclk-mode = <1>;
 	status = "okay";
+};
+
+&dsi {
+	panel@0 {
+		reg = <0>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				panel_in_dsi: endpoint {
+					remote-endpoint = <&dsi_out_panel>;
+				};
+			};
+		};
+	};
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+
+			dsi_out_panel: endpoint {
+				remote-endpoint = <&panel_in_dsi>;
+			};
+		};
+	};
 };
 
 &video_phy {

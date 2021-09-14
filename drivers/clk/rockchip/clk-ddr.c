@@ -14,8 +14,6 @@
  */
 
 #include <drm/drmP.h>
-#include <drm/drm_modeset_lock.h>
-#include <dt-bindings/display/rk_fb.h>
 #include <linux/arm-smccc.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
@@ -104,7 +102,10 @@ static int rockchip_ddrclk_sip_set_rate(struct clk_hw *hw, unsigned long drate,
 		      ROCKCHIP_SIP_CONFIG_DRAM_SET_RATE,
 		      0, 0, 0, 0, &res);
 
-	return res.a0;
+	if (res.a0)
+		return 0;
+	else
+		return -EPERM;
 }
 
 static unsigned long
@@ -136,15 +137,11 @@ static long rockchip_ddrclk_sip_round_rate(struct clk_hw *hw,
 static u8 rockchip_ddrclk_get_parent(struct clk_hw *hw)
 {
 	struct rockchip_ddrclk *ddrclk = to_rockchip_ddrclk_hw(hw);
-	int num_parents = clk_hw_get_num_parents(hw);
 	u32 val;
 
 	val = clk_readl(ddrclk->reg_base +
 			ddrclk->mux_offset) >> ddrclk->mux_shift;
 	val &= GENMASK(ddrclk->mux_width - 1, 0);
-
-	if (val >= num_parents)
-		return -EINVAL;
 
 	return val;
 }
@@ -339,7 +336,6 @@ rockchip_clk_register_ddrclk(const char *name, int flags,
 
 	init.flags = flags;
 	init.flags |= CLK_SET_RATE_NO_REPARENT;
-	init.flags |= CLK_GET_RATE_NOCACHE;
 
 	switch (ddr_flag) {
 	case ROCKCHIP_DDRCLK_SIP:

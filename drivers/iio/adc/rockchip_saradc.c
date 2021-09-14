@@ -107,7 +107,7 @@ static int rockchip_saradc_read_raw(struct iio_dev *indio_dev,
 
 static irqreturn_t rockchip_saradc_isr(int irq, void *dev_id)
 {
-	struct rockchip_saradc *info = (struct rockchip_saradc *)dev_id;
+	struct rockchip_saradc *info = dev_id;
 
 	/* Read value */
 	info->last_val = readl_relaxed(info->regs + SARADC_DATA);
@@ -123,7 +123,6 @@ static irqreturn_t rockchip_saradc_isr(int irq, void *dev_id)
 
 static const struct iio_info rockchip_saradc_iio_info = {
 	.read_raw = rockchip_saradc_read_raw,
-	.driver_module = THIS_MODULE,
 };
 
 #define ADC_CHANNEL(_index, _id) {				\
@@ -222,6 +221,11 @@ static int rockchip_saradc_probe(struct platform_device *pdev)
 	info = iio_priv(indio_dev);
 
 	match = of_match_device(rockchip_saradc_match, &pdev->dev);
+	if (!match) {
+		dev_err(&pdev->dev, "failed to match device\n");
+		return -ENODEV;
+	}
+
 	info->data = match->data;
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -233,7 +237,8 @@ static int rockchip_saradc_probe(struct platform_device *pdev)
 	 * The reset should be an optional property, as it should work
 	 * with old devicetrees as well
 	 */
-	info->reset = devm_reset_control_get(&pdev->dev, "saradc-apb");
+	info->reset = devm_reset_control_get_exclusive(&pdev->dev,
+						       "saradc-apb");
 	if (IS_ERR(info->reset)) {
 		ret = PTR_ERR(info->reset);
 		if (ret != -ENOENT)
@@ -397,7 +402,21 @@ static struct platform_driver rockchip_saradc_driver = {
 	},
 };
 
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+static int __init rockchip_saradc_driver_init(void)
+{
+	return platform_driver_register(&rockchip_saradc_driver);
+}
+fs_initcall(rockchip_saradc_driver_init);
+
+static void __exit rockchip_saradc_driver_exit(void)
+{
+	platform_driver_unregister(&rockchip_saradc_driver);
+}
+module_exit(rockchip_saradc_driver_exit);
+#else
 module_platform_driver(rockchip_saradc_driver);
+#endif
 
 MODULE_AUTHOR("Heiko Stuebner <heiko@sntech.de>");
 MODULE_DESCRIPTION("Rockchip SARADC driver");

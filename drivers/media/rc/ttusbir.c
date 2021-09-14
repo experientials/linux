@@ -12,10 +12,6 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include <linux/module.h>
@@ -121,9 +117,11 @@ static void ttusbir_bulk_complete(struct urb *urb)
  */
 static void ttusbir_process_ir_data(struct ttusbir *tt, uint8_t *buf)
 {
-	struct ir_raw_event rawir = {};
+	struct ir_raw_event rawir;
 	unsigned i, v, b;
 	bool event = false;
+
+	init_ir_raw_event(&rawir);
 
 	for (i = 0; i < 128; i++) {
 		v = buf[i] & 0xfe;
@@ -319,7 +317,10 @@ static int ttusbir_probe(struct usb_interface *intf,
 	rc->priv = tt;
 	rc->driver_name = DRIVER_NAME;
 	rc->map_name = RC_MAP_TT_1500;
-	rc->timeout = MS_TO_NS(100);
+	rc->min_timeout = 1;
+	rc->timeout = IR_DEFAULT_TIMEOUT;
+	rc->max_timeout = 10 * IR_DEFAULT_TIMEOUT;
+
 	/*
 	 * The precision is NS_PER_BIT, but since every 8th bit can be
 	 * overwritten with garbage the accuracy is at best 2 * NS_PER_BIT.

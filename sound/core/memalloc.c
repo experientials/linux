@@ -25,7 +25,6 @@
 #include <linux/mm.h>
 #include <linux/dma-mapping.h>
 #include <linux/genalloc.h>
-#include <linux/of.h>
 #include <sound/memalloc.h>
 
 /*
@@ -55,6 +54,7 @@ void *snd_malloc_pages(size_t size, gfp_t gfp_flags)
 	pg = get_order(size);
 	return (void *) __get_free_pages(gfp_flags, pg);
 }
+EXPORT_SYMBOL(snd_malloc_pages);
 
 /**
  * snd_free_pages - release the pages
@@ -72,6 +72,7 @@ void snd_free_pages(void *ptr, size_t size)
 	pg = get_order(size);
 	free_pages((unsigned long) ptr, pg);
 }
+EXPORT_SYMBOL(snd_free_pages);
 
 /*
  *
@@ -193,15 +194,6 @@ int snd_dma_alloc_pages(int type, struct device *device, size_t size,
 		snd_malloc_dev_iram(dmab, size);
 		if (dmab->area)
 			break;
-#ifdef CONFIG_SND_SOC_ROCKCHIP_FORCE_SRAM
-		if (device->of_node) {
-			if (of_property_read_bool(device->of_node,
-						  "rockchip,force-iram")) {
-				dev_err(device, "iram space is not enough!\n");
-				break;
-			}
-		}
-#endif
 		/* Internal memory might have limited size and no enough space,
 		 * so if we fail to malloc, try to fetch memory traditionally.
 		 */
@@ -227,6 +219,7 @@ int snd_dma_alloc_pages(int type, struct device *device, size_t size,
 	dmab->bytes = size;
 	return 0;
 }
+EXPORT_SYMBOL(snd_dma_alloc_pages);
 
 /**
  * snd_dma_alloc_pages_fallback - allocate the buffer area according to the given type with fallback
@@ -260,6 +253,7 @@ int snd_dma_alloc_pages_fallback(int type, struct device *device, size_t size,
 		return -ENOMEM;
 	return 0;
 }
+EXPORT_SYMBOL(snd_dma_alloc_pages_fallback);
 
 
 /**
@@ -293,13 +287,4 @@ void snd_dma_free_pages(struct snd_dma_buffer *dmab)
 		pr_err("snd-malloc: invalid device type %d\n", dmab->dev.type);
 	}
 }
-
-/*
- * exports
- */
-EXPORT_SYMBOL(snd_dma_alloc_pages);
-EXPORT_SYMBOL(snd_dma_alloc_pages_fallback);
 EXPORT_SYMBOL(snd_dma_free_pages);
-
-EXPORT_SYMBOL(snd_malloc_pages);
-EXPORT_SYMBOL(snd_free_pages);

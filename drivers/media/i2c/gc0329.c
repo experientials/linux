@@ -4,6 +4,7 @@
  *
  * Copyright (C) 2018 Fuzhou Rockchip Electronics Co., Ltd.
  * V0.0X01.0X01 add enum_frame_interval function.
+ * V0.0X01.0X02 add quick stream on/off
  */
 
 #include <linux/clk.h>
@@ -35,7 +36,7 @@
 #include <media/v4l2-mediabus.h>
 #include <media/v4l2-subdev.h>
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x1)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x2)
 #define DRIVER_NAME "gc0329"
 #define GC0329_PIXEL_RATE		(24 * 1000 * 1000)
 
@@ -680,10 +681,17 @@ static long gc0329_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 {
 	struct gc0329 *gc0329 = to_gc0329(sd);
 	long ret = 0;
+	u32 stream = 0;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
 		gc0329_get_module_inf(gc0329, (struct rkmodule_inf *)arg);
+		break;
+	case RKMODULE_SET_QUICK_STREAM:
+
+		stream = *((u32 *)arg);
+
+		gc0329_set_streaming(gc0329, !!stream);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -701,6 +709,7 @@ static long gc0329_compat_ioctl32(struct v4l2_subdev *sd,
 	struct rkmodule_inf *inf;
 	struct rkmodule_awb_cfg *cfg;
 	long ret;
+	u32 stream = 0;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
@@ -726,6 +735,11 @@ static long gc0329_compat_ioctl32(struct v4l2_subdev *sd,
 		if (!ret)
 			ret = gc0329_ioctl(sd, cmd, cfg);
 		kfree(cfg);
+		break;
+	case RKMODULE_SET_QUICK_STREAM:
+		ret = copy_from_user(&stream, up, sizeof(u32));
+		if (!ret)
+			ret = gc0329_ioctl(sd, cmd, &stream);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -1120,8 +1134,8 @@ static int gc0329_probe(struct i2c_client *client,
 
 #if defined(CONFIG_MEDIA_CONTROLLER)
 	gc0329->pad.flags = MEDIA_PAD_FL_SOURCE;
-	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
-	ret = media_entity_init(&sd->entity, 1, &gc0329->pad, 0);
+	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	ret = media_entity_pads_init(&sd->entity, 1, &gc0329->pad);
 	if (ret < 0) {
 		v4l2_ctrl_handler_free(&gc0329->ctrls);
 		return ret;

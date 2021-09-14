@@ -6,6 +6,7 @@
  *
  * V0.0X01.0X01 add poweron function.
  * V0.0X01.0X02 add enum_frame_interval function.
+ * V0.0X01.0X03 add quick stream on/off
  */
 
 #include <linux/clk.h>
@@ -25,7 +26,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
 
-#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x02)
+#define DRIVER_VERSION			KERNEL_VERSION(0, 0x01, 0x03)
 
 #ifndef V4L2_CID_DIGITAL_GAIN
 #define V4L2_CID_DIGITAL_GAIN		V4L2_CID_GAIN
@@ -860,10 +861,22 @@ static long ov5695_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 {
 	struct ov5695 *ov5695 = to_ov5695(sd);
 	long ret = 0;
+	u32 stream = 0;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
 		ov5695_get_module_inf(ov5695, (struct rkmodule_inf *)arg);
+		break;
+	case RKMODULE_SET_QUICK_STREAM:
+
+		stream = *((u32 *)arg);
+
+		if (stream)
+			ret = ov5695_write_reg(ov5695->client, OV5695_REG_CTRL_MODE,
+				OV5695_REG_VALUE_08BIT, OV5695_MODE_STREAMING);
+		else
+			ret = ov5695_write_reg(ov5695->client, OV5695_REG_CTRL_MODE,
+				OV5695_REG_VALUE_08BIT, OV5695_MODE_SW_STANDBY);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -881,6 +894,7 @@ static long ov5695_compat_ioctl32(struct v4l2_subdev *sd,
 	struct rkmodule_inf *inf;
 	struct rkmodule_awb_cfg *cfg;
 	long ret;
+	u32 stream = 0;
 
 	switch (cmd) {
 	case RKMODULE_GET_MODULE_INFO:
@@ -906,6 +920,11 @@ static long ov5695_compat_ioctl32(struct v4l2_subdev *sd,
 		if (!ret)
 			ret = ov5695_ioctl(sd, cmd, cfg);
 		kfree(cfg);
+		break;
+	case RKMODULE_SET_QUICK_STREAM:
+		ret = copy_from_user(&stream, up, sizeof(u32));
+		if (!ret)
+			ret = ov5695_ioctl(sd, cmd, &stream);
 		break;
 	default:
 		ret = -ENOIOCTLCMD;
@@ -962,12 +981,12 @@ static int ov5695_s_stream(struct v4l2_subdev *sd, int on)
 		ret = __ov5695_start_stream(ov5695);
 		if (ret) {
 			v4l2_err(sd, "start stream failed while write regs\n");
-			pm_runtime_put_autosuspend(&client->dev);
+			pm_runtime_put(&client->dev);
 			goto unlock_and_return;
 		}
 	} else {
 		__ov5695_stop_stream(ov5695);
-		pm_runtime_put_autosuspend(&client->dev);
+		pm_runtime_put(&client->dev);
 	}
 
 	ov5695->streaming = on;
@@ -1000,14 +1019,13 @@ static int ov5695_s_power(struct v4l2_subdev *sd, int on)
 		ret = ov5695_write_array(ov5695->client, ov5695_global_regs);
 		if (ret) {
 			v4l2_err(sd, "could not set init registers\n");
-			pm_runtime_put_autosuspend(&client->dev);
+			pm_runtime_put_noidle(&client->dev);
 			goto unlock_and_return;
 		}
 
 		ov5695->power_on = true;
 	} else {
-		pm_runtime_mark_last_busy(&client->dev);
-		pm_runtime_put_autosuspend(&client->dev);
+		pm_runtime_put(&client->dev);
 		ov5695->power_on = false;
 	}
 
@@ -1140,8 +1158,6 @@ static int ov5695_enum_frame_interval(struct v4l2_subdev *sd,
 static const struct dev_pm_ops ov5695_pm_ops = {
 	SET_RUNTIME_PM_OPS(ov5695_runtime_suspend,
 			   ov5695_runtime_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
-				pm_runtime_force_resume)
 };
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
@@ -1197,7 +1213,7 @@ static int ov5695_set_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
-	if (pm_runtime_get(&client->dev) <= 0)
+	if (!pm_runtime_get_if_in_use(&client->dev))
 		return 0;
 
 	switch (ctrl->id) {
@@ -1232,8 +1248,7 @@ static int ov5695_set_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
-	pm_runtime_mark_last_busy(&client->dev);
-	pm_runtime_put_autosuspend(&client->dev);
+	pm_runtime_put(&client->dev);
 
 	return ret;
 }
@@ -1412,31 +1427,25 @@ static int ov5695_probe(struct i2c_client *client,
 	if (ret)
 		goto err_destroy_mutex;
 
-	pm_runtime_set_autosuspend_delay(dev, 10 * 1000);
-	pm_runtime_use_autosuspend(dev);
-	pm_runtime_enable(dev);
-	pm_runtime_idle(dev);
-
-	ret = pm_runtime_get_sync(dev);
-	if (ret) {
-		pm_runtime_put_noidle(dev);
-		goto err_pm_disable;
-	}
+	ret = __ov5695_power_on(ov5695);
+	if (ret)
+		goto err_free_handler;
 
 	ret = ov5695_check_sensor_id(ov5695, client);
 	if (ret)
-		goto err_pm_put;
+		goto err_power_off;
 
 #ifdef CONFIG_VIDEO_V4L2_SUBDEV_API
 	sd->internal_ops = &ov5695_internal_ops;
-	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
+		     V4L2_SUBDEV_FL_HAS_EVENTS;
 #endif
 #if defined(CONFIG_MEDIA_CONTROLLER)
 	ov5695->pad.flags = MEDIA_PAD_FL_SOURCE;
-	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV_SENSOR;
-	ret = media_entity_init(&sd->entity, 1, &ov5695->pad, 0);
+	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	ret = media_entity_pads_init(&sd->entity, 1, &ov5695->pad);
 	if (ret < 0)
-		goto err_pm_put;
+		goto err_power_off;
 #endif
 
 	memset(facing, 0, sizeof(facing));
@@ -1454,7 +1463,9 @@ static int ov5695_probe(struct i2c_client *client,
 		goto err_clean_entity;
 	}
 
-	pm_runtime_put_autosuspend(dev);
+	pm_runtime_set_active(dev);
+	pm_runtime_enable(dev);
+	pm_runtime_idle(dev);
 
 	return 0;
 
@@ -1462,10 +1473,9 @@ err_clean_entity:
 #if defined(CONFIG_MEDIA_CONTROLLER)
 	media_entity_cleanup(&sd->entity);
 #endif
-err_pm_put:
-	pm_runtime_put(dev);
-err_pm_disable:
-	pm_runtime_disable(dev);
+err_power_off:
+	__ov5695_power_off(ov5695);
+err_free_handler:
 	v4l2_ctrl_handler_free(&ov5695->ctrl_handler);
 err_destroy_mutex:
 	mutex_destroy(&ov5695->mutex);
@@ -1485,7 +1495,6 @@ static int ov5695_remove(struct i2c_client *client)
 	v4l2_ctrl_handler_free(&ov5695->ctrl_handler);
 	mutex_destroy(&ov5695->mutex);
 
-	pm_runtime_dont_use_autosuspend(&client->dev);
 	pm_runtime_disable(&client->dev);
 	if (!pm_runtime_status_suspended(&client->dev))
 		__ov5695_power_off(ov5695);

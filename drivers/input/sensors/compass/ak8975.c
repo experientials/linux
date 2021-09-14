@@ -19,7 +19,7 @@
 #include <linux/irq.h>
 #include <linux/miscdevice.h>
 #include <linux/gpio.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/atomic.h>
 #include <linux/delay.h>
 #include <linux/input.h>
@@ -183,7 +183,6 @@ static int sensor_report_value(struct i2c_client *client)
 	unsigned char *stat;
 	unsigned char *stat2;
 	int ret = 0;
-	char value = 0;
 	int i;
 
 	if(sensor->ops->read_len < 8)	//sensor->ops->read_len = 8
@@ -257,8 +256,8 @@ static int sensor_report_value(struct i2c_client *client)
 	if((sensor->pdata->irq_enable)&& (sensor->ops->int_status_reg >= 0))	//read sensor intterupt status register
 	{
 
-		value = sensor_read_reg(client, sensor->ops->int_status_reg);
-		DBG("%s:sensor int status :0x%x\n",__func__,value);
+		DBG("%s:sensor int status :0x%x\n", __func__,
+			sensor_read_reg(client, sensor->ops->int_status_reg));
 	}
 
 
@@ -430,7 +429,6 @@ static long compass_dev_ioctl(struct file *file,
 	struct i2c_client *client = this_client;
 	void __user *argp = (void __user *)arg;
 	int result = 0;
-	struct akm_platform_data compass;
 
 	/* NOTE: In this function the size of "char" should be 1-byte. */
 	char compass_data[SENSOR_DATA_SIZE];/* for GETDATA */
@@ -543,15 +541,6 @@ static long compass_dev_ioctl(struct file *file,
 			delay = sensor->flags.delay;
 			break;
 		case ECS_IOCTL_GET_PLATFORM_DATA:
-			DBG("%s:ECS_IOCTL_GET_PLATFORM_DATA start\n",__func__);
-			//memcpy(compass.m_layout, sensor->pdata->m_layout, sizeof(sensor->pdata->m_layout));
-			//memcpy(compass.project_name, sensor->pdata->project_name, sizeof(sensor->pdata->project_name));
-			ret = copy_to_user(argp, &compass, sizeof(compass));
-			if(ret < 0)
-			{
-				printk("%s:error,ret=%d\n",__FUNCTION__, ret);
-				return ret;
-			}
 			break;
 
 		default:
@@ -623,33 +612,39 @@ struct sensor_operate compass_akm8975_ops = {
 };
 
 /****************operate according to sensor chip:end************/
-
-//function name should not be changed
-static struct sensor_operate *compass_get_ops(void)
+static int compass_akm8975_probe(struct i2c_client *client,
+				 const struct i2c_device_id *devid)
 {
-	return &compass_akm8975_ops;
+	return sensor_register_device(client, NULL, devid, &compass_akm8975_ops);
 }
 
-
-static int __init compass_akm8975_init(void)
+static int compass_akm8975_remove(struct i2c_client *client)
 {
-	struct sensor_operate *ops = compass_get_ops();
-	int result = 0;
-	int type = ops->type;
-	result = sensor_register_slave(type, NULL, NULL, compass_get_ops);
-
-	return result;
+	return sensor_unregister_device(client, NULL, &compass_akm8975_ops);
 }
 
-static void __exit compass_akm8975_exit(void)
-{
-	struct sensor_operate *ops = compass_get_ops();
-	int type = ops->type;
-	sensor_unregister_slave(type, NULL, NULL, compass_get_ops);
-}
+static const struct i2c_device_id compass_akm8975_id[] = {
+	{"ak8975", COMPASS_ID_AK8975},
+	{}
+};
 
+static struct i2c_driver compass_akm8975_driver = {
+	.probe = compass_akm8975_probe,
+	.remove = compass_akm8975_remove,
+	.shutdown = sensor_shutdown,
+	.id_table = compass_akm8975_id,
+	.driver = {
+		.name = "compass_akm8975",
+	#ifdef CONFIG_PM
+		.pm = &sensor_pm_ops,
+	#endif
+	},
+};
 
-module_init(compass_akm8975_init);
-module_exit(compass_akm8975_exit);
+module_i2c_driver(compass_akm8975_driver);
+
+MODULE_AUTHOR("luowei <lw@rock-chips.com>");
+MODULE_DESCRIPTION("akm8975 3-Axis compasss driver");
+MODULE_LICENSE("GPL");
 
 

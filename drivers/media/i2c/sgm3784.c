@@ -92,7 +92,7 @@ static int sgm3784_i2c_write(struct sgm3784_flash *flash, u8 reg, u8 val)
 	int ret;
 
 	ret = i2c_smbus_write_byte_data(client, reg, val);
-	if (IS_ERR_VALUE(ret))
+	if (ret < 0)
 		dev_err(&client->dev,
 			 "%s: reg:0x%x val:0x%x failed\n",
 			 __func__, reg, val);
@@ -110,7 +110,7 @@ static int sgm3784_i2c_read(struct sgm3784_flash *flash, u8 reg)
 	int ret;
 
 	ret = i2c_smbus_read_byte_data(client, reg);
-	if (IS_ERR_VALUE(ret))
+	if (ret < 0)
 		dev_err(&client->dev,
 			 "%s: reg:0x%x failed\n",
 			 __func__, reg);
@@ -141,7 +141,7 @@ static int sgm3784_get_fault(struct sgm3784_flash *flash)
 	int fault = 0;
 
 	fault = sgm3784_i2c_read(flash, SGM3784_REG_FAULT);
-	if (IS_ERR_VALUE(fault))
+	if (fault < 0)
 		return fault;
 
 	if (!fault)
@@ -162,7 +162,7 @@ static int sgm3784_set_timeout(struct sgm3784_flash *flash)
 		 __func__, flash->flash_timeout);
 
 	ret = sgm3784_i2c_read(flash, 0x02);
-	if (IS_ERR_VALUE(ret))
+	if (ret != 0)
 		return ret;
 
 	val =  (flash->flash_timeout - TIMEOUT_MIN) / TIMEOUT_STEP;
@@ -314,7 +314,7 @@ static int sgm3784_set_ctrl(struct v4l2_ctrl *ctrl, enum sgm3784_led_id id)
 	mutex_lock(&flash->lock);
 
 	ret = sgm3784_get_fault(flash);
-	if (IS_ERR_VALUE(ret))
+	if (ret != 0)
 		goto err;
 	if ((ret & (SGM3784_REG_FL_OVP |
 		     SGM3784_REG_FL_OT |
@@ -711,11 +711,11 @@ static int sgm3784_probe(struct i2c_client *client,
 		if (ret)
 			goto err;
 
-		ret = media_entity_init(&sd->entity, 0, NULL, 0);
+		ret = media_entity_pads_init(&sd->entity, 0, NULL);
 		if (ret < 0)
 			goto free_ctl;
 
-		sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV_FLASH;
+		sd->entity.function = MEDIA_ENT_F_FLASH;
 		ret = v4l2_async_register_subdev(sd);
 		if (ret)
 			goto free_media;

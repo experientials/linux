@@ -222,9 +222,9 @@ static struct rockchip_clk_branch common_clk_branches[] __initdata = {
 	GATE(0, "gpll_div2_ddr", "gpll_div2", CLK_IGNORE_UNUSED,
 			RK2928_CLKGATE_CON(0), 2, GFLAGS),
 	COMPOSITE_DDRCLK(SCLK_DDRC, "clk_ddrc", mux_ddrphy_p, 0,
-			 RK2928_CLKSEL_CON(26), 8, 2, 0, 2,
-			 ROCKCHIP_DDRCLK_SIP_V2),
-	FACTOR(0, "clk_ddrphy", "clk_ddrc", 0, 1, 2),
+			RK2928_CLKSEL_CON(26), 8, 2, 0, 2,
+			ROCKCHIP_DDRCLK_SIP_V2),
+	FACTOR(0, "clk_ddrphy", "ddrphy2x", 0, 1, 2),
 
 	/* PD_CORE */
 	GATE(0, "apll_core", "apll", CLK_IGNORE_UNUSED,
@@ -541,7 +541,7 @@ static struct rockchip_clk_branch common_clk_branches[] __initdata = {
 	GATE(0, "pclk_grf", "pclk_cpu", CLK_IGNORE_UNUSED, RK2928_CLKGATE_CON(5), 4, GFLAGS),
 	GATE(PCLK_MIPIPHY, "pclk_mipiphy", "pclk_cpu", 0, RK2928_CLKGATE_CON(5), 0, GFLAGS),
 
-	GATE(0, "pclk_pmu", "pclk_pmu_pre", CLK_IGNORE_UNUSED, RK2928_CLKGATE_CON(9), 2, GFLAGS),
+	GATE(0, "pclk_pmu", "pclk_pmu_pre", 0, RK2928_CLKGATE_CON(9), 2, GFLAGS),
 	GATE(0, "pclk_pmu_niu", "pclk_pmu_pre", CLK_IGNORE_UNUSED, RK2928_CLKGATE_CON(9), 3, GFLAGS),
 
 	/* PD_MMC */

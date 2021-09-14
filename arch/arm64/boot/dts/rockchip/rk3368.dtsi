@@ -1,43 +1,6 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
  * Copyright (c) 2015 Heiko Stuebner <heiko@sntech.de>
- *
- * This file is dual-licensed: you can use it either under the terms
- * of the GPL or the X11 license, at your option. Note that this dual
- * licensing only applies to this file, and not this project as a
- * whole.
- *
- *  a) This library is free software; you can redistribute it and/or
- *     modify it under the terms of the GNU General Public License as
- *     published by the Free Software Foundation; either version 2 of the
- *     License, or (at your option) any later version.
- *
- *     This library is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- * Or, alternatively,
- *
- *  b) Permission is hereby granted, free of charge, to any person
- *     obtaining a copy of this software and associated documentation
- *     files (the "Software"), to deal in the Software without
- *     restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or
- *     sell copies of the Software, and to permit persons to whom the
- *     Software is furnished to do so, subject to the following
- *     conditions:
- *
- *     The above copyright notice and this permission notice shall be
- *     included in all copies or substantial portions of the Software.
- *
- *     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
- *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- *     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- *     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- *     OTHER DEALINGS IN THE SOFTWARE.
  */
 
 #include <dt-bindings/clock/rk3368-cru.h>
@@ -224,8 +187,10 @@
 			1   24   0
 			25  254  1
 		>;
-		nvmem-cells = <&cpu_leakage>;
-		nvmem-cell-names = "cpu_leakage";
+		nvmem-cells = <&cpu_leakage>, <&leakage_temp>, <&leakage_volt>;
+		nvmem-cell-names = "cpu_leakage", "leakage_temp",
+				   "leakage_volt";
+		rockchip,reboot-freq = <816000>;
 
 		opp-216000000 {
 			opp-hz = /bits/ 64 <216000000>;
@@ -286,8 +251,10 @@
 			25  50   1
 			51  254  2
 		>;
-		nvmem-cells = <&cpu_leakage>;
-		nvmem-cell-names = "cpu_leakage";
+		nvmem-cells = <&cpu_leakage>, <&leakage_temp>, <&leakage_volt>;
+		nvmem-cell-names = "cpu_leakage", "leakage_temp",
+				   "leakage_volt";
+		rockchip,reboot-freq = <816000>;
 
 		opp-216000000 {
 			opp-hz = /bits/ 64 <216000000>;
@@ -436,6 +403,37 @@
 		};
 	};
 
+	amba {
+		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		dmac_peri: dma-controller@ff250000 {
+			compatible = "arm,pl330", "arm,primecell";
+			reg = <0x0 0xff250000 0x0 0x4000>;
+			interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			arm,pl330-broken-no-flushp;
+			arm,pl330-periph-burst;
+			clocks = <&cru ACLK_DMAC_PERI>;
+			clock-names = "apb_pclk";
+		};
+
+		dmac_bus: dma-controller@ff600000 {
+			compatible = "arm,pl330", "arm,primecell";
+			reg = <0x0 0xff600000 0x0 0x4000>;
+			interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			arm,pl330-broken-no-flushp;
+			arm,pl330-periph-burst;
+			clocks = <&cru ACLK_DMAC_BUS>;
+			clock-names = "apb_pclk";
+		};
+	};
+
 	arm-pmu {
 		compatible = "arm,armv8-pmuv3";
 		interrupts = <GIC_SPI 112 IRQ_TYPE_LEVEL_HIGH>,
@@ -451,34 +449,10 @@
 				     <&cpu_b2>, <&cpu_b3>;
 	};
 
-	amba {
-		compatible = "arm,amba-bus";
-		#address-cells = <2>;
-		#size-cells = <2>;
-		ranges;
-
-		dmac_peri: dma-controller@ff250000 {
-			compatible = "arm,pl330", "arm,primecell";
-			reg = <0x0 0xff250000 0x0 0x4000>;
-			interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>;
-			#dma-cells = <1>;
-			clocks = <&cru ACLK_DMAC_PERI>;
-			clock-names = "apb_pclk";
-			arm,pl330-broken-no-flushp;
-			peripherals-req-type-burst;
-		};
-
-		dmac_bus: dma-controller@ff600000 {
-			compatible = "arm,pl330", "arm,primecell";
-			reg = <0x0 0xff600000 0x0 0x4000>;
-			interrupts = <GIC_SPI 0 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>;
-			#dma-cells = <1>;
-			clocks = <&cru ACLK_DMAC_BUS>;
-			clock-names = "apb_pclk";
-			arm,pl330-broken-no-flushp;
-			peripherals-req-type-burst;
+	firmware {
+		optee: optee {
+			compatible = "linaro,optee-tz";
+			method = "smc";
 		};
 	};
 
@@ -515,6 +489,8 @@
 		clock-names = "biu", "ciu", "ciu-drive", "ciu-sample";
 		fifo-depth = <0x100>;
 		interrupts = <GIC_SPI 32 IRQ_TYPE_LEVEL_HIGH>;
+		resets = <&cru SRST_MMC0>;
+		reset-names = "reset";
 		status = "disabled";
 	};
 
@@ -527,6 +503,8 @@
 		clock-names = "biu", "ciu", "ciu-drive", "ciu-sample";
 		fifo-depth = <0x100>;
 		interrupts = <GIC_SPI 33 IRQ_TYPE_LEVEL_HIGH>;
+		resets = <&cru SRST_SDIO0>;
+		reset-names = "reset";
 		status = "disabled";
 	};
 
@@ -539,6 +517,8 @@
 		clock-names = "biu", "ciu", "ciu-drive", "ciu-sample";
 		fifo-depth = <0x100>;
 		interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>;
+		resets = <&cru SRST_EMMC>;
+		reset-names = "reset";
 		status = "disabled";
 	};
 
@@ -773,7 +753,6 @@
 		nvmem-cell-names = "temp_adjust";
 		#thermal-sensor-cells = <1>;
 		hw-shut-temp = <95000>;
-		latency-bound = <50000>;
 		status = "disabled";
 	};
 
@@ -1161,7 +1140,7 @@
 			<&cru PCLK_BUS>, <&cru PCLK_PERI>,
 			<&cru ACLK_CCI_PRE>;
 		assigned-clock-rates =
-			<816000000>, <816000000>,
+			<600000000>, <600000000>,
 			<576000000>, <400000000>,
 			<300000000>, <300000000>,
 			<150000000>, <150000000>,
@@ -1345,10 +1324,10 @@
 		compatible = "rockchip,rk3368-spdif";
 		reg = <0x0 0xff880000 0x0 0x1000>;
 		interrupts = <GIC_SPI 54 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru SCLK_SPDIF_8CH>, <&cru HCLK_SPDIF>;
+		clock-names = "mclk", "hclk";
 		dmas = <&dmac_bus 3>;
 		dma-names = "tx";
-		clock-names = "mclk", "hclk";
-		clocks = <&cru SCLK_SPDIF_8CH>, <&cru HCLK_SPDIF>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&spdif_bus>;
 		status = "disabled";
@@ -1358,10 +1337,10 @@
 		compatible = "rockchip,rk3368-i2s", "rockchip,rk3066-i2s";
 		reg = <0x0 0xff890000 0x0 0x1000>;
 		interrupts = <GIC_SPI 40 IRQ_TYPE_LEVEL_HIGH>;
-		dmas = <&dmac_bus 6>, <&dmac_bus 7>;
-		dma-names = "tx", "rx";
 		clock-names = "i2s_clk", "i2s_hclk";
 		clocks = <&cru SCLK_I2S_2CH>, <&cru HCLK_I2S_2CH>;
+		dmas = <&dmac_bus 6>, <&dmac_bus 7>;
+		dma-names = "tx", "rx";
 		resets = <&cru SRST_I2S2CH>;
 		reset-names = "reset-m";
 		status = "disabled";
@@ -1371,10 +1350,10 @@
 		compatible = "rockchip,rk3368-i2s", "rockchip,rk3066-i2s";
 		reg = <0x0 0xff898000 0x0 0x1000>;
 		interrupts = <GIC_SPI 53 IRQ_TYPE_LEVEL_HIGH>;
-		dmas = <&dmac_bus 0>, <&dmac_bus 1>;
-		dma-names = "tx", "rx";
 		clock-names = "i2s_clk", "i2s_hclk";
 		clocks = <&cru SCLK_I2S_8CH>, <&cru HCLK_I2S_8CH>;
+		dmas = <&dmac_bus 0>, <&dmac_bus 1>;
+		dma-names = "tx", "rx";
 		resets = <&cru SRST_I2S8CH>;
 		reset-names = "reset-m";
 		pinctrl-names = "default";
@@ -1412,6 +1391,8 @@
 		reg = <0x0 0xff900800 0x0 0x100>;
 		interrupts = <GIC_SPI 17 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "iep_mmu";
+		clocks = <&cru ACLK_IEP>, <&cru HCLK_IEP>;
+		clock-names = "aclk", "iface";
 		power-domains = <&power RK3368_PD_VIO>;
 		#iommu-cells = <0>;
 		status = "disabled";
@@ -1423,7 +1404,7 @@
 		interrupts = <GIC_SPI 14 IRQ_TYPE_LEVEL_HIGH>;
 		power-domains = <&power RK3368_PD_VIO>;
 		clocks =
-			<&cru ACLK_RGA>, <&cru HCLK_ISP>, <&cru SCLK_ISP>,
+			<&cru ACLK_ISP>, <&cru HCLK_ISP>, <&cru SCLK_ISP>,
 			<&cru SCLK_ISP>, <&cru PCLK_ISP>, <&cru SCLK_VIP_OUT>,
 			<&cru SCLK_VIP_OUT>, <&cru PCLK_MIPI_CSI>,
 			<&cru PCLK_DPHYRX>, <&cru ACLK_VIO0_NOC>;
@@ -1465,7 +1446,7 @@
 		reg = <0x0 0xff910000 0x0 0x4000>;
 		interrupts = <GIC_SPI 14 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "isp_irq";
-		clocks = <&cru ACLK_RGA>, <&cru HCLK_ISP>,
+		clocks = <&cru ACLK_ISP>, <&cru HCLK_ISP>,
 			<&cru SCLK_ISP>, <&cru PCLK_ISP>;
 		clock-names = "aclk_isp", "hclk_isp",
 			"clk_isp", "pclk_isp";
@@ -1481,11 +1462,11 @@
 		      <0x0 0xff915000 0x0 0x100>;
 		interrupts = <GIC_SPI 14 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "isp_mmu";
-		clocks = <&cru ACLK_RGA>, <&cru HCLK_ISP>;
-		clock-names = "aclk", "hclk";
-		rk_iommu,disable_reset_quirk;
+		clocks = <&cru ACLK_ISP>, <&cru HCLK_ISP>;
+		clock-names = "aclk", "iface";
 		#iommu-cells = <0>;
 		power-domains = <&power RK3368_PD_VIO>;
+		rockchip,disable-mmu-reset;
 		status = "disabled";
 	};
 
@@ -1549,7 +1530,7 @@
 		interrupts = <GIC_SPI 15 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "vop_mmu";
 		clocks = <&cru ACLK_VOP>, <&cru HCLK_VOP>;
-		clock-names = "aclk", "hclk";
+		clock-names = "aclk", "iface";
 		power-domains = <&power RK3368_PD_VIO>;
 		#iommu-cells = <0>;
 		status = "disabled";
@@ -1567,6 +1548,22 @@
 		reset-names = "rst_cif";
 		pinctrl-names = "cif_pin_all";
 		pinctrl-0 = <&cif_clkout &isp_dvp_d2d9 &isp_dvp_d10d11>;
+		rockchip,grf = <&grf>;
+		power-domains = <&power RK3368_PD_VIO>;
+		iommus = <&vip_mmu>;
+		status = "disabled";
+	};
+
+	cif_new: cif-new@ff950000 {
+		compatible = "rockchip,rk3368-cif";
+		reg = <0x0 0xff950000 0x0 0x400>;
+		interrupts = <GIC_SPI 13 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru PCLK_VIP>, <&cru ACLK_VIP>, <&cru HCLK_VIP>,
+				<&cru SCLK_VIP_SRC>, <&cru SCLK_VIP_OUT>;
+		clock-names = "pclk_cif", "aclk_cif0", "hclk_cif0",
+				"cif0_in", "cif0_out";
+		resets = <&cru SRST_VIP>;
+		reset-names = "rst_cif";
 		rockchip,grf = <&grf>;
 		power-domains = <&power RK3368_PD_VIO>;
 		iommus = <&vip_mmu>;
@@ -1690,6 +1687,77 @@
 		};
 	};
 
+	mpp_srv: mpp-srv {
+		compatible = "rockchip,mpp-service";
+		rockchip,taskqueue-count = <1>;
+		rockchip,resetgroup-count = <1>;
+		rockchip,grf = <&grf>;
+		rockchip,grf-offset = <0x0418>;
+		rockchip,grf-values = <0x10001000>, <0x10000000>, <0x10000000>;
+		rockchip,grf-names = "grf_rkvdec", "grf_vdpu1", "grf_vepu1";
+		status = "disabled";
+	};
+
+	hevc: hevc_service@ff9a0000 {
+		compatible = "rockchip,hevc-decoder-rk3368";
+		reg = <0x0 0xff9a0000 0x0 0x400>;
+		interrupts = <GIC_SPI 12 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "irq_dec";
+		clocks = <&cru ACLK_VIDEO>, <&cru HCLK_VIDEO>,
+			<&cru SCLK_HEVC_CORE>, <&cru SCLK_HEVC_CABAC>;
+		clock-names = "aclk_vcodec", "hclk_vcodec", "clk_core",
+				"clk_cabac";
+		rockchip,normal-rates = <300000000>, <0>, <200000000>,
+				<200000000>;
+		rockchip,advanced-rates = <500000000>, <0>, <400000000>,
+				<400000000>;
+		resets = <&cru SRST_VIDEO_AXI>, <&cru SRST_VIDEO_AHB>,
+			<&cru SRST_VIDEO>;
+		reset-names = "shared_video_a", "shared_video_h", "video_core";
+		iommus = <&hevc_mmu>;
+		rockchip,srv = <&mpp_srv>;
+		rockchip,taskqueue-node = <0>;
+		rockchip,resetgroup-node = <0>;
+		power-domains = <&power RK3368_PD_VIDEO>;
+		status = "disabled";
+	};
+
+	vepu: vepu@ff9a0000 {
+		compatible = "rockchip,vpu-encoder-v1";
+		reg = <0x0 0xff9a0000 0x0 0x400>;
+		interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "irq_enc";
+		clocks = <&cru ACLK_VIDEO>, <&cru HCLK_VIDEO>;
+		clock-names = "aclk_vcodec", "hclk_vcodec";
+		resets = <&cru SRST_VIDEO_AXI>, <&cru SRST_VIDEO_AHB>;
+		reset-names = "shared_video_a", "shared_video_h";
+		iommus = <&vpu_mmu>;
+		power-domains = <&power RK3368_PD_VIDEO>;
+		rockchip,srv = <&mpp_srv>;
+		rockchip,taskqueue-node = <0>;
+		rockchip,resetgroup-node = <0>;
+		status = "disabled";
+	};
+
+	vdpu: vdpu@ff9a0400 {
+		compatible = "rockchip,vpu-decoder-rk3368";
+		reg = <0x0 0xff9a0400 0x0 0x400>;
+		interrupts = <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "irq_dec";
+		clocks = <&cru ACLK_VIDEO>, <&cru HCLK_VIDEO>;
+		clock-names = "aclk_vcodec", "hclk_vcodec";
+		rockchip,normal-rates = <300000000>, <0>;
+		rockchip,advanced-rates = <600000000>, <0>;
+		resets = <&cru SRST_VIDEO_AXI>, <&cru SRST_VIDEO_AHB>;
+		reset-names = "shared_video_a", "shared_video_h";
+		iommus = <&vpu_mmu>;
+		power-domains = <&power RK3368_PD_VIDEO>;
+		rockchip,srv = <&mpp_srv>;
+		rockchip,taskqueue-node = <0>;
+		rockchip,resetgroup-node = <0>;
+		status = "disabled";
+	};
+
 	hevc_mmu: iommu@ff9a0440 {
 		compatible = "rockchip,iommu";
 		reg = <0x0 0xff9a0440 0x0 0x40>,
@@ -1697,7 +1765,7 @@
 		interrupts = <GIC_SPI 12 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "hevc_mmu";
 		clocks = <&cru ACLK_VIDEO>, <&cru HCLK_VIDEO>;
-		clock-names = "aclk", "hclk";
+		clock-names = "aclk", "iface";
 		power-domains = <&power RK3368_PD_VIDEO>;
 		#iommu-cells = <0>;
 		status = "disabled";
@@ -1706,58 +1774,13 @@
 	vpu_mmu: iommu@ff9a0800 {
 		compatible = "rockchip,iommu";
 		reg = <0x0 0xff9a0800 0x0 0x100>;
-		interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts =  <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>,
+			<GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "vepu_mmu", "vdpu_mmu";
 		clocks = <&cru ACLK_VIDEO>, <&cru HCLK_VIDEO>;
-		clock-names = "aclk", "hclk";
+		clock-names = "aclk", "iface";
 		power-domains = <&power RK3368_PD_VIDEO>;
 		#iommu-cells = <0>;
-		status = "disabled";
-	};
-
-	vpu: vpu_service {
-		compatible = "rockchip,vpu_sub";
-		iommu_enabled = <1>;
-		iommus = <&vpu_mmu>;
-		interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "irq_enc","irq_dec";
-		dev_mode = <0>;
-		name = "vpu_service";
-		allocator = <1>;
-	};
-
-	hevc: hevc_service {
-		compatible = "rockchip,hevc_sub";
-		iommu_enabled = <1>;
-		iommus = <&hevc_mmu>;
-		interrupts = <GIC_SPI 12 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "irq_dec";
-		dev_mode = <1>;
-		name = "hevc_service";
-		allocator = <1>;
-	};
-
-	vpu_combo: vpu_combo@ff9a0000 {
-		compatible = "rockchip,vpu_combo";
-		reg = <0x0 0xff9a0000 0x0 0x440>;
-		rockchip,grf = <&grf>;
-		subcnt = <2>;
-		rockchip,sub = <&vpu>, <&hevc>;
-		clocks = <&cru ACLK_VIDEO>, <&cru HCLK_VIDEO>,
-			 <&cru SCLK_HEVC_CORE>, <&cru SCLK_HEVC_CABAC>;
-		clock-names = "aclk_vcodec", "hclk_vcodec",
-			      "clk_core", "clk_cabac";
-		assigned-clocks = <&cru SCLK_HEVC_CORE>, <&cru SCLK_HEVC_CABAC>;
-		assigned-clock-rates = <400000000>, <400000000>;
-		resets = <&cru SRST_VIDEO_AXI>, <&cru SRST_VIDEO_AHB>,
-			 <&cru SRST_VIDEO>;
-		reset-names = "video_a", "video_h", "video";
-		mode_bit = <12>;
-		mode_ctrl = <0x418>;
-		name = "vpu_combo";
-		power-domains = <&power RK3368_PD_VIDEO>;
 		status = "disabled";
 	};
 
@@ -1865,6 +1888,14 @@
 		/* Data cells */
 		cpu_leakage: cpu-leakage@17 {
 			reg = <0x17 0x1>;
+		};
+		leakage_volt: leakage-volt@1a {
+			reg = <0x1a 0x1>;
+			bits = <7 1>;
+		};
+		leakage_temp: leakage-temp@1e {
+			reg = <0x1e 0x1>;
+			bits = <1 7>;
 		};
 		temp_adjust: temp-adjust@1f {
 			reg = <0x1f 0x1>;

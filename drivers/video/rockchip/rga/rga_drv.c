@@ -1043,7 +1043,7 @@ static int rga_convert_dma_buf(struct rga_req *req)
 
 	if (req->src.uv_addr) {
 		if (RGA_TEST_MSG)
-			pr_err("RGA WARNING : don't input viraddrs when already input fd !");
+			pr_err("WARNING : don't input viraddrs when already input fd !\n");
 		req->src.uv_addr = 0;
 	}
 
@@ -1086,7 +1086,7 @@ static int rga_convert_dma_buf(struct rga_req *req)
 
 	if (req->dst.uv_addr) {
 		if (RGA_TEST_MSG)
-			pr_err("RGA WARNING : don't input viraddrs when already input fd !\n");
+			pr_err("WARNING : don't input viraddrs when already input fd !\n");
 		req->dst.uv_addr = 0;
 	}
 

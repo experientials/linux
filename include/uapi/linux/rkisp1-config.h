@@ -9,6 +9,7 @@
 
 #include <linux/types.h>
 #include <linux/v4l2-controls.h>
+#include "rkisp21-config.h"
 
 #define CIFISP_MODULE_DPCC			(1 << 0)
 #define CIFISP_MODULE_BLS			(1 << 1)
@@ -129,8 +130,6 @@
 enum cifisp_ctrl_id {
 	CIFISP_CID_EMB_VC = (V4L2_CTRL_CLASS_CAMERA | 0x1001),
 	CIFISP_CID_EMB_DT,
-	CIFISP_CID_USR_VC,
-	CIFISP_CID_USR_DT,
 	CIFISP_CID_LAST
 };
 

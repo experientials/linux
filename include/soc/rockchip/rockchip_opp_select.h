@@ -6,7 +6,7 @@
 #ifndef __SOC_ROCKCHIP_OPP_SELECT_H
 #define __SOC_ROCKCHIP_OPP_SELECT_H
 
-#ifdef CONFIG_ROCKCHIP_OPP
+#if IS_ENABLED(CONFIG_ROCKCHIP_OPP)
 int rockchip_of_get_leakage(struct device *dev, char *lkg_name, int *leakage);
 void rockchip_of_get_lkg_sel(struct device *dev, struct device_node *np,
 			     char *lkg_name, int process,
@@ -16,6 +16,8 @@ void rockchip_of_get_pvtm_sel(struct device *dev, struct device_node *np,
 			      int *volt_sel, int *scale_sel);
 void rockchip_of_get_bin_sel(struct device *dev, struct device_node *np,
 			     int bin, int *scale_sel);
+void rockchip_of_get_bin_volt_sel(struct device *dev, struct device_node *np,
+				  int bin, int *bin_volt_sel);
 int rockchip_get_efuse_value(struct device_node *np, char *porp_name,
 			     int *value);
 void rockchip_get_soc_info(struct device *dev,
@@ -24,7 +26,8 @@ void rockchip_get_soc_info(struct device *dev,
 void rockchip_get_scale_volt_sel(struct device *dev, char *lkg_name,
 				 char *reg_name, int bin, int process,
 				 int *scale, int *volt_sel);
-int rockchip_set_opp_info(struct device *dev, int process, int volt_sel);
+struct opp_table *rockchip_set_opp_prop_name(struct device *dev, int process,
+					     int volt_sel);
 int rockchip_adjust_power_scale(struct device *dev, int scale);
 int rockchip_init_opp_table(struct device *dev,
 			    const struct of_device_id *matches,
@@ -56,6 +59,12 @@ static inline void rockchip_of_get_bin_sel(struct device *dev,
 {
 }
 
+static inline void rockchip_of_get_bin_volt_sel(struct device *dev,
+						struct device_node *np,
+						int bin, int *bin_volt_sel)
+{
+}
+
 static inline int rockchip_get_efuse_value(struct device_node *np,
 					   char *porp_name, int *value)
 {
@@ -75,10 +84,11 @@ static inline void rockchip_get_scale_volt_sel(struct device *dev,
 {
 }
 
-static inline int rockchip_set_opp_info(struct device *dev, int process,
-					int volt_sel)
+static inline struct opp_table *rockchip_set_opp_prop_name(struct device *dev,
+							   int process,
+							   int volt_sel)
 {
-	return -ENOTSUPP;
+	return ERR_PTR(-ENOTSUPP);
 }
 
 static inline int rockchip_adjust_power_scale(struct device *dev, int scale)

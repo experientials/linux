@@ -14,20 +14,12 @@
 
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/interrupt.h>
 #include <linux/i2c.h>
 #include <linux/gpio/consumer.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/regulator/consumer.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/rk618.h>
-
-static struct resource rk618_hdmi_resources[] = {
-	DEFINE_RES_IRQ(RK618_IRQ_HDMI),
-};
-
-static struct resource rk618_dsi_resources[] = {
-	DEFINE_RES_IRQ(RK618_IRQ_DSI),
-};
 
 static const struct mfd_cell rk618_devs[] = {
 	{
@@ -39,13 +31,9 @@ static const struct mfd_cell rk618_devs[] = {
 	}, {
 		.name = "rk618-dsi",
 		.of_compatible = "rockchip,rk618-dsi",
-		.resources = rk618_dsi_resources,
-		.num_resources = ARRAY_SIZE(rk618_dsi_resources),
 	}, {
 		.name = "rk618-hdmi",
 		.of_compatible = "rockchip,rk618-hdmi",
-		.resources = rk618_hdmi_resources,
-		.num_resources = ARRAY_SIZE(rk618_hdmi_resources),
 	}, {
 		.name = "rk618-lvds",
 		.of_compatible = "rockchip,rk618-lvds",
@@ -98,19 +86,6 @@ static void rk618_power_off(struct rk618 *rk618)
 
 	regulator_disable(rk618->supply);
 }
-
-static const struct regmap_irq rk618_irqs[] = {
-	REGMAP_IRQ_REG(RK618_IRQ_HDMI, 0, BIT(20)),
-	REGMAP_IRQ_REG(RK618_IRQ_DSI, 0, BIT(19)),
-};
-
-static struct regmap_irq_chip rk618_irq_chip = {
-	.name = "rk618",
-	.irqs = rk618_irqs,
-	.num_irqs = ARRAY_SIZE(rk618_irqs),
-	.num_regs = 1,
-	.status_base = RK618_MISC_CON,
-};
 
 static const struct regmap_config rk618_regmap_config = {
 	.name = "core",
@@ -178,25 +153,15 @@ rk618_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	if (ret)
 		goto err_clk_disable;
 
-	ret = regmap_add_irq_chip(rk618->regmap, client->irq,
-				  IRQF_ONESHOT | IRQF_TRIGGER_HIGH,
-				  0, &rk618_irq_chip, &rk618->irq_data);
-	if (ret) {
-		dev_err(dev, "failed to add irq chip: %d\n", ret);
-		goto err_clk_disable;
-	}
-
 	ret = mfd_add_devices(dev, -1, rk618_devs, ARRAY_SIZE(rk618_devs),
-			      NULL, 0, regmap_irq_get_domain(rk618->irq_data));
+			      NULL, 0, NULL);
 	if (ret) {
 		dev_err(dev, "failed to add subdev: %d\n", ret);
-		goto err_del_irq_chip;
+		goto err_clk_disable;
 	}
 
 	return 0;
 
-err_del_irq_chip:
-	regmap_del_irq_chip(client->irq, rk618->irq_data);
 err_clk_disable:
 	clk_disable_unprepare(rk618->clkin);
 	return ret;
@@ -207,7 +172,6 @@ static int rk618_remove(struct i2c_client *client)
 	struct rk618 *rk618 = i2c_get_clientdata(client);
 
 	mfd_remove_devices(rk618->dev);
-	regmap_del_irq_chip(client->irq, rk618->irq_data);
 	rk618_power_off(rk618);
 	clk_disable_unprepare(rk618->clkin);
 

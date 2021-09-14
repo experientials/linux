@@ -48,7 +48,7 @@ static inline bool is_mapped_temp(int flags)
 
 /******************************************************************************/
 
-#define _UUID_STR_SIZE 35
+#define _UUID_STR_SIZE 36
 static char *_uuid_to_str(const TEEC_UUID *uuid)
 {
 	static char uuid_str[_UUID_STR_SIZE];
@@ -680,7 +680,6 @@ static void _update_client_tee_cmd(struct tee_session *sess,
 
 	BUG_ON(!cmd_io);
 	BUG_ON(!cmd_io->op);
-	BUG_ON(!cmd_io->op->params);
 	BUG_ON(!cmd);
 	BUG_ON(!sess->ctx);
 	ctx = sess->ctx;

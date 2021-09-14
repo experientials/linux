@@ -1,43 +1,6 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
- * Copyright (c) 2016 Fuzhou Rockchip Electronics Co., Ltd
- *
- * This file is dual-licensed: you can use it either under the terms
- * of the GPL or the X11 license, at your option. Note that this dual
- * licensing only applies to this file, and not this project as a
- * whole.
- *
- *  a) This library is free software; you can redistribute it and/or
- *     modify it under the terms of the GNU General Public License as
- *     published by the Free Software Foundation; either version 2 of the
- *     License, or (at your option) any later version.
- *
- *     This library is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- * Or, alternatively,
- *
- *  b) Permission is hereby granted, free of charge, to any person
- *     obtaining a copy of this software and associated documentation
- *     files (the "Software"), to deal in the Software without
- *     restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or
- *     sell copies of the Software, and to permit persons to whom the
- *     Software is furnished to do so, subject to the following
- *     conditions:
- *
- *     The above copyright notice and this permission notice shall be
- *     included in all copies or substantial portions of the Software.
- *
- *     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
- *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- *     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- *     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- *     OTHER DEALINGS IN THE SOFTWARE.
+ * Copyright (c) 2016-2017 Fuzhou Rockchip Electronics Co., Ltd
  */
 
 #include "rk3399-sched-energy.dtsi"
@@ -51,9 +14,11 @@
 		rockchip,low-temp = <0>;
 		rockchip,low-temp-min-volt = <900000>;
 
-		nvmem-cells = <&cpul_leakage>, <&specification_serial_number>;
+		nvmem-cells = <&cpul_leakage>, <&specification_serial_number>,
+			      <&customer_demand>;
 		nvmem-cell-names = "cpu_leakage",
-				   "specification_serial_number";
+				   "specification_serial_number",
+				   "customer_demand";
 		clocks = <&cru PLL_APLLL>;
 		rockchip,avs-scale = <20>;
 		rockchip,bin-scaling-sel = <
@@ -75,7 +40,7 @@
 		rockchip,pvtm-error = <1000>;
 		rockchip,pvtm-ref-temp = <41>;
 		rockchip,pvtm-temp-prop = <115 66>;
-		rockchip,thermal-zone = "soc-thermal";
+		rockchip,pvtm-thermal-zone = "soc-thermal";
 
 		opp-408000000 {
 			opp-hz = /bits/ 64 <408000000>;
@@ -128,7 +93,7 @@
 			opp-microvolt = <1125000 1125000 1250000>;
 			opp-microvolt-L0 = <1125000 1125000 1250000>;
 			opp-microvolt-L1 = <1100000 1100000 1250000>;
-			opp-microvolt-L2 = <1075000 1075000 1250000>;
+			opp-microvolt-L2 = <1075000 1075000 1200000>;
 			opp-microvolt-L3 = <1050000 1050000 1250000>;
 			clock-latency-ns = <40000>;
 		};
@@ -142,9 +107,11 @@
 		rockchip,low-temp = <0>;
 		rockchip,low-temp-min-volt = <900000>;
 
-		nvmem-cells = <&cpub_leakage>, <&specification_serial_number>;
+		nvmem-cells = <&cpub_leakage>, <&specification_serial_number>,
+			      <&customer_demand>;
 		nvmem-cell-names = "cpu_leakage",
-				   "specification_serial_number";
+				   "specification_serial_number",
+				   "customer_demand";
 		clocks = <&cru PLL_APLLB>;
 		rockchip,avs-scale = <8>;
 		rockchip,bin-scaling-sel = <
@@ -167,7 +134,7 @@
 		rockchip,pvtm-error = <1000>;
 		rockchip,pvtm-ref-temp = <41>;
 		rockchip,pvtm-temp-prop = <71 35>;
-		rockchip,thermal-zone = "soc-thermal";
+		rockchip,pvtm-thermal-zone = "soc-thermal";
 
 		opp-408000000 {
 			opp-hz = /bits/ 64 <408000000>;
@@ -381,10 +348,10 @@
 	sched-energy-costs = <&RK3399_CPU_COST_1 &RK3399_CLUSTER_COST_1>;
 };
 
-&gpu {
-	operating-points-v2 = <&gpu_opp_table>;
-};
-
 &dmc {
 	operating-points-v2 = <&dmc_opp_table>;
+};
+
+&gpu {
+	operating-points-v2 = <&gpu_opp_table>;
 };

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
 #
 # Partition configuration
 #
@@ -259,16 +260,6 @@ config SYSV68_PARTITION
 	  Say Y here if you would like to be able to read the hard disk
 	  partition table format used by Motorola Delta machines (using
 	  sysv68).
-	  Otherwise, say N.
-
-config RK_PARTITION
-	bool "Rockchip partition table support" if PARTITION_ADVANCED
-	default y if ARCH_ROCKCHIP
-	---help---
-	  Like most systems, Rockchip use its own hard disk partition table
-	  format, incompatible with all others. Say Y here if you would like
-	  to be able to read the hard disk partition table format used by
-	  Rockchip SoCs inside machines with eMMC as main storage disk.
 	  Otherwise, say N.
 
 config CMDLINE_PARTITION

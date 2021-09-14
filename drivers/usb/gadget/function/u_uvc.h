@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * u_uvc.h
  *
@@ -7,15 +8,12 @@
  *		http://www.samsung.com
  *
  * Author: Andrzej Pietrasiewicz <andrzej.p@samsung.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef U_UVC_H
 #define U_UVC_H
 
+#include <linux/mutex.h>
 #include <linux/usb/composite.h>
 #include <linux/usb/video.h>
 
@@ -25,11 +23,13 @@ DECLARE_UVC_EXTENSION_UNIT_DESCRIPTOR(1, 1);
 struct f_uvc_opts {
 	struct usb_function_instance			func_inst;
 	bool						streaming_bulk;
-	unsigned int					uvc_gadget_trace_param;
 	unsigned int					streaming_interval;
 	unsigned int					streaming_maxpacket;
 	unsigned int					streaming_maxburst;
-	unsigned int					streaming_intf;
+
+	unsigned int					control_interface;
+	unsigned int					streaming_interface;
+	unsigned int					uvc_num_request;
 
 	/*
 	 * Control descriptors array pointers for full-/high-speed and
@@ -87,7 +87,4 @@ struct f_uvc_opts {
 	int				refcnt;
 };
 
-void uvc_set_trace_param(unsigned int trace);
-
 #endif /* U_UVC_H */
-

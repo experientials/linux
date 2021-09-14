@@ -159,13 +159,13 @@ struct rk3x_i2c_calced_timings {
 
 enum rk3x_i2c_state {
 	STATE_IDLE,
-	STATE_START,
 	STATE_READ,
 	STATE_WRITE,
 	STATE_STOP
 };
 
 /**
+ * struct rk3x_i2c_soc_data:
  * @grf_offset: offset inside the grf regmap for setting the i2c type
  * @calc_timings: Callback function for i2c timing information calculated
  */
@@ -200,7 +200,7 @@ struct rk3x_i2c_soc_data {
 struct rk3x_i2c {
 	struct i2c_adapter adap;
 	struct device *dev;
-	struct rk3x_i2c_soc_data *soc_data;
+	const struct rk3x_i2c_soc_data *soc_data;
 
 	/* Hardware resources */
 	void __iomem *regs;
@@ -230,6 +230,9 @@ struct rk3x_i2c {
 
 	struct notifier_block i2c_restart_nb;
 };
+
+static int rk3x_i2c_fill_transmit_buf(struct rk3x_i2c *i2c, bool sended);
+static void rk3x_i2c_prepare_read(struct rk3x_i2c *i2c);
 
 static inline void i2c_writel(struct rk3x_i2c *i2c, u32 value,
 			      unsigned int offset)
@@ -266,8 +269,18 @@ static inline void rk3x_i2c_disable(struct rk3x_i2c *i2c)
 static void rk3x_i2c_start(struct rk3x_i2c *i2c)
 {
 	u32 val = i2c_readl(i2c, REG_CON) & REG_CON_TUNING_MASK;
+	int length = 0;
 
-	i2c_writel(i2c, REG_INT_START, REG_IEN);
+	/* enable appropriate interrupts */
+	if (i2c->mode == REG_CON_MOD_TX) {
+		i2c_writel(i2c, REG_INT_MBTF | REG_INT_NAKRCV, REG_IEN);
+		i2c->state = STATE_WRITE;
+		length = rk3x_i2c_fill_transmit_buf(i2c, false);
+	} else {
+		/* in any other case, we are going to be reading. */
+		i2c_writel(i2c, REG_INT_MBRF | REG_INT_NAKRCV, REG_IEN);
+		i2c->state = STATE_READ;
+	}
 
 	/* enable adapter with correct mode, send START condition */
 	val |= REG_CON_EN | REG_CON_MOD(i2c->mode) | REG_CON_START;
@@ -277,6 +290,12 @@ static void rk3x_i2c_start(struct rk3x_i2c *i2c)
 		val |= REG_CON_ACTACK;
 
 	i2c_writel(i2c, val, REG_CON);
+
+	/* enable transition */
+	if (i2c->mode == REG_CON_MOD_TX)
+		i2c_writel(i2c, length, REG_MTXCNT);
+	else
+		rk3x_i2c_prepare_read(i2c);
 }
 
 /**
@@ -300,6 +319,7 @@ static void rk3x_i2c_stop(struct rk3x_i2c *i2c, int error)
 
 		ctrl = i2c_readl(i2c, REG_CON);
 		ctrl |= REG_CON_STOP;
+		ctrl &= ~REG_CON_START;
 		i2c_writel(i2c, ctrl, REG_CON);
 	} else {
 		/* Signal rk3x_i2c_xfer to start the next message. */
@@ -344,6 +364,8 @@ static void rk3x_i2c_prepare_read(struct rk3x_i2c *i2c)
 	if (i2c->processed != 0) {
 		con &= ~REG_CON_MOD_MASK;
 		con |= REG_CON_MOD(REG_CON_MOD_RX);
+		if (con & REG_CON_START)
+			con &= ~REG_CON_START;
 	}
 
 	i2c_writel(i2c, con, REG_CON);
@@ -353,7 +375,7 @@ static void rk3x_i2c_prepare_read(struct rk3x_i2c *i2c)
 /**
  * Fill the transmit buffer with data from i2c->msg
  */
-static void rk3x_i2c_fill_transmit_buf(struct rk3x_i2c *i2c)
+static int rk3x_i2c_fill_transmit_buf(struct rk3x_i2c *i2c, bool sendend)
 {
 	unsigned int i, j;
 	u32 cnt = 0;
@@ -381,39 +403,14 @@ static void rk3x_i2c_fill_transmit_buf(struct rk3x_i2c *i2c)
 			break;
 	}
 
-	i2c_writel(i2c, cnt, REG_MTXCNT);
+	if (sendend)
+		i2c_writel(i2c, cnt, REG_MTXCNT);
+
+	return cnt;
 }
 
 
 /* IRQ handlers for individual states */
-
-static void rk3x_i2c_handle_start(struct rk3x_i2c *i2c, unsigned int ipd)
-{
-	if (!(ipd & REG_INT_START)) {
-		rk3x_i2c_stop(i2c, -EIO);
-		dev_warn(i2c->dev, "unexpected irq in START: 0x%x\n", ipd);
-		rk3x_i2c_clean_ipd(i2c);
-		return;
-	}
-
-	/* ack interrupt */
-	i2c_writel(i2c, REG_INT_START, REG_IPD);
-
-	/* disable start bit */
-	i2c_writel(i2c, i2c_readl(i2c, REG_CON) & ~REG_CON_START, REG_CON);
-
-	/* enable appropriate interrupts and transition */
-	if (i2c->mode == REG_CON_MOD_TX) {
-		i2c_writel(i2c, REG_INT_MBTF | REG_INT_NAKRCV, REG_IEN);
-		i2c->state = STATE_WRITE;
-		rk3x_i2c_fill_transmit_buf(i2c);
-	} else {
-		/* in any other case, we are going to be reading. */
-		i2c_writel(i2c, REG_INT_MBRF | REG_INT_NAKRCV, REG_IEN);
-		i2c->state = STATE_READ;
-		rk3x_i2c_prepare_read(i2c);
-	}
-}
 
 static void rk3x_i2c_handle_write(struct rk3x_i2c *i2c, unsigned int ipd)
 {
@@ -431,7 +428,7 @@ static void rk3x_i2c_handle_write(struct rk3x_i2c *i2c, unsigned int ipd)
 	if (i2c->processed == i2c->msg->len)
 		rk3x_i2c_stop(i2c, i2c->error);
 	else
-		rk3x_i2c_fill_transmit_buf(i2c);
+		rk3x_i2c_fill_transmit_buf(i2c, true);
 }
 
 static void rk3x_i2c_handle_read(struct rk3x_i2c *i2c, unsigned int ipd)
@@ -536,9 +533,6 @@ static irqreturn_t rk3x_i2c_irq(int irqno, void *dev_id)
 		goto out;
 
 	switch (i2c->state) {
-	case STATE_START:
-		rk3x_i2c_handle_start(i2c, ipd);
-		break;
 	case STATE_WRITE:
 		rk3x_i2c_handle_write(i2c, ipd);
 		break;
@@ -944,7 +938,7 @@ static void rk3x_i2c_adapt_div(struct rk3x_i2c *i2c, unsigned long clk_rate)
  * Code adapted from i2c-cadence.c.
  *
  * Return:	NOTIFY_STOP if the rate change should be aborted, NOTIFY_OK
- *		to acknowedge the change, NOTIFY_DONE if the notification is
+ *		to acknowledge the change, NOTIFY_DONE if the notification is
  *		considered irrelevant.
  */
 static int rk3x_i2c_clk_notifier_cb(struct notifier_block *nb, unsigned long
@@ -1058,7 +1052,6 @@ static int rk3x_i2c_setup(struct rk3x_i2c *i2c, struct i2c_msg *msgs, int num)
 
 	i2c->addr = msgs[0].addr;
 	i2c->busy = true;
-	i2c->state = STATE_START;
 	i2c->processed = 0;
 	i2c->error = 0;
 
@@ -1187,9 +1180,9 @@ static __maybe_unused int rk3x_i2c_suspend_noirq(struct device *dev)
 	 *
 	 * So forbid access to I2C device using i2c->suspended flag.
 	 */
-	i2c_lock_adapter(&i2c->adap);
+	i2c_lock_bus(&i2c->adap, I2C_LOCK_ROOT_ADAPTER);
 	i2c->suspended = 1;
-	i2c_unlock_adapter(&i2c->adap);
+	i2c_unlock_bus(&i2c->adap, I2C_LOCK_ROOT_ADAPTER);
 
 	return 0;
 }
@@ -1201,9 +1194,9 @@ static __maybe_unused int rk3x_i2c_resume_noirq(struct device *dev)
 	rk3x_i2c_adapt_div(i2c, clk_get_rate(i2c->clk));
 
 	/* Allow access to I2C bus */
-	i2c_lock_adapter(&i2c->adap);
+	i2c_lock_bus(&i2c->adap, I2C_LOCK_ROOT_ADAPTER);
 	i2c->suspended = 0;
-	i2c_unlock_adapter(&i2c->adap);
+	i2c_unlock_bus(&i2c->adap, I2C_LOCK_ROOT_ADAPTER);
 
 	return 0;
 }
@@ -1219,7 +1212,12 @@ static const struct i2c_algorithm rk3x_i2c_algorithm = {
 };
 
 static const struct rk3x_i2c_soc_data rv1108_soc_data = {
-	.grf_offset = -1,
+	.grf_offset = 0x408,
+	.calc_timings = rk3x_i2c_v1_calc_timings,
+};
+
+static const struct rk3x_i2c_soc_data rv1126_soc_data = {
+	.grf_offset = 0x118,
 	.calc_timings = rk3x_i2c_v1_calc_timings,
 };
 
@@ -1243,11 +1241,6 @@ static const struct rk3x_i2c_soc_data rk3288_soc_data = {
 	.calc_timings = rk3x_i2c_v0_calc_timings,
 };
 
-static const struct rk3x_i2c_soc_data rk3328_soc_data = {
-	.grf_offset = -1,
-	.calc_timings = rk3x_i2c_v1_calc_timings,
-};
-
 static const struct rk3x_i2c_soc_data rk3399_soc_data = {
 	.grf_offset = -1,
 	.calc_timings = rk3x_i2c_v1_calc_timings,
@@ -1256,27 +1249,31 @@ static const struct rk3x_i2c_soc_data rk3399_soc_data = {
 static const struct of_device_id rk3x_i2c_match[] = {
 	{
 		.compatible = "rockchip,rv1108-i2c",
-		.data = (void *)&rv1108_soc_data
+		.data = &rv1108_soc_data
+	},
+	{
+		.compatible = "rockchip,rv1126-i2c",
+		.data = &rv1126_soc_data
 	},
 	{
 		.compatible = "rockchip,rk3066-i2c",
-		.data = (void *)&rk3066_soc_data
+		.data = &rk3066_soc_data
 	},
 	{
 		.compatible = "rockchip,rk3188-i2c",
-		.data = (void *)&rk3188_soc_data
+		.data = &rk3188_soc_data
 	},
 	{
 		.compatible = "rockchip,rk3228-i2c",
-		.data = (void *)&rk3228_soc_data
+		.data = &rk3228_soc_data
 	},
 	{
 		.compatible = "rockchip,rk3288-i2c",
-		.data = (void *)&rk3288_soc_data
+		.data = &rk3288_soc_data
 	},
 	{
 		.compatible = "rockchip,rk3399-i2c",
-		.data = (void *)&rk3399_soc_data
+		.data = &rk3399_soc_data
 	},
 	{},
 };
@@ -1289,7 +1286,6 @@ static int rk3x_i2c_probe(struct platform_device *pdev)
 	struct rk3x_i2c *i2c;
 	struct resource *mem;
 	int ret = 0;
-	int bus_nr;
 	u32 value;
 	int irq;
 	unsigned long clk_rate;
@@ -1299,7 +1295,7 @@ static int rk3x_i2c_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	match = of_match_node(rk3x_i2c_match, np);
-	i2c->soc_data = (struct rk3x_i2c_soc_data *)match->data;
+	i2c->soc_data = match->data;
 
 	/* use common interface to get I2C timing properties */
 	i2c_parse_fw_timings(&pdev->dev, &i2c->t, true);
@@ -1319,7 +1315,7 @@ static int rk3x_i2c_probe(struct platform_device *pdev)
 
 	i2c->i2c_restart_nb.notifier_call = rk3x_i2c_restart_notify;
 	i2c->i2c_restart_nb.priority = 128;
-	ret = register_i2c_restart_handler(&i2c->i2c_restart_nb);
+	ret = register_pre_restart_handler(&i2c->i2c_restart_nb);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to setup i2c restart handler.\n");
 		return ret;
@@ -1330,9 +1326,6 @@ static int rk3x_i2c_probe(struct platform_device *pdev)
 	if (IS_ERR(i2c->regs))
 		return PTR_ERR(i2c->regs);
 
-	/* Try to set the I2C adapter number from dt */
-	bus_nr = of_alias_get_id(np, "i2c");
-
 	/*
 	 * Switch to new interface if the SoC also offers the old one.
 	 * The control bit is located in the GRF register space.
@@ -1341,24 +1334,34 @@ static int rk3x_i2c_probe(struct platform_device *pdev)
 		struct regmap *grf;
 
 		grf = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
-		if (IS_ERR(grf)) {
-			dev_err(&pdev->dev,
-				"rk3x-i2c needs 'rockchip,grf' property\n");
-			return PTR_ERR(grf);
-		}
+		if (!IS_ERR(grf)) {
+			int bus_nr;
 
-		if (bus_nr < 0) {
-			dev_err(&pdev->dev, "rk3x-i2c needs i2cX alias");
-			return -EINVAL;
-		}
+			/* Try to set the I2C adapter number from dt */
+			bus_nr = of_alias_get_id(np, "i2c");
+			if (bus_nr < 0) {
+				dev_err(&pdev->dev, "rk3x-i2c needs i2cX alias");
+				return -EINVAL;
+			}
 
-		/* 27+i: write mask, 11+i: value */
-		value = BIT(27 + bus_nr) | BIT(11 + bus_nr);
+			if (i2c->soc_data == &rv1108_soc_data && bus_nr == 2)
+				/* rv1108 i2c2 set grf offset-0x408, bit-10 */
+				value = BIT(26) | BIT(10);
+			else if (i2c->soc_data == &rv1126_soc_data &&
+				 bus_nr == 2)
+				/* rv1126 i2c2 set pmugrf offset-0x118, bit-4 */
+				value = BIT(20) | BIT(4);
+			else
+				/* rk3xxx 27+i: write mask, 11+i: value */
+				value = BIT(27 + bus_nr) | BIT(11 + bus_nr);
 
-		ret = regmap_write(grf, i2c->soc_data->grf_offset, value);
-		if (ret != 0) {
-			dev_err(i2c->dev, "Could not write to GRF: %d\n", ret);
-			return ret;
+			ret = regmap_write(grf, i2c->soc_data->grf_offset,
+					   value);
+			if (ret != 0) {
+				dev_err(i2c->dev, "Could not write to GRF: %d\n",
+					ret);
+				return ret;
+			}
 		}
 	}
 
@@ -1422,12 +1425,8 @@ static int rk3x_i2c_probe(struct platform_device *pdev)
 	rk3x_i2c_adapt_div(i2c, clk_rate);
 
 	ret = i2c_add_adapter(&i2c->adap);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Could not register adapter\n");
+	if (ret < 0)
 		goto err_clk_notifier;
-	}
-
-	dev_info(&pdev->dev, "Initialized RK3xxx I2C bus at %p\n", i2c->regs);
 
 	return 0;
 
@@ -1447,7 +1446,7 @@ static int rk3x_i2c_remove(struct platform_device *pdev)
 	i2c_del_adapter(&i2c->adap);
 
 	clk_notifier_unregister(i2c->clk, &i2c->clk_rate_nb);
-	unregister_i2c_restart_handler(&i2c->i2c_restart_nb);
+	unregister_pre_restart_handler(&i2c->i2c_restart_nb);
 	clk_unprepare(i2c->pclk);
 	clk_unprepare(i2c->clk);
 
@@ -1469,7 +1468,21 @@ static struct platform_driver rk3x_i2c_driver = {
 	},
 };
 
+#ifdef CONFIG_ROCKCHIP_THUNDER_BOOT
+static int __init rk3x_i2c_driver_init(void)
+{
+	return platform_driver_register(&rk3x_i2c_driver);
+}
+subsys_initcall_sync(rk3x_i2c_driver_init);
+
+static void __exit rk3x_i2c_driver_exit(void)
+{
+	platform_driver_unregister(&rk3x_i2c_driver);
+}
+module_exit(rk3x_i2c_driver_exit);
+#else
 module_platform_driver(rk3x_i2c_driver);
+#endif
 
 MODULE_DESCRIPTION("Rockchip RK3xxx I2C Bus driver");
 MODULE_AUTHOR("Max Schwarz <max.schwarz@online.de>");

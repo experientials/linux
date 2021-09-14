@@ -22,11 +22,8 @@
 #include <linux/mfd/rk808.h>
 #include <linux/i2c.h>
 
-#define RK808_NR_OUTPUT 2
-
 struct rk808_clkout {
 	struct rk808 *rk808;
-	struct clk_onecell_data clk_data;
 	struct clk_hw		clkout1_hw;
 	struct clk_hw		clkout2_hw;
 };
@@ -85,6 +82,20 @@ static const struct clk_ops rk808_clkout2_ops = {
 	.recalc_rate = rk808_clkout_recalc_rate,
 };
 
+static struct clk_hw *
+of_clk_rk808_get(struct of_phandle_args *clkspec, void *data)
+{
+	struct rk808_clkout *rk808_clkout = data;
+	unsigned int idx = clkspec->args[0];
+
+	if (idx >= 2) {
+		pr_err("%s: invalid index %u\n", __func__, idx);
+		return ERR_PTR(-EINVAL);
+	}
+
+	return idx ? &rk808_clkout->clkout2_hw : &rk808_clkout->clkout1_hw;
+}
+
 static int rk817_clkout2_enable(struct clk_hw *hw, bool enable)
 {
 	struct rk808_clkout *rk808_clkout = container_of(hw,
@@ -118,7 +129,7 @@ static int rk817_clkout2_is_prepared(struct clk_hw *hw)
 	int ret = regmap_read(rk808->regmap, RK817_SYS_CFG(1), &val);
 
 	if (ret < 0)
-		return ret;
+		return 0;
 
 	return (val & RK817_CLK32KOUT2_EN) ? 1 : 0;
 }
@@ -136,14 +147,15 @@ static const struct clk_ops *rkpmic_get_ops(long variant)
 	case RK809_ID:
 	case RK817_ID:
 		return &rk817_clkout2_ops;
-	case RK805_ID:
-	case RK808_ID:
-	case RK816_ID:
-	case RK818_ID:
+	/*
+	 * For the default case, it match the following PMIC type.
+	 * RK805_ID
+	 * RK808_ID
+	 * RK818_ID
+	 */
+	default:
 		return &rk808_clkout2_ops;
 	}
-
-	return &rk808_clkout2_ops;
 }
 
 static int rk808_clkout_probe(struct platform_device *pdev)
@@ -152,8 +164,8 @@ static int rk808_clkout_probe(struct platform_device *pdev)
 	struct i2c_client *client = rk808->i2c;
 	struct device_node *node = client->dev.of_node;
 	struct clk_init_data init = {};
-	struct clk **clk_table;
 	struct rk808_clkout *rk808_clkout;
+	int ret;
 
 	rk808_clkout = devm_kzalloc(&client->dev,
 				    sizeof(*rk808_clkout), GFP_KERNEL);
@@ -162,12 +174,6 @@ static int rk808_clkout_probe(struct platform_device *pdev)
 
 	rk808_clkout->rk808 = rk808;
 
-	clk_table = devm_kcalloc(&client->dev, RK808_NR_OUTPUT,
-				 sizeof(struct clk *), GFP_KERNEL);
-	if (!clk_table)
-		return -ENOMEM;
-
-	init.flags = CLK_IS_ROOT;
 	init.parent_names = NULL;
 	init.num_parents = 0;
 	init.name = "rk808-clkout1";
@@ -178,10 +184,9 @@ static int rk808_clkout_probe(struct platform_device *pdev)
 	of_property_read_string_index(node, "clock-output-names",
 				      0, &init.name);
 
-	clk_table[0] = devm_clk_register(&client->dev,
-					 &rk808_clkout->clkout1_hw);
-	if (IS_ERR(clk_table[0]))
-		return PTR_ERR(clk_table[0]);
+	ret = devm_clk_hw_register(&client->dev, &rk808_clkout->clkout1_hw);
+	if (ret)
+		return ret;
 
 	init.name = "rk808-clkout2";
 	init.ops = rkpmic_get_ops(rk808->variant);
@@ -191,16 +196,11 @@ static int rk808_clkout_probe(struct platform_device *pdev)
 	of_property_read_string_index(node, "clock-output-names",
 				      1, &init.name);
 
-	clk_table[1] = devm_clk_register(&client->dev,
-					 &rk808_clkout->clkout2_hw);
-	if (IS_ERR(clk_table[1]))
-		return PTR_ERR(clk_table[1]);
+	ret = devm_clk_hw_register(&client->dev, &rk808_clkout->clkout2_hw);
+	if (ret)
+		return ret;
 
-	rk808_clkout->clk_data.clks = clk_table;
-	rk808_clkout->clk_data.clk_num = RK808_NR_OUTPUT;
-
-	return of_clk_add_provider(node, of_clk_src_onecell_get,
-				   &rk808_clkout->clk_data);
+	return of_clk_add_hw_provider(node, of_clk_rk808_get, rk808_clkout);
 }
 
 static int rk808_clkout_remove(struct platform_device *pdev)

@@ -2,6 +2,7 @@
 
 /* Copyright (c) 2018 Fuzhou Rockchip Electronics Co., Ltd */
 
+#include <linux/fs.h>
 #include <linux/kthread.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
@@ -133,19 +134,54 @@ static int flash_vendor_read(u32 id, void *pbuf, u32 size)
 
 static int flash_vendor_write(u32 id, void *pbuf, u32 size)
 {
-	u32 i, next_index, algin_size;
+	u32 i, j, next_index, align_size, alloc_size, item_num;
+	u32 offset, next_size;
+	u8 *p_data;
 	struct vendor_item *item;
+	struct vendor_item *next_item;
 
-	algin_size = (size + 0x3F) & (~0x3F); /* algin to 64 bytes */
+	if (!g_vendor)
+		return -1;
+
+	p_data = g_vendor->data;
+	item_num = g_vendor->item_num;
+	align_size = ALIGN(size, 0x40); /* align to 64 bytes*/
 	next_index = g_vendor->next_index;
-	for (i = 0; i < g_vendor->item_num; i++) {
-		if (g_vendor->item[i].id == id) {
-			if (size > algin_size)
-				return -1;
-			memcpy(&g_vendor->data[g_vendor->item[i].offset],
-			       pbuf,
-			       size);
-			g_vendor->item[i].size = size;
+	for (i = 0; i < item_num; i++) {
+		item = &g_vendor->item[i];
+		if (item->id == id) {
+			alloc_size = ALIGN(item->size, 0x40);
+			if (size > alloc_size) {
+				if (g_vendor->free_size < align_size)
+					return -1;
+				offset = item->offset;
+				for (j = i; j < item_num - 1; j++) {
+					item = &g_vendor->item[j];
+					next_item = &g_vendor->item[j + 1];
+					item->id = next_item->id;
+					item->size = next_item->size;
+					item->offset = offset;
+					next_size = ALIGN(next_item->size,
+							  0x40);
+					memcpy(&p_data[offset],
+					       &p_data[next_item->offset],
+					       next_size);
+					offset += next_size;
+				}
+				item = &g_vendor->item[j];
+				item->id = id;
+				item->offset = offset;
+				item->size = size;
+				memcpy(&p_data[item->offset], pbuf, size);
+				g_vendor->free_offset = offset + align_size;
+				g_vendor->free_size -= (align_size -
+							alloc_size);
+			} else {
+				memcpy(&p_data[item->offset],
+				       pbuf,
+				       size);
+				g_vendor->item[i].size = size;
+			}
 			g_vendor->version++;
 			g_vendor->version2 = g_vendor->version;
 			g_vendor->next_index++;
@@ -159,14 +195,14 @@ static int flash_vendor_write(u32 id, void *pbuf, u32 size)
 		}
 	}
 
-	if (g_vendor->free_size >= algin_size) {
+	if (g_vendor->free_size >= align_size) {
 		item = &g_vendor->item[g_vendor->item_num];
 		item->id = id;
 		item->offset = g_vendor->free_offset;
-		item->size = algin_size;
+		item->size = align_size;
 		item->size = size;
-		g_vendor->free_offset += algin_size;
-		g_vendor->free_size -= algin_size;
+		g_vendor->free_offset += align_size;
+		g_vendor->free_size -= align_size;
 		memcpy(&g_vendor->data[item->offset], pbuf, size);
 		g_vendor->item_num++;
 		g_vendor->version++;
@@ -315,8 +351,11 @@ static int __init vendor_storage_init(void)
 
 static __exit void vendor_storage_deinit(void)
 {
-	if (g_vendor)
+	if (g_vendor) {
 		misc_deregister(&vender_storage_dev);
+		kfree(g_vendor);
+		g_vendor = NULL;
+	}
 }
 
 device_initcall_sync(vendor_storage_init);

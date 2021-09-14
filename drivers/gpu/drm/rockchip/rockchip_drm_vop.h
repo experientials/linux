@@ -16,12 +16,12 @@
 #define _ROCKCHIP_DRM_VOP_H
 
 /*
- * major: IP major vertion, used for IP structure
+ * major: IP major version, used for IP structure
  * minor: big feature change under same structure
  */
 #define VOP_VERSION(major, minor)	((major) << 8 | (minor))
-#define VOP_MAJOR(version) 	((version) >> 8)
-#define VOP_MINOR(version) 	((version) & 0xff)
+#define VOP_MAJOR(version)		((version) >> 8)
+#define VOP_MINOR(version)		((version) & 0xff)
 
 #define ROCKCHIP_OUTPUT_DSI_DUAL_CHANNEL	BIT(0)
 #define ROCKCHIP_OUTPUT_DSI_DUAL_LINK		BIT(1)
@@ -68,17 +68,11 @@ enum vop_csc_mode {
 enum vop_data_format {
 	VOP_FMT_ARGB8888 = 0,
 	VOP_FMT_RGB888,
-	VOP_FMT_RGB565,
+	VOP_FMT_RGB565 = 2,
+	VOP_FMT_YUYV = 2,
 	VOP_FMT_YUV420SP = 4,
 	VOP_FMT_YUV422SP,
 	VOP_FMT_YUV444SP,
-};
-
-enum vop_raw_format {
-	VOP_RAW8	= 0,
-	VOP_RAW10,
-	VOP_RAW_RESERVED,
-	VOP_RAW16,
 };
 
 struct vop_reg_data {
@@ -88,10 +82,11 @@ struct vop_reg_data {
 
 struct vop_reg {
 	uint32_t mask;
-	uint32_t offset:12;
+	uint32_t offset:17;
 	uint32_t shift:5;
 	uint32_t begin_minor:4;
 	uint32_t end_minor:4;
+	uint32_t reserved:2;
 	uint32_t major:3;
 	uint32_t write_mask:1;
 };
@@ -196,21 +191,6 @@ struct vop_ctrl {
 	struct vop_reg afbdc_pic_offset;
 	struct vop_reg afbdc_axi_ctrl;
 
-	/* CABC */
-	struct vop_reg cabc_total_num;
-	struct vop_reg cabc_config_mode;
-	struct vop_reg cabc_stage_up_mode;
-	struct vop_reg cabc_scale_cfg_value;
-	struct vop_reg cabc_scale_cfg_enable;
-	struct vop_reg cabc_global_dn_limit_en;
-	struct vop_reg cabc_lut_en;
-	struct vop_reg cabc_en;
-	struct vop_reg cabc_handle_en;
-	struct vop_reg cabc_stage_up;
-	struct vop_reg cabc_stage_down;
-	struct vop_reg cabc_global_dn;
-	struct vop_reg cabc_calc_pixel_num;
-
 	/* BCSH */
 	struct vop_reg bcsh_brightness;
 	struct vop_reg bcsh_contrast;
@@ -261,12 +241,9 @@ struct vop_ctrl {
 	struct vop_reg mcu_type;
 	struct vop_reg mcu_rw_bypass_port;
 
-	/* VOP RAW */
-	struct vop_reg frame_st;
-	struct vop_reg work_mode; /* bypass, pingpong, hold mode */
-	struct vop_reg pdaf_en;
-	struct vop_reg pdaf_type; /* hblank or vblank mode */
-	struct vop_reg pdaf_vc_num;
+	/* bt1120 */
+	struct vop_reg bt1120_yc_swap;
+	struct vop_reg bt1120_en;
 
 	struct vop_reg reg_done_frm;
 	struct vop_reg cfg_done;
@@ -409,6 +386,7 @@ struct vop_win_phy {
 	struct vop_reg enable;
 	struct vop_reg format;
 	struct vop_reg fmt_10;
+	struct vop_reg fmt_yuyv;
 	struct vop_reg csc_mode;
 	struct vop_reg xmirror;
 	struct vop_reg ymirror;
@@ -430,10 +408,6 @@ struct vop_win_phy {
 	struct vop_reg global_alpha_val;
 	struct vop_reg key_color;
 	struct vop_reg key_en;
-	struct vop_reg yrgb_mst1;
-	struct vop_reg ex_wc;
-	struct vop_reg data_type;
-	struct vop_reg vact_st_end_info;
 };
 
 struct vop_win_data {
@@ -458,7 +432,6 @@ struct vop_grf_ctrl {
 #define WIN_FEATURE_SDR2HDR		BIT(1)
 #define WIN_FEATURE_PRE_OVERLAY		BIT(2)
 #define WIN_FEATURE_AFBDC		BIT(3)
-#define WIN_FEATURE_PDAF_AFTER_VBLANK	BIT(4)
 
 struct vop_rect {
 	int width;
@@ -511,6 +484,20 @@ struct vop_data {
 					 POST_BUF_EMPTY_INTR | \
 					 DMA_FINISH_INTR | FS_FIELD_INTR | \
 					 FE_INTR)
+#define DSP_HOLD_VALID_INTR_EN(x)	((x) << 4)
+#define FS_INTR_EN(x)			((x) << 5)
+#define LINE_FLAG_INTR_EN(x)		((x) << 6)
+#define BUS_ERROR_INTR_EN(x)		((x) << 7)
+#define DSP_HOLD_VALID_INTR_MASK	(1 << 4)
+#define FS_INTR_MASK			(1 << 5)
+#define LINE_FLAG_INTR_MASK		(1 << 6)
+#define BUS_ERROR_INTR_MASK		(1 << 7)
+
+#define INTR_CLR_SHIFT			8
+#define DSP_HOLD_VALID_INTR_CLR		(1 << (INTR_CLR_SHIFT + 0))
+#define FS_INTR_CLR			(1 << (INTR_CLR_SHIFT + 1))
+#define LINE_FLAG_INTR_CLR		(1 << (INTR_CLR_SHIFT + 2))
+#define BUS_ERROR_INTR_CLR		(1 << (INTR_CLR_SHIFT + 3))
 
 #define DSP_LINE_NUM(x)			(((x) & 0x1fff) << 12)
 #define DSP_LINE_NUM_MASK		(0x1fff << 12)
@@ -531,8 +518,10 @@ struct vop_data {
  * display output interface supported by rockchip lcdc
  */
 #define ROCKCHIP_OUT_MODE_P888		0
+#define ROCKCHIP_OUT_MODE_BT1120	0
 #define ROCKCHIP_OUT_MODE_P666		1
 #define ROCKCHIP_OUT_MODE_P565		2
+#define ROCKCHIP_OUT_MODE_BT656		5
 #define ROCKCHIP_OUT_MODE_S888		8
 #define ROCKCHIP_OUT_MODE_S888_DUMMY	12
 #define ROCKCHIP_OUT_MODE_YUV420	14
@@ -541,9 +530,6 @@ struct vop_data {
 
 #define ROCKCHIP_OUT_MODE_TYPE(x)	((x) >> 16)
 #define ROCKCHIP_OUT_MODE(x)		((x) & 0xffff)
-#define ROCKCHIP_DSP_MODE(type, mode) \
-		(DRM_MODE_CONNECTOR_##type << 16) | \
-		(ROCKCHIP_OUT_MODE_##mode & 0xffff)
 
 enum alpha_mode {
 	ALPHA_STRAIGHT,
@@ -613,24 +599,7 @@ enum vop_pol {
 	HSYNC_POSITIVE = 0,
 	VSYNC_POSITIVE = 1,
 	DEN_NEGATIVE   = 2,
-};
-
-enum vop_pdaf_mode {
-	VOP_HOLD_MODE = 0,
-	VOP_NORMAL_MODE,
-	VOP_PINGPONG_MODE,
-	VOP_BYPASS_MODE,
-	VOP_BACKGROUND_MODE,
-	VOP_ONEFRAME_MODE,
-	VOP_ONEFRAME_NOSEND_MODE
-};
-
-enum vop_pdaf_type {
-	VOP_PDAF_TYPE_DEFAULT = 0,
-	VOP_PDAF_TYPE_HBLANK,
-	VOP_PDAF_TYPE_VBLANK,
-	VOP_PDAF_TYPE_HBLANK_VBLANK,
-	VOP_PDAF_TYPE_INTERWEAVE,
+	DCLK_INVERT    = 3
 };
 
 #define FRAC_16_16(mult, div)    (((mult) << 16) / (div))
@@ -690,16 +659,19 @@ static inline int scl_vop_cal_lb_mode(int width, bool is_yuv)
 {
 	int lb_mode;
 
-	if (!is_yuv && (width > 2560))
-		lb_mode = LB_RGB_3840X2;
-	else if (!is_yuv && (width > 1920))
-		lb_mode = LB_RGB_2560X4;
-	else if (!is_yuv)
-		lb_mode = LB_RGB_1920X5;
-	else if (width > 1280)
-		lb_mode = LB_YUV_3840X5;
-	else
-		lb_mode = LB_YUV_2560X8;
+	if (is_yuv) {
+		if (width > 1280)
+			lb_mode = LB_YUV_3840X5;
+		else
+			lb_mode = LB_YUV_2560X8;
+	} else {
+		if (width > 2560)
+			lb_mode = LB_RGB_3840X2;
+		else if (width > 1920)
+			lb_mode = LB_RGB_2560X4;
+		else
+			lb_mode = LB_RGB_1920X5;
+	}
 
 	return lb_mode;
 }
@@ -715,10 +687,4 @@ static inline int interpolate(int x1, int y1, int x2, int y2, int x)
 }
 
 extern const struct component_ops vop_component_ops;
-
-#if defined(CONFIG_ROCKCHIP_DRM_DEBUG)
-int drm_debugfs_vop_add(struct drm_crtc *crtc, struct dentry *root);
-int vop_plane_dump(struct vop_dump_info *dump_info, int frame_count);
-#endif
-
 #endif /* _ROCKCHIP_DRM_VOP_H */

@@ -187,7 +187,7 @@
 				     <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>;
 			#dma-cells = <1>;
 			arm,pl330-broken-no-flushp;
-			peripherals-req-type-burst;
+			arm,pl330-periph-burst;
 			clocks = <&cru ACLK_DMAC>;
 			clock-names = "apb_pclk";
 		};
@@ -229,10 +229,10 @@
 		system-status-freq = <
 			/*system status		freq(KHz)*/
 			SYS_STATUS_NORMAL	456000
-			SYS_STATUS_SUSPEND	200000
-			SYS_STATUS_REBOOT	396000
+			SYS_STATUS_SUSPEND	456000
+			SYS_STATUS_REBOOT	456000
 		>;
-		auto-min-freq = <300000>;
+		auto-min-freq = <456000>;
 		auto-freq-en = <0>;
 		status = "disabled";
 	};
@@ -255,6 +255,14 @@
 		opp-456000000 {
 			opp-hz = /bits/ 64 <456000000>;
 			opp-microvolt = <1200000>;
+		};
+	};
+
+	firmware {
+		optee: optee {
+			compatible = "linaro,optee-tz";
+			method = "smc";
+			status = "disabled";
 		};
 	};
 
@@ -291,11 +299,6 @@
 					hysteresis = <2000>;
 					type = "passive";
 				};
-				soc_crit: soc-crit {
-					temperature = <115000>;
-					hysteresis = <2000>;
-					type = "critical";
-				};
 			};
 
 			cooling-maps {
@@ -329,23 +332,11 @@
 		#clock-cells = <0>;
 	};
 
-	gpu: gpu@0x10091000 {
+	gpu: gpu@10090000 {
 		compatible = "arm,mali400";
-		reg = <0x10091000 0x200>,
-		      <0x10090000 0x100>,
-		      <0x10093000 0x100>,
-		      <0x10098000 0x1100>,
-		      <0x10094000 0x100>,
-		      <0x1009A000 0x1100>,
-		      <0x10095000 0x100>;
-
-		reg-names = "Mali_L2",
-			    "Mali_GP",
-			    "Mali_GP_MMU",
-			    "Mali_PP0",
-			    "Mali_PP0_MMU",
-			    "Mali_PP1",
-			    "Mali_PP1_MMU";
+		reg = <0x10090000 0x10000>;
+		upthreshold = <40>;
+		downdifferential = <10>;
 
 		interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 4 IRQ_TYPE_LEVEL_HIGH>,
@@ -453,7 +444,7 @@
 			};
 		};
 
-		reboot-mode {
+		reboot_mode: reboot-mode {
 			compatible = "syscon-reboot-mode";
 			offset = <0x38>;
 			mode-bootloader = <BOOT_BL_DOWNLOAD>;
@@ -466,15 +457,34 @@
 		};
 	};
 
-	hevc: hevc_service@10104000 {
-		compatible = "rockchip,sub";
+	mpp_srv: mpp-srv {
+		compatible = "rockchip,mpp-service";
+		rockchip,taskqueue-count = <1>;
+		rockchip,resetgroup-count = <1>;
+		rockchip,grf = <&grf>;
+		rockchip,grf-offset = <0x0144>;
+		rockchip,grf-values = <0x04000400>, <0x04000400>;
+		rockchip,grf-names = "grf_vdpu1", "grf_vepu1";
+		status = "disabled";
+	};
+
+	hevc: hevc@10104000 {
+		compatible = "rockchip,hevc-decoder";
 		reg = <0x10104000 0x400>;
 		interrupts = <GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "irq_dec";
-		power-domains = <&power RK3128_PD_VIDEO>;
-		dev_mode = <1>;
-		name = "hevc_service";
+		clocks = <&cru ACLK_VDPU>, <&cru HCLK_VDPU>,
+			<&cru SCLK_HEVC_CORE>;
+		clock-names = "aclk_vcodec", "hclk_vcodec", "clk_core";
+		resets = <&cru SRST_VCODEC_H>, <&cru SRST_VCODEC_A>,
+			<&cru SRST_HEVC_CORE>;
+		reset-names = "shared_video_h", "shared_video_a",
+			      "video_core";
 		iommus = <&hevc_mmu>;
+		power-domains = <&power RK3128_PD_VIDEO>;
+		rockchip,srv = <&mpp_srv>;
+		rockchip,taskqueue-node = <0>;
+		rockchip,resetgroup-node = <0>;
 		status = "disabled";
 	};
 
@@ -483,28 +493,44 @@
 		reg = <0x10104440 0x40>, <0x10104480 0x40>;
 		interrupts = <GIC_SPI 65 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "hevc_mmu";
+		clock-names = "aclk", "iface";
+		clocks = <&cru ACLK_VDPU>, <&cru HCLK_VDPU>;
 		power-domains = <&power RK3128_PD_VIDEO>;
 		#iommu-cells = <0>;
 		status = "disabled";
 	};
 
-	vpu: vpu_service@10106000 {
-		compatible = "rockchip,sub";
-		reg = <0x10106000 0x800>;
-		rockchip,grf = <&grf>;
-		interrupts = <GIC_SPI 6 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 7 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "irq_enc", "irq_dec";
+	vepu: vepu@0x10106000 {
+		compatible = "rockchip,vpu-encoder-v1";
+		reg = <0x10106000 0x400>;
+		interrupts = <GIC_SPI 6 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "irq_enc";
 		clocks = <&cru ACLK_VDPU>, <&cru HCLK_VDPU>;
 		clock-names = "aclk_vcodec", "hclk_vcodec";
 		resets = <&cru SRST_VCODEC_H>, <&cru SRST_VCODEC_A>;
-		reset-names = "video_h", "video_a";
-		power-domains = <&power RK3128_PD_VIDEO>;
-		name = "vpu_service";
-		dev_mode = <0>;
+		reset-names = "shared_video_h", "shared_video_a";
 		iommus = <&vpu_mmu>;
-		/* 0 means ion, 1 means drm */
-		allocator = <1>;
+		power-domains = <&power RK3128_PD_VIDEO>;
+		rockchip,srv = <&mpp_srv>;
+		rockchip,taskqueue-node = <0>;
+		rockchip,resetgroup-node = <0>;
+		status = "disabled";
+	};
+
+	vdpu: vdpu@10106400 {
+		compatible = "rockchip,vpu-decoder-v1";
+		reg = <0x10106400 0x400>;
+		interrupts = <GIC_SPI 7 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "irq_dec";
+		clocks = <&cru ACLK_VDPU>, <&cru HCLK_VDPU>;
+		clock-names = "aclk_vcodec", "hclk_vcodec";
+		resets = <&cru SRST_VCODEC_H>, <&cru SRST_VCODEC_A>;
+		reset-names = "shared_video_h", "shared_video_a";
+		iommus = <&vpu_mmu>;
+		power-domains = <&power RK3128_PD_VIDEO>;
+		rockchip,srv = <&mpp_srv>;
+		rockchip,taskqueue-node = <0>;
+		rockchip,resetgroup-node = <0>;
 		status = "disabled";
 	};
 
@@ -514,27 +540,9 @@
 		interrupts = <GIC_SPI 67 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "vpu_mmu";
 		clocks = <&cru ACLK_VDPU>, <&cru HCLK_VDPU>;
-		clock-names = "aclk", "hclk";
+		clock-names = "aclk", "iface";
 		power-domains = <&power RK3128_PD_VIDEO>;
 		#iommu-cells = <0>;
-		status = "disabled";
-	};
-
-	vpu_combo: vpu_combo {
-		compatible = "rockchip,vpu_combo";
-		subcnt = <2>;
-		rockchip,sub = <&vpu>, <&hevc>;
-		rockchip,grf = <&grf>;
-		clocks = <&cru ACLK_VDPU>, <&cru HCLK_VDPU>,
-			 <&cru SCLK_HEVC_CORE>;
-		clock-names = "aclk_vcodec", "hclk_vcodec",
-			      "clk_core";
-		resets = <&cru SRST_VCODEC_H>, <&cru SRST_VCODEC_A>,
-		         <&cru SRST_HEVC_CORE>;
-		reset-names = "video_h", "video_a", "video";
-		mode_bit = <15>;
-		mode_ctrl = <0x144>;
-		name = "vpu_combo";
 		status = "disabled";
 	};
 
@@ -558,7 +566,7 @@
 		interrupts = <GIC_SPI 48 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "iep_mmu";
 		clocks = <&cru ACLK_IEP>, <&cru HCLK_IEP>;
-		clock-names = "aclk", "hclk";
+		clock-names = "aclk", "iface";
 		power-domains = <&power RK3128_PD_VIO>;
 		#iommu-cells = <0>;
 		status = "disabled";
@@ -647,9 +655,10 @@
 		interrupts = <GIC_SPI 9 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "vop_mmu";
 		clocks = <&cru ACLK_LCDC0>, <&cru HCLK_LCDC0>;
-		clock-names = "aclk", "hclk";
+		clock-names = "aclk", "iface";
 		power-domains = <&power RK3128_PD_VIO>;
 		#iommu-cells = <0>;
+		rockchip,disable-device-link-resume;
 		status = "disabled";
 	};
 
@@ -1281,10 +1290,6 @@
 
 		pcfg_output_high: pcfg-output-high {
 			output-high;
-		};
-
-		pcfg_pull_up: pcfg-output-up {
-			bias-pull-up;
 		};
 
 		pcfg_pull_none: pcfg-pull-none {

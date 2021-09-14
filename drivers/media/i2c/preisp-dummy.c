@@ -2,7 +2,7 @@
 /*
  * pisp_dmy driver
  *
- * Copyright (C) 2019 Fuzhou Rockchip Electronics Co., Ltd.
+ * Copyright (C) 2020 Rockchip Electronics Co., Ltd.
  */
 
 #include <linux/clk.h>
@@ -401,8 +401,10 @@ static int pisp_dmy_analyze_dts(struct pisp_dmy *pisp_dmy)
 			devm_kzalloc(&pisp_dmy->client->dev,
 				     elem_size * sizeof(struct pisp_dmy_regulator),
 				     GFP_KERNEL);
-		if (!pisp_dmy->regulators.regulator)
+		if (!pisp_dmy->regulators.regulator) {
 			dev_err(dev, "could not malloc pisp_dmy_regulator\n");
+			return -ENOMEM;
+		}
 
 		pisp_dmy->regulators.cnt = elem_size;
 

@@ -117,7 +117,7 @@ struct tee_shm *rk_tee_shm_alloc(struct tee *tee, size_t size, uint32_t flags)
 
 	ret = sg_alloc_table_from_pages(&shm->sgt, &page,
 			nr_pages, 0, nr_pages * PAGE_SIZE, GFP_KERNEL);
-	if (IS_ERR_VALUE(ret)) {
+	if (ret < 0) {
 		dev_err(_DEV(tee), "%s: sg_alloc_table_from_pages() failed\n",
 				__func__);
 		tee->ops->free(shm);
@@ -146,7 +146,6 @@ void rk_tee_shm_free(struct tee_shm *shm)
 }
 
 static int _tee_shm_attach_dma_buf(struct dma_buf *dmabuf,
-					struct device *dev,
 					struct dma_buf_attachment *attach)
 {
 	struct tee_shm_attach *tee_shm_attach;
@@ -319,12 +318,6 @@ static int _tee_shm_dma_buf_mmap(struct dma_buf *dmabuf,
 	return ret;
 }
 
-static void *_tee_shm_dma_buf_kmap_atomic(struct dma_buf *dmabuf,
-					 unsigned long pgnum)
-{
-	return NULL;
-}
-
 static void *_tee_shm_dma_buf_kmap(struct dma_buf *db, unsigned long pgnum)
 {
 	struct tee_shm *shm = db->priv;
@@ -351,9 +344,8 @@ struct dma_buf_ops _tee_shm_dma_buf_ops = {
 	.map_dma_buf = _tee_shm_dma_buf_map_dma_buf,
 	.unmap_dma_buf = _tee_shm_dma_buf_unmap_dma_buf,
 	.release = _tee_shm_dma_buf_release,
-	.kmap_atomic = _tee_shm_dma_buf_kmap_atomic,
-	.kmap = _tee_shm_dma_buf_kmap,
-	.kunmap = _tee_shm_dma_buf_kunmap,
+	.map = _tee_shm_dma_buf_kmap,
+	.unmap = _tee_shm_dma_buf_kunmap,
 	.mmap = _tee_shm_dma_buf_mmap,
 };
 

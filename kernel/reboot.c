@@ -104,6 +104,33 @@ int unregister_reboot_notifier(struct notifier_block *nb)
 }
 EXPORT_SYMBOL(unregister_reboot_notifier);
 
+static void devm_unregister_reboot_notifier(struct device *dev, void *res)
+{
+	WARN_ON(unregister_reboot_notifier(*(struct notifier_block **)res));
+}
+
+int devm_register_reboot_notifier(struct device *dev, struct notifier_block *nb)
+{
+	struct notifier_block **rcnb;
+	int ret;
+
+	rcnb = devres_alloc(devm_unregister_reboot_notifier,
+			    sizeof(*rcnb), GFP_KERNEL);
+	if (!rcnb)
+		return -ENOMEM;
+
+	ret = register_reboot_notifier(nb);
+	if (!ret) {
+		*rcnb = nb;
+		devres_add(dev, rcnb);
+	} else {
+		devres_free(rcnb);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(devm_register_reboot_notifier);
+
 /*
  *	Notifier list for kernel code which wants to be called
  *	to restart the system.
@@ -185,23 +212,23 @@ void do_kernel_restart(char *cmd)
 	atomic_notifier_call_chain(&restart_handler_list, reboot_mode, cmd);
 }
 
-static ATOMIC_NOTIFIER_HEAD(i2c_restart_handler_list);
+static ATOMIC_NOTIFIER_HEAD(pre_restart_handler_list);
 
-int register_i2c_restart_handler(struct notifier_block *nb)
+int register_pre_restart_handler(struct notifier_block *nb)
 {
-	return atomic_notifier_chain_register(&i2c_restart_handler_list, nb);
+	return atomic_notifier_chain_register(&pre_restart_handler_list, nb);
 }
-EXPORT_SYMBOL(register_i2c_restart_handler);
+EXPORT_SYMBOL(register_pre_restart_handler);
 
-int unregister_i2c_restart_handler(struct notifier_block *nb)
+int unregister_pre_restart_handler(struct notifier_block *nb)
 {
-	return atomic_notifier_chain_unregister(&i2c_restart_handler_list, nb);
+	return atomic_notifier_chain_unregister(&pre_restart_handler_list, nb);
 }
-EXPORT_SYMBOL(unregister_i2c_restart_handler);
+EXPORT_SYMBOL(unregister_pre_restart_handler);
 
-void do_kernel_i2c_restart(char *cmd)
+void do_kernel_pre_restart(char *cmd)
 {
-	atomic_notifier_call_chain(&i2c_restart_handler_list, reboot_mode, cmd);
+	atomic_notifier_call_chain(&pre_restart_handler_list, reboot_mode, cmd);
 }
 
 void migrate_to_reboot_cpu(void)
@@ -286,7 +313,7 @@ void kernel_power_off(void)
 }
 EXPORT_SYMBOL_GPL(kernel_power_off);
 
-static DEFINE_MUTEX(reboot_mutex);
+DEFINE_MUTEX(system_transition_mutex);
 
 /*
  * Reboot system call: for obvious reasons only root may call it,
@@ -330,7 +357,7 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 	if ((cmd == LINUX_REBOOT_CMD_POWER_OFF) && !pm_power_off)
 		cmd = LINUX_REBOOT_CMD_HALT;
 
-	mutex_lock(&reboot_mutex);
+	mutex_lock(&system_transition_mutex);
 	switch (cmd) {
 	case LINUX_REBOOT_CMD_RESTART:
 		kernel_restart(NULL);
@@ -381,7 +408,7 @@ SYSCALL_DEFINE4(reboot, int, magic1, int, magic2, unsigned int, cmd,
 		ret = -EINVAL;
 		break;
 	}
-	mutex_unlock(&reboot_mutex);
+	mutex_unlock(&system_transition_mutex);
 	return ret;
 }
 

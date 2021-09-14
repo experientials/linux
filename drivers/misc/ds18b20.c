@@ -12,7 +12,7 @@
 #include <linux/errno.h>
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
-#include <asm/uaccess.h>	/* copy_*_user() */
+#include <linux/uaccess.h>	/* copy_*_user() */
 
 #define DS1820_CMD_SKIP_ROM	(0xCC)
 #define DS1820_CMD_CONVERT	(0x44)

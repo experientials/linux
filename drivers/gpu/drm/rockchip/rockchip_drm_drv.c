@@ -18,9 +18,10 @@
 #include <drm/drm_atomic.h>
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_fb_helper.h>
-#include <drm/drm_sync_helper.h>
-#include <drm/rockchip_drm.h>
+#include <drm/drm_gem_cma_helper.h>
+#include <drm/drm_of.h>
 #include <linux/devfreq.h>
+#include <linux/dma-buf.h>
 #include <linux/dma-mapping.h>
 #include <linux/dma-iommu.h>
 #include <linux/genalloc.h>
@@ -32,37 +33,32 @@
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/component.h>
-#include <linux/fence.h>
 #include <linux/console.h>
 #include <linux/iommu.h>
 #include <linux/of_reserved_mem.h>
-
-#include <drm/rockchip_drm.h>
 
 #include "rockchip_drm_drv.h"
 #include "rockchip_drm_fb.h"
 #include "rockchip_drm_fbdev.h"
 #include "rockchip_drm_gem.h"
 
+#include "../drm_internal.h"
+
 #define DRIVER_NAME	"rockchip"
 #define DRIVER_DESC	"RockChip Soc DRM"
 #define DRIVER_DATE	"20140818"
-#define DRIVER_MAJOR	1
+#define DRIVER_MAJOR	2
 #define DRIVER_MINOR	0
-#define DRIVER_VERSION	"v1.0.1"
+#define DRIVER_PATCH	0
 
 /***********************************************************************
  *  Rockchip DRM driver version
  *
- *  v1.0.0	: add basic version for rockchip drm driver(hjc)
- *  v1.0.1	: set frame start to field start for interlace mode(hjc)
+ *  v2.0.0	: add basic version for linux 4.19 rockchip drm driver(hjc)
  *
  **********************************************************************/
 
 static bool is_support_iommu = true;
-
-static LIST_HEAD(rockchip_drm_subdrv_list);
-static DEFINE_MUTEX(subdrv_list_mutex);
 static struct drm_driver rockchip_drm_driver;
 
 struct rockchip_drm_mode_set {
@@ -75,6 +71,7 @@ struct rockchip_drm_mode_set {
 	int vdisplay;
 	int vrefresh;
 	int flags;
+	int picture_aspect_ratio;
 	int crtc_hsync_end;
 	int crtc_vsync_end;
 
@@ -84,13 +81,129 @@ struct rockchip_drm_mode_set {
 	int bottom_margin;
 
 	bool mode_changed;
-	bool ymirror;
 	int ratio;
 };
 
+static DEFINE_MUTEX(rockchip_drm_sub_dev_lock);
+static LIST_HEAD(rockchip_drm_sub_dev_list);
+
+void rockchip_drm_register_sub_dev(struct rockchip_drm_sub_dev *sub_dev)
+{
+	mutex_lock(&rockchip_drm_sub_dev_lock);
+	list_add_tail(&sub_dev->list, &rockchip_drm_sub_dev_list);
+	mutex_unlock(&rockchip_drm_sub_dev_lock);
+}
+EXPORT_SYMBOL(rockchip_drm_register_sub_dev);
+
+void rockchip_drm_unregister_sub_dev(struct rockchip_drm_sub_dev *sub_dev)
+{
+	mutex_lock(&rockchip_drm_sub_dev_lock);
+	list_del(&sub_dev->list);
+	mutex_unlock(&rockchip_drm_sub_dev_lock);
+}
+EXPORT_SYMBOL(rockchip_drm_unregister_sub_dev);
+
+struct rockchip_drm_sub_dev *rockchip_drm_get_sub_dev(struct device_node *node)
+{
+	struct rockchip_drm_sub_dev *sub_dev = NULL;
+
+	mutex_lock(&rockchip_drm_sub_dev_lock);
+	list_for_each_entry(sub_dev, &rockchip_drm_sub_dev_list, list) {
+		if (sub_dev->of_node == node)
+			break;
+	}
+	mutex_unlock(&rockchip_drm_sub_dev_lock);
+
+	return sub_dev;
+}
+EXPORT_SYMBOL(rockchip_drm_get_sub_dev);
+
+int rockchip_drm_get_sub_dev_type(void)
+{
+	int connector_type = DRM_MODE_CONNECTOR_Unknown;
+	struct rockchip_drm_sub_dev *sub_dev = NULL;
+
+	mutex_lock(&rockchip_drm_sub_dev_lock);
+	list_for_each_entry(sub_dev, &rockchip_drm_sub_dev_list, list) {
+		if (sub_dev->connector->encoder) {
+			connector_type = sub_dev->connector->connector_type;
+			break;
+		}
+	}
+	mutex_unlock(&rockchip_drm_sub_dev_lock);
+
+	return connector_type;
+}
+EXPORT_SYMBOL(rockchip_drm_get_sub_dev_type);
+
+static const struct drm_display_mode rockchip_drm_default_modes[] = {
+	/* 4 - 1280x720@60Hz 16:9 */
+	{ DRM_MODE("1280x720", DRM_MODE_TYPE_DRIVER, 74250, 1280, 1390,
+		   1430, 1650, 0, 720, 725, 730, 750, 0,
+		   DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC),
+	  .vrefresh = 60, .picture_aspect_ratio = HDMI_PICTURE_ASPECT_16_9, },
+	/* 16 - 1920x1080@60Hz 16:9 */
+	{ DRM_MODE("1920x1080", DRM_MODE_TYPE_DRIVER, 148500, 1920, 2008,
+		   2052, 2200, 0, 1080, 1084, 1089, 1125, 0,
+		   DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC),
+	  .vrefresh = 60, .picture_aspect_ratio = HDMI_PICTURE_ASPECT_16_9, },
+	/* 31 - 1920x1080@50Hz 16:9 */
+	{ DRM_MODE("1920x1080", DRM_MODE_TYPE_DRIVER, 148500, 1920, 2448,
+		   2492, 2640, 0, 1080, 1084, 1089, 1125, 0,
+		   DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC),
+	  .vrefresh = 50, .picture_aspect_ratio = HDMI_PICTURE_ASPECT_16_9, },
+	/* 19 - 1280x720@50Hz 16:9 */
+	{ DRM_MODE("1280x720", DRM_MODE_TYPE_DRIVER, 74250, 1280, 1720,
+		   1760, 1980, 0, 720, 725, 730, 750, 0,
+		   DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC),
+	  .vrefresh = 50, .picture_aspect_ratio = HDMI_PICTURE_ASPECT_16_9, },
+	/* 17 - 720x576@50Hz 4:3 */
+	{ DRM_MODE("720x576", DRM_MODE_TYPE_DRIVER, 27000, 720, 732,
+		   796, 864, 0, 576, 581, 586, 625, 0,
+		   DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC),
+	  .vrefresh = 50, .picture_aspect_ratio = HDMI_PICTURE_ASPECT_4_3, },
+	/* 2 - 720x480@60Hz 4:3 */
+	{ DRM_MODE("720x480", DRM_MODE_TYPE_DRIVER, 27000, 720, 736,
+		   798, 858, 0, 480, 489, 495, 525, 0,
+		   DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC),
+	  .vrefresh = 60, .picture_aspect_ratio = HDMI_PICTURE_ASPECT_4_3, },
+};
+
+int rockchip_drm_add_modes_noedid(struct drm_connector *connector)
+{
+	struct drm_device *dev = connector->dev;
+	struct drm_display_mode *mode;
+	int i, count, num_modes = 0;
+
+	mutex_lock(&rockchip_drm_sub_dev_lock);
+	count = ARRAY_SIZE(rockchip_drm_default_modes);
+
+	for (i = 0; i < count; i++) {
+		const struct drm_display_mode *ptr = &rockchip_drm_default_modes[i];
+
+		mode = drm_mode_duplicate(dev, ptr);
+		if (mode) {
+			if (!i)
+				mode->type = DRM_MODE_TYPE_PREFERRED;
+			drm_mode_probed_add(connector, mode);
+			num_modes++;
+		}
+	}
+	mutex_unlock(&rockchip_drm_sub_dev_lock);
+
+	return num_modes;
+}
+EXPORT_SYMBOL(rockchip_drm_add_modes_noedid);
+
+#ifdef CONFIG_ARCH_ROCKCHIP
+struct drm_prime_callback_data {
+	struct drm_gem_object *obj;
+	struct sg_table *sgt;
+};
+#endif
+
 #ifndef MODULE
-static struct drm_crtc *find_crtc_by_node(struct drm_device *drm_dev,
-					  struct device_node *node)
+static struct drm_crtc *find_crtc_by_node(struct drm_device *drm_dev, struct device_node *node)
 {
 	struct device_node *np_crtc;
 	struct drm_crtc *crtc;
@@ -111,50 +224,38 @@ static struct drm_connector *find_connector_by_node(struct drm_device *drm_dev,
 						    struct device_node *node)
 {
 	struct device_node *np_connector;
-	struct drm_connector *connector;
+	struct rockchip_drm_sub_dev *sub_dev;
 
 	np_connector = of_graph_get_remote_port_parent(node);
 	if (!np_connector || !of_device_is_available(np_connector))
 		return NULL;
 
-	drm_for_each_connector(connector, drm_dev) {
-		if (connector->port == np_connector)
-			return connector;
-	}
+	sub_dev = rockchip_drm_get_sub_dev(np_connector);
+	if (!sub_dev)
+		return NULL;
 
-	return NULL;
+	return sub_dev->connector;
 }
 
-static
-struct drm_connector *find_connector_by_bridge(struct drm_device *drm_dev,
-					       struct device_node *node)
+static struct drm_connector *find_connector_by_bridge(struct drm_device *drm_dev,
+						      struct device_node *node)
 {
 	struct device_node *np_encoder, *np_connector = NULL;
-	struct drm_encoder *encoder;
 	struct drm_connector *connector = NULL;
 	struct device_node *port, *endpoint;
-	bool encoder_bridge = false;
-	bool found_connector = false;
+	struct rockchip_drm_sub_dev *sub_dev;
 
 	np_encoder = of_graph_get_remote_port_parent(node);
 	if (!np_encoder || !of_device_is_available(np_encoder))
 		goto err_put_encoder;
-	drm_for_each_encoder(encoder, drm_dev) {
-		if (encoder->port == np_encoder && encoder->bridge) {
-			encoder_bridge = true;
-			break;
-		}
-	}
-	if (!encoder_bridge) {
-		dev_err(drm_dev->dev, "can't found encoder bridge!\n");
-		goto err_put_encoder;
-	}
+
 	port = of_graph_get_port_by_id(np_encoder, 1);
 	if (!port) {
 		dev_err(drm_dev->dev, "can't found port point!\n");
 		goto err_put_encoder;
 	}
-	for_each_available_child_of_node(port, endpoint) {
+
+	for_each_child_of_node(port, endpoint) {
 		np_connector = of_graph_get_remote_port_parent(endpoint);
 		if (!np_connector) {
 			dev_err(drm_dev->dev,
@@ -174,15 +275,10 @@ struct drm_connector *find_connector_by_bridge(struct drm_device *drm_dev,
 		goto err_put_port;
 	}
 
-	drm_for_each_connector(connector, drm_dev) {
-		if (connector->port == np_connector) {
-			found_connector = true;
-			break;
-		}
-	}
-
-	if (!found_connector)
-		connector = NULL;
+	sub_dev = rockchip_drm_get_sub_dev(np_connector);
+	if (!sub_dev)
+		goto err_put_port;
+	connector = sub_dev->connector;
 
 	of_node_put(np_connector);
 err_put_port:
@@ -203,24 +299,20 @@ void rockchip_free_loader_memory(struct drm_device *drm)
 		return;
 
 	logo = private->logo;
-	start = phys_to_virt(logo->start);
-	end = phys_to_virt(logo->start + logo->size);
+	start = phys_to_virt(logo->dma_addr);
+	end = phys_to_virt(logo->dma_addr + logo->size);
 
 	if (private->domain) {
-		iommu_unmap(private->domain, logo->dma_addr,
-			    logo->iommu_map_size);
-		mutex_lock(&private->mm_lock);
-		drm_mm_remove_node(&logo->mm);
-		mutex_unlock(&private->mm_lock);
-	} else {
-		dma_unmap_sg(drm->dev, logo->sgt->sgl,
-			     logo->sgt->nents, DMA_TO_DEVICE);
+		u32 pg_size = 1UL << __ffs(private->domain->pgsize_bitmap);
+
+		iommu_unmap(private->domain, logo->dma_addr, ALIGN(logo->size, pg_size));
 	}
-	sg_free_table(logo->sgt);
+
 	memblock_free(logo->start, logo->size);
 	free_reserved_area(start, end, -1, "drm_logo");
 	kfree(logo);
 	private->logo = NULL;
+	private->loader_protect = false;
 }
 
 static int init_loader_memory(struct drm_device *drm_dev)
@@ -229,12 +321,10 @@ static int init_loader_memory(struct drm_device *drm_dev)
 	struct rockchip_logo *logo;
 	struct device_node *np = drm_dev->dev->of_node;
 	struct device_node *node;
-	unsigned long nr_pages;
-	struct page **pages;
-	struct sg_table *sgt;
 	phys_addr_t start, size;
+	u32 pg_size = PAGE_SIZE;
 	struct resource res;
-	int i, ret;
+	int ret;
 
 	node = of_parse_phandle(np, "logo-memory-region", 0);
 	if (!node)
@@ -243,7 +333,9 @@ static int init_loader_memory(struct drm_device *drm_dev)
 	ret = of_address_to_resource(node, 0, &res);
 	if (ret)
 		return ret;
-	start = res.start;
+	if (private->domain)
+		pg_size = 1UL << __ffs(private->domain->pgsize_bitmap);
+	start = ALIGN_DOWN(res.start, pg_size);
 	size = resource_size(&res);
 	if (!size)
 		return -ENOMEM;
@@ -253,61 +345,23 @@ static int init_loader_memory(struct drm_device *drm_dev)
 		return -ENOMEM;
 
 	logo->kvaddr = phys_to_virt(start);
-	nr_pages = PAGE_ALIGN(size) >> PAGE_SHIFT;
-	pages = kmalloc_array(nr_pages, sizeof(*pages),	GFP_KERNEL);
-	if (!pages)
-		goto err_free_logo;
-	i = 0;
-	while (i < nr_pages) {
-		pages[i] = phys_to_page(start);
-		start += PAGE_SIZE;
-		i++;
-	}
-	sgt = drm_prime_pages_to_sg(pages, nr_pages);
-	if (IS_ERR(sgt)) {
-		ret = PTR_ERR(sgt);
-		goto err_free_pages;
-	}
 
 	if (private->domain) {
-		memset(&logo->mm, 0, sizeof(logo->mm));
-		mutex_lock(&private->mm_lock);
-		ret = drm_mm_insert_node_generic(&private->mm, &logo->mm,
-						 size, PAGE_SIZE,
-						 0, 0, 0);
-		mutex_unlock(&private->mm_lock);
-		if (ret < 0) {
-			DRM_ERROR("out of I/O virtual memory: %d\n", ret);
-			goto err_free_pages;
+		ret = iommu_map(private->domain, start, start, ALIGN(size, pg_size),
+				IOMMU_WRITE | IOMMU_READ);
+		if (ret) {
+			dev_err(drm_dev->dev, "failed to create 1v1 mapping\n");
+			goto err_free_logo;
 		}
-
-		logo->dma_addr = logo->mm.start;
-
-		logo->iommu_map_size = iommu_map_sg(private->domain,
-						    logo->dma_addr, sgt->sgl,
-						    sgt->nents, IOMMU_READ);
-		if (logo->iommu_map_size < size) {
-			DRM_ERROR("failed to map buffer");
-			ret = -ENOMEM;
-			goto err_remove_node;
-		}
-	} else {
-		dma_map_sg(drm_dev->dev, sgt->sgl, sgt->nents, DMA_TO_DEVICE);
-		logo->dma_addr = sg_dma_address(sgt->sgl);
 	}
 
-	logo->sgt = sgt;
-	logo->start = res.start;
+	logo->dma_addr = start;
 	logo->size = size;
 	logo->count = 1;
 	private->logo = logo;
 
 	return 0;
 
-err_remove_node:
-	drm_mm_remove_node(&logo->mm);
-err_free_pages:
-	kfree(pages);
 err_free_logo:
 	kfree(logo);
 
@@ -353,16 +407,16 @@ get_framebuffer_by_node(struct drm_device *drm_dev, struct device_node *node)
 
 	switch (bpp) {
 	case 16:
-		mode_cmd.pixel_format = DRM_FORMAT_BGR565;
+		mode_cmd.pixel_format = DRM_FORMAT_RGB565;
 		break;
 	case 24:
-		mode_cmd.pixel_format = DRM_FORMAT_BGR888;
+		mode_cmd.pixel_format = DRM_FORMAT_RGB888;
 		break;
 	case 32:
 		mode_cmd.pixel_format = DRM_FORMAT_XRGB8888;
 		break;
 	default:
-		pr_err("%s: unsupport to logo bpp %d\n", __func__, bpp);
+		pr_err("%s: unsupported to logo bpp %d\n", __func__, bpp);
 		return NULL;
 	}
 
@@ -395,7 +449,7 @@ of_parse_display_resource(struct drm_device *drm_dev, struct device_node *route)
 	if (!crtc || !connector) {
 		dev_warn(drm_dev->dev,
 			 "No available crtc or connector for display");
-		drm_framebuffer_unreference(fb);
+		drm_framebuffer_put(fb);
 		return NULL;
 	}
 
@@ -421,8 +475,8 @@ of_parse_display_resource(struct drm_device *drm_dev, struct device_node *route)
 	if (!of_property_read_u32(route, "video,flags", &val))
 		set->flags = val;
 
-	if (!of_property_read_u32(route, "logo,ymirror", &val))
-		set->ymirror = val;
+	if (!of_property_read_u32(route, "video,aspect_ratio", &val))
+		set->picture_aspect_ratio = val;
 
 	if (!of_property_read_u32(route, "overscan,left_margin", &val))
 		set->left_margin = val;
@@ -439,13 +493,135 @@ of_parse_display_resource(struct drm_device *drm_dev, struct device_node *route)
 	set->ratio = 1;
 	if (!of_property_read_string(route, "logo,mode", &string) &&
 	    !strcmp(string, "fullscreen"))
-			set->ratio = 0;
+		set->ratio = 0;
 
 	set->fb = fb;
 	set->crtc = crtc;
 	set->connector = connector;
 
 	return set;
+}
+
+static int rockchip_drm_fill_connector_modes(struct drm_connector *connector,
+					     uint32_t maxX, uint32_t maxY)
+{
+	struct drm_device *dev = connector->dev;
+	struct drm_display_mode *mode;
+	const struct drm_connector_helper_funcs *connector_funcs =
+		connector->helper_private;
+	int count = 0;
+	bool verbose_prune = true;
+	enum drm_connector_status old_status;
+
+	WARN_ON(!mutex_is_locked(&dev->mode_config.mutex));
+
+	DRM_DEBUG_KMS("[CONNECTOR:%d:%s]\n", connector->base.id,
+		      connector->name);
+	/* set all modes to the unverified state */
+	list_for_each_entry(mode, &connector->modes, head)
+		mode->status = MODE_STALE;
+
+	if (connector->force) {
+		if (connector->force == DRM_FORCE_ON ||
+		    connector->force == DRM_FORCE_ON_DIGITAL)
+			connector->status = connector_status_connected;
+		else
+			connector->status = connector_status_disconnected;
+		if (connector->funcs->force)
+			connector->funcs->force(connector);
+	} else {
+		old_status = connector->status;
+
+		if (connector->funcs->detect)
+			connector->status = connector->funcs->detect(connector, true);
+		else
+			connector->status  = connector_status_connected;
+		/*
+		 * Normally either the driver's hpd code or the poll loop should
+		 * pick up any changes and fire the hotplug event. But if
+		 * userspace sneaks in a probe, we might miss a change. Hence
+		 * check here, and if anything changed start the hotplug code.
+		 */
+		if (old_status != connector->status) {
+			DRM_DEBUG_KMS("[CONNECTOR:%d:%s] status updated from %d to %d\n",
+				      connector->base.id,
+				      connector->name,
+				      old_status, connector->status);
+
+			/*
+			 * The hotplug event code might call into the fb
+			 * helpers, and so expects that we do not hold any
+			 * locks. Fire up the poll struct instead, it will
+			 * disable itself again.
+			 */
+			dev->mode_config.delayed_event = true;
+			if (dev->mode_config.poll_enabled)
+				schedule_delayed_work(&dev->mode_config.output_poll_work,
+						      0);
+		}
+	}
+
+	/* Re-enable polling in case the global poll config changed. */
+	if (!dev->mode_config.poll_running)
+		drm_kms_helper_poll_enable(dev);
+
+	dev->mode_config.poll_running = true;
+
+	if (connector->status == connector_status_disconnected) {
+		DRM_DEBUG_KMS("[CONNECTOR:%d:%s] disconnected\n",
+			      connector->base.id, connector->name);
+		drm_connector_update_edid_property(connector, NULL);
+		verbose_prune = false;
+		goto prune;
+	}
+
+	count = (*connector_funcs->get_modes)(connector);
+
+	if (count == 0 && connector->status == connector_status_connected)
+		count = drm_add_modes_noedid(connector, 1024, 768);
+	if (count == 0)
+		goto prune;
+
+	drm_connector_list_update(connector);
+
+	list_for_each_entry(mode, &connector->modes, head) {
+		if (mode->status == MODE_OK)
+			mode->status = drm_mode_validate_driver(dev, mode);
+
+		if (mode->status == MODE_OK)
+			mode->status = drm_mode_validate_size(mode, maxX, maxY);
+
+		/**
+		 * if (mode->status == MODE_OK)
+		 *	mode->status = drm_mode_validate_flag(mode, mode_flags);
+		 */
+		if (mode->status == MODE_OK && connector_funcs->mode_valid)
+			mode->status = connector_funcs->mode_valid(connector,
+								   mode);
+		if (mode->status == MODE_OK)
+			mode->status = drm_mode_validate_ycbcr420(mode,
+								  connector);
+	}
+
+prune:
+	drm_mode_prune_invalid(dev, &connector->modes, verbose_prune);
+
+	if (list_empty(&connector->modes))
+		return 0;
+
+	list_for_each_entry(mode, &connector->modes, head)
+		mode->vrefresh = drm_mode_vrefresh(mode);
+
+	drm_mode_sort(&connector->modes);
+
+	DRM_DEBUG_KMS("[CONNECTOR:%d:%s] probed modes :\n", connector->base.id,
+		      connector->name);
+	list_for_each_entry(mode, &connector->modes, head) {
+		drm_mode_set_crtcinfo(mode, CRTC_INTERLACE_HALVE_V);
+		drm_mode_debug_printmodeline(mode);
+	}
+
+	return count;
 }
 
 static int setup_initial_state(struct drm_device *drm_dev,
@@ -468,6 +644,7 @@ static int setup_initial_state(struct drm_device *drm_dev,
 	int found = 0, match = 0;
 	int num_modes;
 	int ret = 0;
+	struct rockchip_crtc_state *s = NULL;
 
 	if (!set->hdisplay || !set->vdisplay || !set->vrefresh)
 		is_crtc_enabled = false;
@@ -477,7 +654,12 @@ static int setup_initial_state(struct drm_device *drm_dev,
 		return PTR_ERR(conn_state);
 
 	funcs = connector->helper_private;
-	conn_state->best_encoder = funcs->best_encoder(connector);
+
+	if (funcs->best_encoder)
+		conn_state->best_encoder = funcs->best_encoder(connector);
+	else
+		conn_state->best_encoder = drm_atomic_helper_best_encoder(connector);
+
 	if (funcs->loader_protect)
 		funcs->loader_protect(connector, true);
 	connector->loader_protect = true;
@@ -485,7 +667,7 @@ static int setup_initial_state(struct drm_device *drm_dev,
 	if (encoder_funcs->loader_protect)
 		encoder_funcs->loader_protect(conn_state->best_encoder, true);
 	conn_state->best_encoder->loader_protect = true;
-	num_modes = connector->funcs->fill_modes(connector, 4096, 4096);
+	num_modes = rockchip_drm_fill_connector_modes(connector, 4096, 4096);
 	if (!num_modes) {
 		dev_err(drm_dev->dev, "connector[%s] can't found any modes\n",
 			connector->name);
@@ -499,7 +681,11 @@ static int setup_initial_state(struct drm_device *drm_dev,
 		    mode->crtc_hsync_end == set->crtc_hsync_end &&
 		    mode->crtc_vsync_end == set->crtc_vsync_end &&
 		    drm_mode_vrefresh(mode) == set->vrefresh &&
-		    mode->flags == set->flags) {
+		    /* we just need to focus on DRM_MODE_FLAG_ALL flag, so here
+		     * we compare mode->flags with set->flags & DRM_MODE_FLAG_ALL.
+		     */
+		    mode->flags == (set->flags & DRM_MODE_FLAG_ALL) &&
+		    mode->picture_aspect_ratio == set->picture_aspect_ratio) {
 			found = 1;
 			match = 1;
 			break;
@@ -508,6 +694,7 @@ static int setup_initial_state(struct drm_device *drm_dev,
 
 	if (!found) {
 		ret = -EINVAL;
+		connector->status = connector_status_disconnected;
 		goto error_conn;
 	}
 
@@ -579,6 +766,8 @@ static int setup_initial_state(struct drm_device *drm_dev,
 		primary_state->crtc_w = hdisplay;
 		primary_state->crtc_h = vdisplay;
 	}
+	s = to_rockchip_crtc_state(crtc->state);
+	s->output_type = connector->connector_type;
 
 	return 0;
 
@@ -601,7 +790,6 @@ static int update_state(struct drm_device *drm_dev,
 			struct rockchip_drm_mode_set *set,
 			unsigned int *plane_mask)
 {
-	struct rockchip_drm_private *priv = drm_dev->dev_private;
 	struct drm_crtc *crtc = set->crtc;
 	struct drm_connector *connector = set->connector;
 	struct drm_display_mode *mode = set->mode;
@@ -639,10 +827,12 @@ static int update_state(struct drm_device *drm_dev,
 		struct drm_encoder *encoder;
 
 		connector_helper_funcs = connector->helper_private;
-		if (!connector_helper_funcs ||
-		    !connector_helper_funcs->best_encoder)
+		if (!connector_helper_funcs)
 			return -ENXIO;
-		encoder = connector_helper_funcs->best_encoder(connector);
+		if (connector_helper_funcs->best_encoder)
+			encoder = connector_helper_funcs->best_encoder(connector);
+		else
+			encoder = drm_atomic_helper_best_encoder(connector);
 		if (!encoder)
 			return -ENXIO;
 		encoder_helper_funcs = encoder->helper_private;
@@ -652,7 +842,12 @@ static int update_state(struct drm_device *drm_dev,
 							 conn_state);
 		if (ret)
 			return ret;
-		if (encoder_helper_funcs->mode_set)
+
+		if (encoder_helper_funcs->atomic_mode_set)
+			encoder_helper_funcs->atomic_mode_set(encoder,
+							      crtc_state,
+							      conn_state);
+		else if (encoder_helper_funcs->mode_set)
 			encoder_helper_funcs->mode_set(encoder, mode, mode);
 	}
 
@@ -664,36 +859,10 @@ static int update_state(struct drm_device *drm_dev,
 	*plane_mask |= crtc_state->plane_mask;
 
 	drm_atomic_set_fb_for_plane(primary_state, set->fb);
-	drm_framebuffer_unreference(set->fb);
+	drm_framebuffer_put(set->fb);
 	ret = drm_atomic_set_crtc_for_plane(primary_state, crtc);
 
-	if (set->ymirror)
-		/*
-		 * TODO:
-		 * some vop maybe not support ymirror, but force use it now.
-		 */
-		drm_atomic_plane_set_property(crtc->primary, primary_state,
-					      priv->logo_ymirror_prop,
-					      true);
-
 	return ret;
-}
-
-static bool is_support_hotplug(uint32_t output_type)
-{
-	switch (output_type) {
-	case DRM_MODE_CONNECTOR_Unknown:
-	case DRM_MODE_CONNECTOR_DVII:
-	case DRM_MODE_CONNECTOR_DVID:
-	case DRM_MODE_CONNECTOR_DVIA:
-	case DRM_MODE_CONNECTOR_DisplayPort:
-	case DRM_MODE_CONNECTOR_HDMIA:
-	case DRM_MODE_CONNECTOR_HDMIB:
-	case DRM_MODE_CONNECTOR_TV:
-		return true;
-	default:
-		return false;
-	}
 }
 
 static void show_loader_logo(struct drm_device *drm_dev)
@@ -701,12 +870,13 @@ static void show_loader_logo(struct drm_device *drm_dev)
 	struct drm_atomic_state *state, *old_state;
 	struct device_node *np = drm_dev->dev->of_node;
 	struct drm_mode_config *mode_config = &drm_dev->mode_config;
+	struct rockchip_drm_private *private = drm_dev->dev_private;
 	struct device_node *root, *route;
 	struct rockchip_drm_mode_set *set, *tmp, *unset;
 	struct list_head mode_set_list;
 	struct list_head mode_unset_list;
-	unsigned plane_mask = 0;
-	int ret;
+	unsigned int plane_mask = 0;
+	int ret, i;
 
 	root = of_get_child_by_name(np, "route");
 	if (!root) {
@@ -731,13 +901,16 @@ static void show_loader_logo(struct drm_device *drm_dev)
 
 	state->acquire_ctx = mode_config->acquire_ctx;
 
-	for_each_available_child_of_node(root, route) {
+	for_each_child_of_node(root, route) {
+		if (!of_device_is_available(route))
+			continue;
+
 		set = of_parse_display_resource(drm_dev, route);
 		if (!set)
 			continue;
 
 		if (setup_initial_state(drm_dev, state, set)) {
-			drm_framebuffer_unreference(set->fb);
+			drm_framebuffer_put(set->fb);
 			INIT_LIST_HEAD(&set->head);
 			list_add_tail(&set->head, &mode_unset_list);
 			continue;
@@ -752,15 +925,16 @@ static void show_loader_logo(struct drm_device *drm_dev)
 	 */
 	list_for_each_entry_safe(unset, tmp, &mode_unset_list, head) {
 		struct rockchip_drm_mode_set *tmp_set;
-		int found_used_crtc = 0;
+		int find_used_crtc = 0;
 
 		list_for_each_entry_safe(set, tmp_set, &mode_set_list, head) {
 			if (set->crtc == unset->crtc) {
-				found_used_crtc = 1;
+				find_used_crtc = 1;
 				continue;
 			}
 		}
-		if (!found_used_crtc) {
+
+		if (!find_used_crtc) {
 			struct drm_crtc *crtc = unset->crtc;
 			int pipe = drm_crtc_index(crtc);
 			struct rockchip_drm_private *priv =
@@ -769,6 +943,7 @@ static void show_loader_logo(struct drm_device *drm_dev)
 			if (unset->hdisplay && unset->vdisplay)
 				priv->crtc_funcs[pipe]->crtc_close(crtc);
 		}
+
 		list_del(&unset->head);
 		kfree(unset);
 	}
@@ -781,11 +956,11 @@ static void show_loader_logo(struct drm_device *drm_dev)
 
 	/*
 	 * The state save initial devices status, swap the state into
-	 * drm deivces as old state, so if new state come, can compare
+	 * drm devices as old state, so if new state come, can compare
 	 * with this state to judge which status need to update.
 	 */
-	drm_atomic_helper_swap_state(drm_dev, state);
-	drm_atomic_state_free(state);
+	WARN_ON(drm_atomic_helper_swap_state(state, false));
+	drm_atomic_state_put(state);
 	old_state = drm_atomic_helper_duplicate_state(drm_dev,
 						      mode_config->acquire_ctx);
 	if (IS_ERR(old_state)) {
@@ -808,8 +983,17 @@ static void show_loader_logo(struct drm_device *drm_dev)
 		 */
 		WARN_ON(update_state(drm_dev, state, set, &plane_mask));
 
+	for (i = 0; i < state->num_connector; i++) {
+		if (state->connectors[i].new_state->connector->status !=
+		    connector_status_connected)
+			state->connectors[i].new_state->best_encoder = NULL;
+	}
+
 	ret = drm_atomic_commit(state);
-	drm_atomic_clean_old_fb(drm_dev, plane_mask, ret);
+	/**
+	 * todo
+	 * drm_atomic_clean_old_fb(drm_dev, plane_mask, ret);
+	 */
 
 	list_for_each_entry_safe(set, tmp, &mode_set_list, head) {
 		list_del(&set->head);
@@ -825,31 +1009,45 @@ static void show_loader_logo(struct drm_device *drm_dev)
 		/*
 		 * restore display status if atomic commit failed.
 		 */
-		drm_atomic_helper_swap_state(drm_dev, old_state);
-		goto err_free_old_state;
+		WARN_ON(drm_atomic_helper_swap_state(old_state, false));
+		goto err_free_state;
 	}
 
 	rockchip_free_loader_memory(drm_dev);
-	drm_atomic_state_free(old_state);
+	drm_atomic_state_put(old_state);
+	drm_atomic_state_put(state);
 
+	private->loader_protect = true;
 	drm_modeset_unlock_all(drm_dev);
 	return;
-
 err_free_old_state:
-	drm_atomic_state_free(old_state);
+	drm_atomic_state_put(old_state);
 err_free_state:
-	drm_atomic_state_free(state);
+	drm_atomic_state_put(state);
 err_unlock:
 	drm_modeset_unlock_all(drm_dev);
 	if (ret)
 		dev_err(drm_dev->dev, "failed to show loader logo\n");
-	rockchip_free_loader_memory(drm_dev);
 }
 
 static const char *const loader_protect_clocks[] __initconst = {
 	"hclk_vio",
+	"hclk_vop",
+	"hclk_vopb",
+	"hclk_vopl",
 	"aclk_vio",
 	"aclk_vio0",
+	"aclk_vio1",
+	"aclk_vop",
+	"aclk_vopb",
+	"aclk_vopl",
+	"aclk_vo_pre",
+	"aclk_vio_pre",
+	"dclk_vop",
+	"dclk_vop0",
+	"dclk_vop1",
+	"dclk_vopb",
+	"dclk_vopl",
 };
 
 static struct clk **loader_clocks __initdata;
@@ -874,7 +1072,7 @@ static int __init rockchip_clocks_loader_protect(void)
 
 	return 0;
 }
-fs_initcall(rockchip_clocks_loader_protect);
+arch_initcall_sync(rockchip_clocks_loader_protect);
 
 static int __init rockchip_clocks_loader_unprotect(void)
 {
@@ -921,6 +1119,7 @@ int rockchip_drm_crtc_send_mcu_cmd(struct drm_device *drm_dev,
 
 	return 0;
 }
+EXPORT_SYMBOL(rockchip_drm_crtc_send_mcu_cmd);
 
 /*
  * Attach a (component) device to the shared drm dma mapping from master drm
@@ -938,7 +1137,7 @@ int rockchip_drm_dma_attach_device(struct drm_device *drm_dev,
 
 	ret = iommu_attach_device(private->domain, dev);
 	if (ret) {
-		dev_err(dev, "Failed to attach iommu device\n");
+		DRM_DEV_ERROR(dev, "Failed to attach iommu device\n");
 		return ret;
 	}
 
@@ -982,43 +1181,6 @@ void rockchip_unregister_crtc_funcs(struct drm_crtc *crtc)
 	priv->crtc_funcs[pipe] = NULL;
 }
 
-static struct drm_crtc *rockchip_crtc_from_pipe(struct drm_device *drm,
-						int pipe)
-{
-	struct drm_crtc *crtc;
-	int i = 0;
-
-	list_for_each_entry(crtc, &drm->mode_config.crtc_list, head)
-		if (i++ == pipe)
-			return crtc;
-
-	return NULL;
-}
-
-static int rockchip_drm_crtc_enable_vblank(struct drm_device *dev,
-					   unsigned int pipe)
-{
-	struct rockchip_drm_private *priv = dev->dev_private;
-	struct drm_crtc *crtc = rockchip_crtc_from_pipe(dev, pipe);
-
-	if (crtc && priv->crtc_funcs[pipe] &&
-	    priv->crtc_funcs[pipe]->enable_vblank)
-		return priv->crtc_funcs[pipe]->enable_vblank(crtc);
-
-	return 0;
-}
-
-static void rockchip_drm_crtc_disable_vblank(struct drm_device *dev,
-					     unsigned int pipe)
-{
-	struct rockchip_drm_private *priv = dev->dev_private;
-	struct drm_crtc *crtc = rockchip_crtc_from_pipe(dev, pipe);
-
-	if (crtc && priv->crtc_funcs[pipe] &&
-	    priv->crtc_funcs[pipe]->disable_vblank)
-		priv->crtc_funcs[pipe]->disable_vblank(crtc);
-}
-
 static int rockchip_drm_fault_handler(struct iommu_domain *iommu,
 				      struct device *dev,
 				      unsigned long iova, int flags, void *arg)
@@ -1027,6 +1189,7 @@ static int rockchip_drm_fault_handler(struct iommu_domain *iommu,
 	struct rockchip_drm_private *priv = drm_dev->dev_private;
 	struct drm_crtc *crtc;
 
+	DRM_ERROR("iommu fault handler flags: 0x%x\n", flags);
 	drm_for_each_crtc(crtc, drm_dev) {
 		int pipe = drm_crtc_index(crtc);
 
@@ -1088,18 +1251,19 @@ static int rockchip_drm_mm_dump(struct seq_file *s, void *data)
 	struct drm_minor *minor = node->minor;
 	struct drm_device *drm_dev = minor->dev;
 	struct rockchip_drm_private *priv = drm_dev->dev_private;
-	int ret;
+
+	struct drm_printer p = drm_seq_file_printer(s);
 
 	if (!priv->domain)
 		return 0;
 
 	mutex_lock(&priv->mm_lock);
 
-	ret = drm_mm_dump_table(s, &priv->mm);
+	drm_mm_print(&priv->mm, &p);
 
 	mutex_unlock(&priv->mm_lock);
 
-	return ret;
+	return 0;
 }
 
 static int rockchip_drm_summary_show(struct seq_file *s, void *data)
@@ -1152,58 +1316,13 @@ static int rockchip_drm_debugfs_init(struct drm_minor *minor)
 
 	return 0;
 }
-
-static void rockchip_drm_debugfs_cleanup(struct drm_minor *minor)
-{
-	drm_debugfs_remove_files(rockchip_debugfs_files,
-				 ARRAY_SIZE(rockchip_debugfs_files), minor);
-}
 #endif
 
 static int rockchip_drm_create_properties(struct drm_device *dev)
 {
 	struct drm_property *prop;
 	struct rockchip_drm_private *private = dev->dev_private;
-	const struct drm_prop_enum_list cabc_mode_enum_list[] = {
-		{ ROCKCHIP_DRM_CABC_MODE_DISABLE, "Disable" },
-		{ ROCKCHIP_DRM_CABC_MODE_NORMAL, "Normal" },
-		{ ROCKCHIP_DRM_CABC_MODE_LOWPOWER, "LowPower" },
-		{ ROCKCHIP_DRM_CABC_MODE_USERSPACE, "Userspace" },
-	};
 
-	prop = drm_property_create_enum(dev, 0, "CABC_MODE", cabc_mode_enum_list,
-			ARRAY_SIZE(cabc_mode_enum_list));
-
-	private->cabc_mode_property = prop;
-
-	prop = drm_property_create(dev, DRM_MODE_PROP_BLOB, "CABC_LUT", 0);
-	if (!prop)
-		return -ENOMEM;
-	private->cabc_lut_property = prop;
-
-	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
-					"CABC_STAGE_UP", 0, 512);
-	if (!prop)
-		return -ENOMEM;
-	private->cabc_stage_up_property = prop;
-
-	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
-					"CABC_STAGE_DOWN", 0, 255);
-	if (!prop)
-		return -ENOMEM;
-	private->cabc_stage_down_property = prop;
-
-	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
-					"CABC_GLOBAL_DN", 0, 255);
-	if (!prop)
-		return -ENOMEM;
-	private->cabc_global_dn_property = prop;
-
-	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
-					"CABC_CALC_PIXEL_NUM", 0, 1000);
-	if (!prop)
-		return -ENOMEM;
-	private->cabc_calc_pixel_num_property = prop;
 	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
 					 "EOTF", 0, 5);
 	if (!prop)
@@ -1235,22 +1354,16 @@ static int rockchip_drm_create_properties(struct drm_device *dev)
 	private->alpha_scale_prop = prop;
 
 	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
-					 "PDAF_TYPE", 0, 4);
+					 "ASYNC_COMMIT", 0, 1);
 	if (!prop)
 		return -ENOMEM;
-	private->pdaf_type = prop;
+	private->async_commit_prop = prop;
 
 	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
-					 "WORK_MODE", 0, 6);
+					 "SHARE_ID", 0, UINT_MAX);
 	if (!prop)
 		return -ENOMEM;
-	private->work_mode = prop;
-
-	prop = drm_property_create_range(dev, DRM_MODE_PROP_ATOMIC,
-					 "PDAF_DATA_TYPE", 0, 255);
-	if (!prop)
-		return -ENOMEM;
-	private->pdaf_data_type = prop;
+	private->share_id_prop = prop;
 
 	return drm_mode_create_tv_properties(dev, 0, NULL);
 }
@@ -1299,18 +1412,22 @@ static void rockchip_attach_connector_property(struct drm_device *drm)
 {
 	struct drm_connector *connector;
 	struct drm_mode_config *conf = &drm->mode_config;
+	struct drm_connector_list_iter conn_iter;
 
 	mutex_lock(&drm->mode_config.mutex);
 
-	drm_for_each_connector(connector, drm) {
 #define ROCKCHIP_PROP_ATTACH(prop, v) \
-	drm_object_attach_property(&connector->base, prop, v)
+		drm_object_attach_property(&connector->base, prop, v)
 
-		ROCKCHIP_PROP_ATTACH(conf->tv_brightness_property, 100);
-		ROCKCHIP_PROP_ATTACH(conf->tv_contrast_property, 100);
-		ROCKCHIP_PROP_ATTACH(conf->tv_saturation_property, 100);
-		ROCKCHIP_PROP_ATTACH(conf->tv_hue_property, 100);
+	drm_connector_list_iter_begin(drm, &conn_iter);
+	drm_for_each_connector_iter(connector, &conn_iter) {
+		ROCKCHIP_PROP_ATTACH(conf->tv_brightness_property, 50);
+		ROCKCHIP_PROP_ATTACH(conf->tv_contrast_property, 50);
+		ROCKCHIP_PROP_ATTACH(conf->tv_saturation_property, 50);
+		ROCKCHIP_PROP_ATTACH(conf->tv_hue_property, 50);
 	}
+	drm_connector_list_iter_end(&conn_iter);
+#undef ROCKCHIP_PROP_ATTACH
 
 	mutex_unlock(&drm->mode_config.mutex);
 }
@@ -1321,6 +1438,7 @@ static void rockchip_drm_set_property_default(struct drm_device *drm)
 	struct drm_mode_config *conf = &drm->mode_config;
 	struct drm_atomic_state *state;
 	int ret;
+	struct drm_connector_list_iter conn_iter;
 
 	drm_modeset_lock_all(drm);
 
@@ -1331,41 +1449,48 @@ static void rockchip_drm_set_property_default(struct drm_device *drm)
 	}
 	state->acquire_ctx = conf->acquire_ctx;
 
-	drm_for_each_connector(connector, drm) {
+	drm_connector_list_iter_begin(drm, &conn_iter);
+	drm_for_each_connector_iter(connector, &conn_iter) {
 		struct drm_connector_state *connector_state;
 
 		connector_state = drm_atomic_get_connector_state(state,
 								 connector);
-		if (IS_ERR(connector_state))
-			DRM_ERROR("Connector[%d]: Failed to get state\n",
-				  connector->base.id);
+		if (IS_ERR(connector_state)) {
+			DRM_ERROR("Connector[%d]: Failed to get state\n", connector->base.id);
+			continue;
+		}
 
-#define CONNECTOR_SET_PROP(prop, val) \
-	do { \
-		ret = drm_atomic_connector_set_property(connector, \
-						connector_state, \
-						prop, \
-						val); \
-		if (ret) \
-			DRM_ERROR("Connector[%d]: Failed to initial %s\n", \
-				  connector->base.id, #prop); \
-	} while (0)
-
-		CONNECTOR_SET_PROP(conf->tv_brightness_property, 50);
-		CONNECTOR_SET_PROP(conf->tv_contrast_property, 50);
-		CONNECTOR_SET_PROP(conf->tv_saturation_property, 50);
-		CONNECTOR_SET_PROP(conf->tv_hue_property, 50);
-
-#undef CONNECTOR_SET_PROP
+		connector_state->tv.brightness = 50;
+		connector_state->tv.contrast = 50;
+		connector_state->tv.saturation = 50;
+		connector_state->tv.hue = 50;
 	}
+	drm_connector_list_iter_end(&conn_iter);
 
 	ret = drm_atomic_commit(state);
 	WARN_ON(ret == -EDEADLK);
 	if (ret)
-		DRM_ERROR("Failed to update propertys\n");
+		DRM_ERROR("Failed to update properties\n");
+	drm_atomic_state_put(state);
 
 err_unlock:
 	drm_modeset_unlock_all(drm);
+}
+
+static bool is_support_hotplug(uint32_t output_type)
+{
+	switch (output_type) {
+	case DRM_MODE_CONNECTOR_DVII:
+	case DRM_MODE_CONNECTOR_DVID:
+	case DRM_MODE_CONNECTOR_DVIA:
+	case DRM_MODE_CONNECTOR_DisplayPort:
+	case DRM_MODE_CONNECTOR_HDMIA:
+	case DRM_MODE_CONNECTOR_HDMIB:
+	case DRM_MODE_CONNECTOR_TV:
+		return true;
+	default:
+		return false;
+	}
 }
 
 static int rockchip_drm_bind(struct device *dev)
@@ -1378,12 +1503,8 @@ static int rockchip_drm_bind(struct device *dev)
 	struct drm_crtc *crtc;
 
 	drm_dev = drm_dev_alloc(&rockchip_drm_driver, dev);
-	if (!drm_dev)
-		return -ENOMEM;
-
-	ret = drm_dev_set_unique(drm_dev, "%s", dev_name(dev));
-	if (ret)
-		goto err_free;
+	if (IS_ERR(drm_dev))
+		return PTR_ERR(drm_dev);
 
 	dev_set_drvdata(dev, drm_dev);
 
@@ -1395,7 +1516,6 @@ static int rockchip_drm_bind(struct device *dev)
 
 	mutex_init(&private->commit_lock);
 	INIT_WORK(&private->commit_work, rockchip_drm_atomic_work);
-
 	drm_dev->dev_private = private;
 
 	private->dmc_support = false;
@@ -1418,7 +1538,6 @@ static int rockchip_drm_bind(struct device *dev)
 		private->dmc_support = true;
 		dev_info(dev, "devfreq is ready\n");
 	}
-
 	private->hdmi_pll.pll = devm_clk_get(dev, "hdmi-tmds-pll");
 	if (PTR_ERR(private->hdmi_pll.pll) == -ENOENT) {
 		private->hdmi_pll.pll = NULL;
@@ -1430,7 +1549,6 @@ static int rockchip_drm_bind(struct device *dev)
 		ret = PTR_ERR(private->hdmi_pll.pll);
 		goto err_free;
 	}
-
 	private->default_pll.pll = devm_clk_get(dev, "default-vop-pll");
 	if (PTR_ERR(private->default_pll.pll) == -ENOENT) {
 		private->default_pll.pll = NULL;
@@ -1443,10 +1561,8 @@ static int rockchip_drm_bind(struct device *dev)
 		goto err_free;
 	}
 
-#ifdef CONFIG_DRM_DMA_SYNC
-	private->cpu_fence_context = fence_context_alloc(1);
-	atomic_set(&private->cpu_fence_seqno, 0);
-#endif
+	INIT_LIST_HEAD(&private->psr_list);
+	mutex_init(&private->psr_list_lock);
 
 	ret = rockchip_drm_init_iommu(drm_dev);
 	if (ret)
@@ -1456,20 +1572,17 @@ static int rockchip_drm_bind(struct device *dev)
 
 	rockchip_drm_mode_config_init(drm_dev);
 	rockchip_drm_create_properties(drm_dev);
-
 	/* Try to bind all sub drivers. */
 	ret = component_bind_all(dev, drm_dev);
 	if (ret)
 		goto err_mode_config_cleanup;
 
 	rockchip_attach_connector_property(drm_dev);
-
 	ret = drm_vblank_init(drm_dev, drm_dev->mode_config.num_crtc);
 	if (ret)
 		goto err_unbind_all;
 
 	drm_mode_config_reset(drm_dev);
-
 	rockchip_drm_set_property_default(drm_dev);
 
 	/*
@@ -1480,13 +1593,6 @@ static int rockchip_drm_bind(struct device *dev)
 
 	/* init kms poll for handling hpd */
 	drm_kms_helper_poll_init(drm_dev);
-
-	/*
-	 * with vblank_disable_allowed = true, vblank interrupt will be disabled
-	 * by drm timer once a current process gives up ownership of
-	 * vblank event.(after drm_vblank_put function is called)
-	 */
-	drm_dev->vblank_disable_allowed = true;
 
 	rockchip_gem_pool_init(drm_dev);
 #ifndef MODULE
@@ -1508,12 +1614,10 @@ static int rockchip_drm_bind(struct device *dev)
 			break;
 
 		s = to_rockchip_crtc_state(crtc->state);
-		if (is_support_hotplug(s->output_type)) {
-			s->crtc_primary_fb = crtc->primary->fb;
-			crtc->primary->fb = helper->fb;
-			drm_framebuffer_reference(helper->fb);
-		}
+		if (is_support_hotplug(s->output_type))
+			drm_framebuffer_get(helper->fb);
 	}
+
 	drm_dev->mode_config.allow_fb_modifiers = true;
 
 	ret = drm_dev_register(drm_dev, 0);
@@ -1526,7 +1630,6 @@ err_fbdev_fini:
 err_kms_helper_poll_fini:
 	rockchip_gem_pool_destroy(drm_dev);
 	drm_kms_helper_poll_fini(drm_dev);
-	drm_vblank_cleanup(drm_dev);
 err_unbind_all:
 	component_unbind_all(dev, drm_dev);
 err_mode_config_cleanup:
@@ -1535,7 +1638,7 @@ err_mode_config_cleanup:
 err_free:
 	drm_dev->dev_private = NULL;
 	dev_set_drvdata(dev, NULL);
-	drm_dev_unref(drm_dev);
+	drm_dev_put(drm_dev);
 	return ret;
 }
 
@@ -1549,14 +1652,14 @@ static void rockchip_drm_unbind(struct device *dev)
 	rockchip_gem_pool_destroy(drm_dev);
 	drm_kms_helper_poll_fini(drm_dev);
 
-	drm_vblank_cleanup(drm_dev);
+	drm_atomic_helper_shutdown(drm_dev);
 	component_unbind_all(dev, drm_dev);
 	drm_mode_config_cleanup(drm_dev);
 	rockchip_iommu_cleanup(drm_dev);
 
 	drm_dev->dev_private = NULL;
 	dev_set_drvdata(dev, NULL);
-	drm_dev_unref(drm_dev);
+	drm_dev_put(drm_dev);
 }
 
 static void rockchip_drm_crtc_cancel_pending_vblank(struct drm_crtc *crtc,
@@ -1571,112 +1674,23 @@ static void rockchip_drm_crtc_cancel_pending_vblank(struct drm_crtc *crtc,
 		priv->crtc_funcs[pipe]->cancel_pending_vblank(crtc, file_priv);
 }
 
-int rockchip_drm_register_subdrv(struct drm_rockchip_subdrv *subdrv)
-{
-	if (!subdrv)
-		return -EINVAL;
-
-	mutex_lock(&subdrv_list_mutex);
-	list_add_tail(&subdrv->list, &rockchip_drm_subdrv_list);
-	mutex_unlock(&subdrv_list_mutex);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(rockchip_drm_register_subdrv);
-
-int rockchip_drm_unregister_subdrv(struct drm_rockchip_subdrv *subdrv)
-{
-	if (!subdrv)
-		return -EINVAL;
-
-	mutex_lock(&subdrv_list_mutex);
-	list_del(&subdrv->list);
-	mutex_unlock(&subdrv_list_mutex);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(rockchip_drm_unregister_subdrv);
-
 static int rockchip_drm_open(struct drm_device *dev, struct drm_file *file)
 {
-	struct rockchip_drm_file_private *file_priv;
-	struct drm_rockchip_subdrv *subdrv;
 	struct drm_crtc *crtc;
-	int ret = 0;
 
-	file_priv = kzalloc(sizeof(*file_priv), GFP_KERNEL);
-	if (!file_priv)
-		return -ENOMEM;
-	INIT_LIST_HEAD(&file_priv->gem_cpu_acquire_list);
-
-	file->driver_priv = file_priv;
-
-	mutex_lock(&subdrv_list_mutex);
-	list_for_each_entry(subdrv, &rockchip_drm_subdrv_list, list) {
-		ret = subdrv->open(dev, subdrv->dev, file);
-		if (ret) {
-			mutex_unlock(&subdrv_list_mutex);
-			goto err_free_file_priv;
-		}
-	}
-	mutex_unlock(&subdrv_list_mutex);
-
-	drm_for_each_crtc(crtc, dev) {
-		struct rockchip_crtc_state *s = NULL;
-
-		s = to_rockchip_crtc_state(crtc->state);
-		if (s->crtc_primary_fb) {
-			crtc->primary->fb = s->crtc_primary_fb;
-			s->crtc_primary_fb = NULL;
-		}
-	}
+	drm_for_each_crtc(crtc, dev)
+		crtc->primary->fb = NULL;
 
 	return 0;
-
-err_free_file_priv:
-	kfree(file_priv);
-	file_priv = NULL;
-
-	return ret;
 }
 
-static void rockchip_drm_preclose(struct drm_device *dev,
-				  struct drm_file *file_priv)
+static void rockchip_drm_postclose(struct drm_device *dev,
+				   struct drm_file *file_priv)
 {
-	struct rockchip_drm_file_private *file_private = file_priv->driver_priv;
-	struct rockchip_gem_object_node *cur, *d;
-	struct drm_rockchip_subdrv *subdrv;
 	struct drm_crtc *crtc;
 
 	list_for_each_entry(crtc, &dev->mode_config.crtc_list, head)
 		rockchip_drm_crtc_cancel_pending_vblank(crtc, file_priv);
-
-	mutex_lock(&dev->struct_mutex);
-	list_for_each_entry_safe(cur, d,
-			&file_private->gem_cpu_acquire_list, list) {
-#ifdef CONFIG_DRM_DMA_SYNC
-		BUG_ON(!cur->rockchip_gem_obj->acquire_fence);
-		drm_fence_signal_and_put(&cur->rockchip_gem_obj->acquire_fence);
-#endif
-		drm_gem_object_unreference(&cur->rockchip_gem_obj->base);
-		kfree(cur);
-	}
-	/* since we are deleting the whole list, just initialize the header
-	 * instead of calling list_del for every element
-	 */
-	INIT_LIST_HEAD(&file_private->gem_cpu_acquire_list);
-	mutex_unlock(&dev->struct_mutex);
-
-	mutex_lock(&subdrv_list_mutex);
-	list_for_each_entry(subdrv, &rockchip_drm_subdrv_list, list)
-		subdrv->close(dev, subdrv->dev, file_priv);
-	mutex_unlock(&subdrv_list_mutex);
-}
-
-static void rockchip_drm_postclose(struct drm_device *dev, struct drm_file *file)
-{
-	kfree(file->driver_priv);
-	file->driver_priv = NULL;
 }
 
 static void rockchip_drm_lastclose(struct drm_device *dev)
@@ -1693,12 +1707,6 @@ static const struct drm_ioctl_desc rockchip_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(ROCKCHIP_GEM_MAP_OFFSET,
 			  rockchip_gem_map_offset_ioctl,
 			  DRM_UNLOCKED | DRM_AUTH | DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(ROCKCHIP_GEM_CPU_ACQUIRE,
-			  rockchip_gem_cpu_acquire_ioctl,
-			  DRM_UNLOCKED | DRM_AUTH | DRM_RENDER_ALLOW),
-	DRM_IOCTL_DEF_DRV(ROCKCHIP_GEM_CPU_RELEASE,
-			  rockchip_gem_cpu_release_ioctl,
-			  DRM_UNLOCKED | DRM_AUTH | DRM_RENDER_ALLOW),
 	DRM_IOCTL_DEF_DRV(ROCKCHIP_GEM_GET_PHYS, rockchip_gem_get_phys_ioctl,
 			  DRM_UNLOCKED | DRM_AUTH | DRM_RENDER_ALLOW),
 };
@@ -1710,47 +1718,195 @@ static const struct file_operations rockchip_drm_driver_fops = {
 	.poll = drm_poll,
 	.read = drm_read,
 	.unlocked_ioctl = drm_ioctl,
-#ifdef CONFIG_COMPAT
 	.compat_ioctl = drm_compat_ioctl,
-#endif
 	.release = drm_release,
 };
 
-const struct vm_operations_struct rockchip_drm_vm_ops = {
-	.open = drm_gem_vm_open,
-	.close = drm_gem_vm_close,
+static int rockchip_drm_gem_dmabuf_begin_cpu_access(struct dma_buf *dma_buf,
+						    enum dma_data_direction dir)
+{
+	struct drm_gem_object *obj = dma_buf->priv;
+
+	return rockchip_gem_prime_begin_cpu_access(obj, dir);
+}
+
+static int rockchip_drm_gem_dmabuf_end_cpu_access(struct dma_buf *dma_buf,
+						  enum dma_data_direction dir)
+{
+	struct drm_gem_object *obj = dma_buf->priv;
+
+	return rockchip_gem_prime_end_cpu_access(obj, dir);
+}
+
+static const struct dma_buf_ops rockchip_drm_gem_prime_dmabuf_ops = {
+	.attach = drm_gem_map_attach,
+	.detach = drm_gem_map_detach,
+	.map_dma_buf = drm_gem_map_dma_buf,
+	.unmap_dma_buf = drm_gem_unmap_dma_buf,
+	.release = drm_gem_dmabuf_release,
+	.map = drm_gem_dmabuf_kmap,
+	.unmap = drm_gem_dmabuf_kunmap,
+	.mmap = drm_gem_dmabuf_mmap,
+	.vmap = drm_gem_dmabuf_vmap,
+	.vunmap = drm_gem_dmabuf_vunmap,
+	.begin_cpu_access = rockchip_drm_gem_dmabuf_begin_cpu_access,
+	.end_cpu_access = rockchip_drm_gem_dmabuf_end_cpu_access,
 };
+
+#ifdef CONFIG_ARCH_ROCKCHIP
+static void drm_gem_prime_dmabuf_release_callback(void *data)
+{
+	struct drm_prime_callback_data *cb_data = data;
+
+	if (cb_data && cb_data->obj && cb_data->obj->import_attach) {
+		struct dma_buf_attachment *attach = cb_data->obj->import_attach;
+		struct sg_table *sgt = cb_data->sgt;
+
+		if (sgt)
+			dma_buf_unmap_attachment(attach, sgt,
+						 DMA_BIDIRECTIONAL);
+		dma_buf_detach(attach->dmabuf, attach);
+		drm_gem_object_put_unlocked(cb_data->obj);
+		kfree(cb_data);
+	}
+}
+#endif
+
+static struct drm_gem_object *rockchip_drm_gem_prime_import_dev(struct drm_device *dev,
+								struct dma_buf *dma_buf,
+								struct device *attach_dev)
+{
+	struct dma_buf_attachment *attach;
+	struct sg_table *sgt;
+	struct drm_gem_object *obj;
+#ifdef CONFIG_ARCH_ROCKCHIP
+	struct drm_prime_callback_data *cb_data = NULL;
+#endif
+	int ret;
+
+	if (dma_buf->ops == &rockchip_drm_gem_prime_dmabuf_ops) {
+		obj = dma_buf->priv;
+		if (obj->dev == dev) {
+			/*
+			 * Importing dmabuf exported from out own gem increases
+			 * refcount on gem itself instead of f_count of dmabuf.
+			 */
+			drm_gem_object_get(obj);
+			return obj;
+		}
+	}
+
+#ifdef CONFIG_ARCH_ROCKCHIP
+	cb_data = dma_buf_get_release_callback_data(dma_buf,
+					drm_gem_prime_dmabuf_release_callback);
+	if (cb_data && cb_data->obj && cb_data->obj->dev == dev) {
+		drm_gem_object_get(cb_data->obj);
+		return cb_data->obj;
+	}
+#endif
+
+	if (!dev->driver->gem_prime_import_sg_table)
+		return ERR_PTR(-EINVAL);
+
+	attach = dma_buf_attach(dma_buf, attach_dev);
+	if (IS_ERR(attach))
+		return ERR_CAST(attach);
+
+	get_dma_buf(dma_buf);
+
+#ifdef CONFIG_ARCH_ROCKCHIP
+	cb_data = kmalloc(sizeof(*cb_data), GFP_KERNEL);
+	if (!cb_data) {
+		ret = -ENOMEM;
+		goto fail_detach;
+	}
+#endif
+
+	sgt = dma_buf_map_attachment(attach, DMA_BIDIRECTIONAL);
+	if (IS_ERR(sgt)) {
+		ret = PTR_ERR(sgt);
+		goto fail_detach;
+	}
+
+	obj = dev->driver->gem_prime_import_sg_table(dev, attach, sgt);
+	if (IS_ERR(obj)) {
+		ret = PTR_ERR(obj);
+		goto fail_unmap;
+	}
+
+	obj->import_attach = attach;
+
+#ifdef CONFIG_ARCH_ROCKCHIP
+	cb_data->obj = obj;
+	cb_data->sgt = sgt;
+	dma_buf_set_release_callback(dma_buf,
+			drm_gem_prime_dmabuf_release_callback, cb_data);
+	dma_buf_put(dma_buf);
+	drm_gem_object_get(obj);
+#endif
+
+	return obj;
+
+fail_unmap:
+	dma_buf_unmap_attachment(attach, sgt, DMA_BIDIRECTIONAL);
+fail_detach:
+#ifdef CONFIG_ARCH_ROCKCHIP
+	kfree(cb_data);
+#endif
+	dma_buf_detach(dma_buf, attach);
+	dma_buf_put(dma_buf);
+
+	return ERR_PTR(ret);
+}
+
+static struct drm_gem_object *rockchip_drm_gem_prime_import(struct drm_device *dev,
+							    struct dma_buf *dma_buf)
+{
+	return rockchip_drm_gem_prime_import_dev(dev, dma_buf, dev->dev);
+}
+
+static struct dma_buf *rockchip_drm_gem_prime_export(struct drm_device *dev,
+						     struct drm_gem_object *obj,
+						     int flags)
+{
+	struct dma_buf_export_info exp_info = {
+		.exp_name = KBUILD_MODNAME, /* white lie for debug */
+		.owner = dev->driver->fops->owner,
+		.ops = &rockchip_drm_gem_prime_dmabuf_ops,
+		.size = obj->size,
+		.flags = flags,
+		.priv = obj,
+	};
+
+	if (dev->driver->gem_prime_res_obj)
+		exp_info.resv = dev->driver->gem_prime_res_obj(obj);
+
+	return drm_gem_dmabuf_export(dev, &exp_info);
+}
 
 static struct drm_driver rockchip_drm_driver = {
 	.driver_features	= DRIVER_MODESET | DRIVER_GEM |
 				  DRIVER_PRIME | DRIVER_ATOMIC |
 				  DRIVER_RENDER,
-	.preclose		= rockchip_drm_preclose,
-	.lastclose		= rockchip_drm_lastclose,
-	.get_vblank_counter	= drm_vblank_no_hw_counter,
-	.open			= rockchip_drm_open,
 	.postclose		= rockchip_drm_postclose,
-	.enable_vblank		= rockchip_drm_crtc_enable_vblank,
-	.disable_vblank		= rockchip_drm_crtc_disable_vblank,
-	.gem_vm_ops		= &rockchip_drm_vm_ops,
-	.gem_free_object	= rockchip_gem_free_object,
+	.lastclose		= rockchip_drm_lastclose,
+	.open			= rockchip_drm_open,
+	.gem_vm_ops		= &drm_gem_cma_vm_ops,
+	.gem_free_object_unlocked = rockchip_gem_free_object,
 	.dumb_create		= rockchip_gem_dumb_create,
 	.dumb_map_offset	= rockchip_gem_dumb_map_offset,
 	.dumb_destroy		= drm_gem_dumb_destroy,
 	.prime_handle_to_fd	= drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle	= drm_gem_prime_fd_to_handle,
-	.gem_prime_import	= drm_gem_prime_import,
-	.gem_prime_export	= drm_gem_prime_export,
+	.gem_prime_import	= rockchip_drm_gem_prime_import,
+	.gem_prime_export	= rockchip_drm_gem_prime_export,
 	.gem_prime_get_sg_table	= rockchip_gem_prime_get_sg_table,
 	.gem_prime_import_sg_table	= rockchip_gem_prime_import_sg_table,
 	.gem_prime_vmap		= rockchip_gem_prime_vmap,
 	.gem_prime_vunmap	= rockchip_gem_prime_vunmap,
 	.gem_prime_mmap		= rockchip_gem_mmap_buf,
-	.gem_prime_begin_cpu_access = rockchip_gem_prime_begin_cpu_access,
-	.gem_prime_end_cpu_access = rockchip_gem_prime_end_cpu_access,
 #ifdef CONFIG_DEBUG_FS
 	.debugfs_init		= rockchip_drm_debugfs_init,
-	.debugfs_cleanup	= rockchip_drm_debugfs_cleanup,
 #endif
 	.ioctls			= rockchip_ioctls,
 	.num_ioctls		= ARRAY_SIZE(rockchip_ioctls),
@@ -1760,6 +1916,7 @@ static struct drm_driver rockchip_drm_driver = {
 	.date	= DRIVER_DATE,
 	.major	= DRIVER_MAJOR,
 	.minor	= DRIVER_MINOR,
+	.patchlevel	= DRIVER_PATCH,
 };
 
 #ifdef CONFIG_PM_SLEEP
@@ -1783,19 +1940,16 @@ static void rockchip_drm_fb_resume(struct drm_device *drm)
 
 static int rockchip_drm_sys_suspend(struct device *dev)
 {
-	struct drm_device *drm;
+	struct drm_device *drm = dev_get_drvdata(dev);
 	struct rockchip_drm_private *priv;
 
-	drm = dev_get_drvdata(dev);
-	if (!drm) {
-		DRM_ERROR("%s: Failed to get drm device!\n", __func__);
+	if (!drm)
 		return 0;
-	}
 
-	priv = drm->dev_private;
 	drm_kms_helper_poll_disable(drm);
 	rockchip_drm_fb_suspend(drm);
 
+	priv = drm->dev_private;
 	priv->state = drm_atomic_helper_suspend(drm);
 	if (IS_ERR(priv->state)) {
 		rockchip_drm_fb_resume(drm);
@@ -1809,8 +1963,12 @@ static int rockchip_drm_sys_suspend(struct device *dev)
 static int rockchip_drm_sys_resume(struct device *dev)
 {
 	struct drm_device *drm = dev_get_drvdata(dev);
-	struct rockchip_drm_private *priv = drm->dev_private;
+	struct rockchip_drm_private *priv;
 
+	if (!drm)
+		return 0;
+
+	priv = drm->dev_private;
 	drm_atomic_helper_resume(drm, priv->state);
 	rockchip_drm_fb_resume(drm);
 	drm_kms_helper_poll_enable(drm);
@@ -1824,34 +1982,50 @@ static const struct dev_pm_ops rockchip_drm_pm_ops = {
 				rockchip_drm_sys_resume)
 };
 
-static int compare_of(struct device *dev, void *data)
-{
-	struct device_node *np = data;
+#define MAX_ROCKCHIP_SUB_DRIVERS 16
+static struct platform_driver *rockchip_sub_drivers[MAX_ROCKCHIP_SUB_DRIVERS];
+static int num_rockchip_sub_drivers;
 
-	return dev->of_node == np;
+static int compare_dev(struct device *dev, void *data)
+{
+	return dev == (struct device *)data;
 }
 
-static void rockchip_add_endpoints(struct device *dev,
-				   struct component_match **match,
-				   struct device_node *port)
+static void rockchip_drm_match_remove(struct device *dev)
 {
-	struct device_node *ep, *remote;
+	struct device_link *link;
 
-	for_each_available_child_of_node(port, ep) {
-		remote = of_graph_get_remote_port_parent(ep);
-		if (!remote || !of_device_is_available(remote)) {
-			of_node_put(remote);
-			continue;
-		} else if (!of_device_is_available(remote->parent)) {
-			dev_warn(dev, "parent device of %s is not available\n",
-				 remote->full_name);
-			of_node_put(remote);
-			continue;
-		}
+	list_for_each_entry(link, &dev->links.consumers, s_node)
+		device_link_del(link);
+}
 
-		component_match_add(dev, match, compare_of, remote);
-		of_node_put(remote);
+static struct component_match *rockchip_drm_match_add(struct device *dev)
+{
+	struct component_match *match = NULL;
+	int i;
+
+	for (i = 0; i < num_rockchip_sub_drivers; i++) {
+		struct platform_driver *drv = rockchip_sub_drivers[i];
+		struct device *p = NULL, *d;
+
+		do {
+			d = bus_find_device(&platform_bus_type, p, &drv->driver,
+					    (void *)platform_bus_type.match);
+			put_device(p);
+			p = d;
+
+			if (!d)
+				break;
+
+			device_link_add(dev, d, DL_FLAG_STATELESS);
+			component_match_add(dev, &match, compare_dev, d);
+		} while (true);
 	}
+
+	if (IS_ERR(match))
+		rockchip_drm_match_remove(dev);
+
+	return match ?: ERR_PTR(-ENODEV);
 }
 
 static const struct component_master_ops rockchip_drm_ops = {
@@ -1859,22 +2033,16 @@ static const struct component_master_ops rockchip_drm_ops = {
 	.unbind = rockchip_drm_unbind,
 };
 
-static int rockchip_drm_platform_probe(struct platform_device *pdev)
+static int rockchip_drm_platform_of_probe(struct device *dev)
 {
-	struct device *dev = &pdev->dev;
-	struct component_match *match = NULL;
 	struct device_node *np = dev->of_node;
 	struct device_node *port;
+	bool found = false;
 	int i;
 
-	DRM_INFO("Rockchip DRM driver version: %s\n", DRIVER_VERSION);
 	if (!np)
 		return -ENODEV;
-	/*
-	 * Bind the crtc ports first, so that
-	 * drm_of_find_possible_crtcs called from encoder .bind callbacks
-	 * works as expected.
-	 */
+
 	for (i = 0;; i++) {
 		struct device_node *iommu;
 
@@ -1889,8 +2057,9 @@ static int rockchip_drm_platform_probe(struct platform_device *pdev)
 
 		iommu = of_parse_phandle(port->parent, "iommus", 0);
 		if (!iommu || !of_device_is_available(iommu->parent)) {
-			dev_dbg(dev, "no iommu attached for %s, using non-iommu buffers\n",
-				port->parent->full_name);
+			DRM_DEV_DEBUG(dev,
+				      "no iommu attached for %pOF, using non-iommu buffers\n",
+				      port->parent);
 			/*
 			 * if there is a crtc not support iommu, force set all
 			 * crtc use non-iommu buffer.
@@ -1898,74 +2067,64 @@ static int rockchip_drm_platform_probe(struct platform_device *pdev)
 			is_support_iommu = false;
 		}
 
-		component_match_add(dev, &match, compare_of, port->parent);
+		found = true;
+
+		of_node_put(iommu);
 		of_node_put(port);
 	}
 
 	if (i == 0) {
-		dev_err(dev, "missing 'ports' property\n");
+		DRM_DEV_ERROR(dev, "missing 'ports' property\n");
 		return -ENODEV;
 	}
 
-	if (!match) {
-		dev_err(dev, "No available vop found for display-subsystem.\n");
+	if (!found) {
+		DRM_DEV_ERROR(dev,
+			      "No available vop found for display-subsystem.\n");
 		return -ENODEV;
 	}
-	/*
-	 * For each bound crtc, bind the encoders attached to its
-	 * remote endpoint.
-	 */
-	for (i = 0;; i++) {
-		port = of_parse_phandle(np, "ports", i);
-		if (!port)
-			break;
 
-		if (!of_device_is_available(port->parent)) {
-			of_node_put(port);
-			continue;
-		}
+	return 0;
+}
 
-		rockchip_add_endpoints(dev, &match, port);
-		of_node_put(port);
+static int rockchip_drm_platform_probe(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct component_match *match = NULL;
+	int ret;
+
+	ret = rockchip_drm_platform_of_probe(dev);
+	if (ret)
+		return ret;
+
+	match = rockchip_drm_match_add(dev);
+	if (IS_ERR(match))
+		return PTR_ERR(match);
+
+	ret = component_master_add_with_match(dev, &rockchip_drm_ops, match);
+	if (ret < 0) {
+		rockchip_drm_match_remove(dev);
+		return ret;
 	}
 
-	port = of_parse_phandle(np, "backlight", 0);
-	if (port && of_device_is_available(port)) {
-		component_match_add(dev, &match, compare_of, port);
-		of_node_put(port);
-	}
-
-	return component_master_add_with_match(dev, &rockchip_drm_ops, match);
+	return 0;
 }
 
 static int rockchip_drm_platform_remove(struct platform_device *pdev)
 {
 	component_master_del(&pdev->dev, &rockchip_drm_ops);
 
+	rockchip_drm_match_remove(&pdev->dev);
+
 	return 0;
 }
 
 static void rockchip_drm_platform_shutdown(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
-	struct drm_crtc *crtc;
-	struct drm_device *drm;
-	struct rockchip_drm_private *priv;
+	struct drm_device *drm = platform_get_drvdata(pdev);
 
-	drm = dev_get_drvdata(dev);
-	if (!drm) {
-		DRM_ERROR("%s: Failed to get drm device!\n", __func__);
-		return;
-	}
-
-	priv = drm->dev_private;
-	drm_for_each_crtc(crtc, drm) {
-		int pipe = drm_crtc_index(crtc);
-
-		if (priv->crtc_funcs[pipe] &&
-		    priv->crtc_funcs[pipe]->crtc_close)
-			priv->crtc_funcs[pipe]->crtc_close(crtc);
-	}
+	if (drm)
+		drm_atomic_helper_shutdown(drm);
 }
 
 static const struct of_device_id rockchip_drm_dt_ids[] = {
@@ -1985,7 +2144,59 @@ static struct platform_driver rockchip_drm_platform_driver = {
 	},
 };
 
-module_platform_driver(rockchip_drm_platform_driver);
+#define ADD_ROCKCHIP_SUB_DRIVER(drv, cond) { \
+	if (IS_ENABLED(cond) && \
+	    !WARN_ON(num_rockchip_sub_drivers >= MAX_ROCKCHIP_SUB_DRIVERS)) \
+		rockchip_sub_drivers[num_rockchip_sub_drivers++] = &drv; \
+}
+
+static int __init rockchip_drm_init(void)
+{
+	int ret;
+
+	num_rockchip_sub_drivers = 0;
+	ADD_ROCKCHIP_SUB_DRIVER(vop_platform_driver, CONFIG_DRM_ROCKCHIP);
+	ADD_ROCKCHIP_SUB_DRIVER(rockchip_lvds_driver,
+				CONFIG_ROCKCHIP_LVDS);
+	ADD_ROCKCHIP_SUB_DRIVER(rockchip_dp_driver,
+				CONFIG_ROCKCHIP_ANALOGIX_DP);
+	ADD_ROCKCHIP_SUB_DRIVER(cdn_dp_driver, CONFIG_ROCKCHIP_CDN_DP);
+	ADD_ROCKCHIP_SUB_DRIVER(dw_hdmi_rockchip_pltfm_driver,
+				CONFIG_ROCKCHIP_DW_HDMI);
+	ADD_ROCKCHIP_SUB_DRIVER(dw_mipi_dsi_driver,
+				CONFIG_ROCKCHIP_DW_MIPI_DSI);
+	ADD_ROCKCHIP_SUB_DRIVER(inno_hdmi_driver, CONFIG_ROCKCHIP_INNO_HDMI);
+	ADD_ROCKCHIP_SUB_DRIVER(rockchip_tve_driver,
+				CONFIG_ROCKCHIP_DRM_TVE);
+	ADD_ROCKCHIP_SUB_DRIVER(rockchip_rgb_driver, CONFIG_ROCKCHIP_RGB);
+
+	ret = platform_register_drivers(rockchip_sub_drivers,
+					num_rockchip_sub_drivers);
+	if (ret)
+		return ret;
+
+	ret = platform_driver_register(&rockchip_drm_platform_driver);
+	if (ret)
+		goto err_unreg_drivers;
+
+	return 0;
+
+err_unreg_drivers:
+	platform_unregister_drivers(rockchip_sub_drivers,
+				    num_rockchip_sub_drivers);
+	return ret;
+}
+
+static void __exit rockchip_drm_fini(void)
+{
+	platform_driver_unregister(&rockchip_drm_platform_driver);
+
+	platform_unregister_drivers(rockchip_sub_drivers,
+				    num_rockchip_sub_drivers);
+}
+
+module_init(rockchip_drm_init);
+module_exit(rockchip_drm_fini);
 
 MODULE_AUTHOR("Mark Yao <mark.yao@rock-chips.com>");
 MODULE_DESCRIPTION("ROCKCHIP DRM Driver");

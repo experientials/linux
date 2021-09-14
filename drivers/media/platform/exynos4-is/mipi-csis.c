@@ -29,7 +29,7 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/videodev2.h>
-#include <media/exynos-fimc.h>
+#include <media/drv-intf/exynos-fimc.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
@@ -189,7 +189,7 @@ struct csis_drvdata {
  * @irq: requested s5p-mipi-csis irq number
  * @interrupt_mask: interrupt mask of the all used interrupts
  * @flags: the state variable for power and streaming control
- * @clock_frequency: device bus clock frequency
+ * @clk_frequency: device bus clock frequency
  * @hs_settle: HS-RX settle time
  * @num_lanes: number of MIPI-CSI data lanes used
  * @max_num_lanes: maximum number of MIPI-CSI data lanes supported
@@ -649,40 +649,23 @@ static int s5pcsis_log_status(struct v4l2_subdev *sd)
 	return 0;
 }
 
-static int s5pcsis_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
-{
-	struct v4l2_mbus_framefmt *format = v4l2_subdev_get_try_format(sd, fh->pad, 0);
-
-	format->colorspace = V4L2_COLORSPACE_JPEG;
-	format->code = s5pcsis_formats[0].code;
-	format->width = S5PCSIS_DEF_PIX_WIDTH;
-	format->height = S5PCSIS_DEF_PIX_HEIGHT;
-	format->field = V4L2_FIELD_NONE;
-
-	return 0;
-}
-
-static const struct v4l2_subdev_internal_ops s5pcsis_sd_internal_ops = {
-	.open = s5pcsis_open,
-};
-
-static struct v4l2_subdev_core_ops s5pcsis_core_ops = {
+static const struct v4l2_subdev_core_ops s5pcsis_core_ops = {
 	.s_power = s5pcsis_s_power,
 	.log_status = s5pcsis_log_status,
 };
 
-static struct v4l2_subdev_pad_ops s5pcsis_pad_ops = {
+static const struct v4l2_subdev_pad_ops s5pcsis_pad_ops = {
 	.enum_mbus_code = s5pcsis_enum_mbus_code,
 	.get_fmt = s5pcsis_get_fmt,
 	.set_fmt = s5pcsis_set_fmt,
 };
 
-static struct v4l2_subdev_video_ops s5pcsis_video_ops = {
+static const struct v4l2_subdev_video_ops s5pcsis_video_ops = {
 	.s_rx_buffer = s5pcsis_s_rx_buffer,
 	.s_stream = s5pcsis_s_stream,
 };
 
-static struct v4l2_subdev_ops s5pcsis_subdev_ops = {
+static const struct v4l2_subdev_ops s5pcsis_subdev_ops = {
 	.core = &s5pcsis_core_ops,
 	.pad = &s5pcsis_pad_ops,
 	.video = &s5pcsis_video_ops,
@@ -747,8 +730,8 @@ static int s5pcsis_parse_dt(struct platform_device *pdev,
 
 	node = of_graph_get_next_endpoint(node, NULL);
 	if (!node) {
-		dev_err(&pdev->dev, "No port node at %s\n",
-				pdev->dev.of_node->full_name);
+		dev_err(&pdev->dev, "No port node at %pOF\n",
+				pdev->dev.of_node);
 		return -EINVAL;
 	}
 	/* Get port node and validate MIPI-CSI channel id. */
@@ -757,8 +740,10 @@ static int s5pcsis_parse_dt(struct platform_device *pdev,
 		goto err;
 
 	state->index = endpoint.base.port - FIMC_INPUT_MIPI_CSI2_0;
-	if (state->index >= CSIS_MAX_ENTITIES)
-		return -ENXIO;
+	if (state->index >= CSIS_MAX_ENTITIES) {
+		ret = -ENXIO;
+		goto err;
+	}
 
 	/* Get MIPI CSI-2 bus configration from the endpoint node. */
 	of_property_read_u32(node, "samsung,csis-hs-settle",
@@ -868,10 +853,11 @@ static int s5pcsis_probe(struct platform_device *pdev)
 	state->format.width = S5PCSIS_DEF_PIX_WIDTH;
 	state->format.height = S5PCSIS_DEF_PIX_HEIGHT;
 
+	state->sd.entity.function = MEDIA_ENT_F_IO_V4L;
 	state->pads[CSIS_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 	state->pads[CSIS_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_init(&state->sd.entity,
-				CSIS_PADS_NUM, state->pads, 0);
+	ret = media_entity_pads_init(&state->sd.entity,
+				CSIS_PADS_NUM, state->pads);
 	if (ret < 0)
 		goto e_clkdis;
 
@@ -905,8 +891,7 @@ e_clkput:
 
 static int s5pcsis_pm_suspend(struct device *dev, bool runtime)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct v4l2_subdev *sd = platform_get_drvdata(pdev);
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
 	struct csis_state *state = sd_to_csis_state(sd);
 	int ret = 0;
 
@@ -935,8 +920,7 @@ static int s5pcsis_pm_suspend(struct device *dev, bool runtime)
 
 static int s5pcsis_pm_resume(struct device *dev, bool runtime)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct v4l2_subdev *sd = platform_get_drvdata(pdev);
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
 	struct csis_state *state = sd_to_csis_state(sd);
 	int ret = 0;
 

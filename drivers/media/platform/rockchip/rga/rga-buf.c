@@ -1,5 +1,5 @@
 /*
- * Copyright (C) Fuzhou Rockchip Electronics Co.Ltd
+ * Copyright (C) 2017 Fuzhou Rockchip Electronics Co.Ltd
  * Author: Jacob Chen <jacob-chen@iotwrt.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -24,23 +24,21 @@
 #include "rga.h"
 
 static int
-rga_queue_setup(struct vb2_queue *vq, const void *parg,
+rga_queue_setup(struct vb2_queue *vq,
 		unsigned int *nbuffers, unsigned int *nplanes,
-		unsigned int sizes[], void *alloc_devs[])
+		unsigned int sizes[], struct device *alloc_devs[])
 {
 	struct rga_ctx *ctx = vb2_get_drv_priv(vq);
-	struct rockchip_rga *rga = ctx->rga;
 	struct rga_frame *f = rga_get_frame(ctx, vq->type);
 
 	if (IS_ERR(f))
 		return PTR_ERR(f);
 
+	if (*nplanes)
+		return sizes[0] < f->size ? -EINVAL : 0;
+
 	sizes[0] = f->size;
 	*nplanes = 1;
-
-	if (*nbuffers == 0)
-		*nbuffers = 1;
-	alloc_devs[0] = rga->alloc_ctx;
 
 	return 0;
 }
@@ -66,20 +64,10 @@ static void rga_buf_queue(struct vb2_buffer *vb)
 	v4l2_m2m_buf_queue(ctx->fh.m2m_ctx, vbuf);
 }
 
-static int rga_buf_start_streaming(struct vb2_queue *q, unsigned int count)
+static void rga_buf_return_buffers(struct vb2_queue *q,
+				   enum vb2_buffer_state state)
 {
 	struct rga_ctx *ctx = vb2_get_drv_priv(q);
-	struct rockchip_rga *rga = ctx->rga;
-	int ret;
-
-	ret = pm_runtime_get_sync(rga->dev);
-	return ret > 0 ? 0 : ret;
-}
-
-static void rga_buf_stop_streaming(struct vb2_queue *q)
-{
-	struct rga_ctx *ctx = vb2_get_drv_priv(q);
-	struct rockchip_rga *rga = ctx->rga;
 	struct vb2_v4l2_buffer *vbuf;
 
 	for (;;) {
@@ -89,9 +77,31 @@ static void rga_buf_stop_streaming(struct vb2_queue *q)
 			vbuf = v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
 		if (!vbuf)
 			break;
-		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
+		v4l2_m2m_buf_done(vbuf, state);
+	}
+}
+
+static int rga_buf_start_streaming(struct vb2_queue *q, unsigned int count)
+{
+	struct rga_ctx *ctx = vb2_get_drv_priv(q);
+	struct rockchip_rga *rga = ctx->rga;
+	int ret;
+
+	ret = pm_runtime_get_sync(rga->dev);
+	if (ret < 0) {
+		rga_buf_return_buffers(q, VB2_BUF_STATE_QUEUED);
+		return ret;
 	}
 
+	return 0;
+}
+
+static void rga_buf_stop_streaming(struct vb2_queue *q)
+{
+	struct rga_ctx *ctx = vb2_get_drv_priv(q);
+	struct rockchip_rga *rga = ctx->rga;
+
+	rga_buf_return_buffers(q, VB2_BUF_STATE_ERROR);
 	pm_runtime_put(rga->dev);
 }
 
@@ -131,7 +141,8 @@ void rga_buf_map(struct vb2_buffer *vb)
 		address = sg_phys(sgl);
 
 		for (p = 0; p < len; p++) {
-			dma_addr_t phys = address + (p << PAGE_SHIFT);
+			dma_addr_t phys = address +
+					  ((dma_addr_t)p << PAGE_SHIFT);
 
 			pages[mapped_size + p] = phys;
 		}

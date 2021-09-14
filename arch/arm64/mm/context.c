@@ -24,6 +24,7 @@
 
 #include <asm/cpufeature.h>
 #include <asm/mmu_context.h>
+#include <asm/smp.h>
 #include <asm/tlbflush.h>
 
 static u32 asid_bits;
@@ -49,6 +50,44 @@ static cpumask_t tlb_flush_pending;
 #define idx2asid(idx)		asid2idx(idx)
 #endif
 
+/* Get the ASIDBits supported by the current CPU */
+static u32 get_cpu_asid_bits(void)
+{
+	u32 asid;
+	int fld = cpuid_feature_extract_unsigned_field(read_cpuid(ID_AA64MMFR0_EL1),
+						ID_AA64MMFR0_ASID_SHIFT);
+
+	switch (fld) {
+	default:
+		pr_warn("CPU%d: Unknown ASID size (%d); assuming 8-bit\n",
+					smp_processor_id(),  fld);
+		/* Fallthrough */
+	case 0:
+		asid = 8;
+		break;
+	case 2:
+		asid = 16;
+	}
+
+	return asid;
+}
+
+/* Check if the current cpu's ASIDBits is compatible with asid_bits */
+void verify_cpu_asid_bits(void)
+{
+	u32 asid = get_cpu_asid_bits();
+
+	if (asid < asid_bits) {
+		/*
+		 * We cannot decrease the ASID size at runtime, so panic if we support
+		 * fewer ASID bits than the boot CPU.
+		 */
+		pr_crit("CPU%d: smaller ASID size(%u) than boot CPU (%u)\n",
+				smp_processor_id(), asid, asid_bits);
+		cpu_panic_kernel();
+	}
+}
+
 static void flush_context(unsigned int cpu)
 {
 	int i;
@@ -56,12 +95,6 @@ static void flush_context(unsigned int cpu)
 
 	/* Update the list of reserved ASIDs and the ASID bitmap. */
 	bitmap_clear(asid_map, 0, NUM_USER_ASIDS);
-
-	/*
-	 * Ensure the generation bump is observed before we xchg the
-	 * active_asids.
-	 */
-	smp_wmb();
 
 	for_each_possible_cpu(i) {
 		asid = atomic64_xchg_relaxed(&per_cpu(active_asids, i), 0);
@@ -78,11 +111,11 @@ static void flush_context(unsigned int cpu)
 		per_cpu(reserved_asids, i) = asid;
 	}
 
-	/* Queue a TLB invalidate and flush the I-cache if necessary. */
+	/*
+	 * Queue a TLB invalidation for each CPU to perform on next
+	 * context-switch
+	 */
 	cpumask_setall(&tlb_flush_pending);
-
-	if (icache_is_aivivt())
-		__flush_icache_all();
 }
 
 static bool check_update_reserved_asid(u64 asid, u64 newasid)
@@ -149,7 +182,7 @@ static u64 new_context(struct mm_struct *mm, unsigned int cpu)
 						 &asid_generation);
 	flush_context(cpu);
 
-	/* We have at least 1 ASID per CPU, so this will always succeed */
+	/* We have more ASIDs than CPUs, so this will always succeed */
 	asid = find_next_zero_bit(asid_map, NUM_USER_ASIDS, 1);
 
 set_asid:
@@ -161,19 +194,29 @@ set_asid:
 void check_and_switch_context(struct mm_struct *mm, unsigned int cpu)
 {
 	unsigned long flags;
-	u64 asid;
+	u64 asid, old_active_asid;
 
 	asid = atomic64_read(&mm->context.id);
 
 	/*
-	 * The memory ordering here is subtle. We rely on the control
-	 * dependency between the generation read and the update of
-	 * active_asids to ensure that we are synchronised with a
-	 * parallel rollover (i.e. this pairs with the smp_wmb() in
-	 * flush_context).
+	 * The memory ordering here is subtle.
+	 * If our active_asids is non-zero and the ASID matches the current
+	 * generation, then we update the active_asids entry with a relaxed
+	 * cmpxchg. Racing with a concurrent rollover means that either:
+	 *
+	 * - We get a zero back from the cmpxchg and end up waiting on the
+	 *   lock. Taking the lock synchronises with the rollover and so
+	 *   we are forced to see the updated generation.
+	 *
+	 * - We get a valid ASID back from the cmpxchg, which means the
+	 *   relaxed xchg in flush_context will treat us as reserved
+	 *   because atomic RmWs are totally ordered for a given location.
 	 */
-	if (!((asid ^ atomic64_read(&asid_generation)) >> asid_bits)
-	    && atomic64_xchg_relaxed(&per_cpu(active_asids, cpu), asid))
+	old_active_asid = atomic64_read(&per_cpu(active_asids, cpu));
+	if (old_active_asid &&
+	    !((asid ^ atomic64_read(&asid_generation)) >> asid_bits) &&
+	    atomic64_cmpxchg_relaxed(&per_cpu(active_asids, cpu),
+				     old_active_asid, asid))
 		goto switch_mm_fastpath;
 
 	raw_spin_lock_irqsave(&cpu_asid_lock, flags);
@@ -191,6 +234,9 @@ void check_and_switch_context(struct mm_struct *mm, unsigned int cpu)
 	raw_spin_unlock_irqrestore(&cpu_asid_lock, flags);
 
 switch_mm_fastpath:
+
+	arm64_apply_bp_hardening();
+
 	/*
 	 * Defer TTBR0_EL1 setting for user threads to uaccess_enable() when
 	 * emulating PAN.
@@ -210,23 +256,14 @@ asmlinkage void post_ttbr_update_workaround(void)
 
 static int asids_init(void)
 {
-	int fld = cpuid_feature_extract_field(read_cpuid(SYS_ID_AA64MMFR0_EL1), 4);
-
-	switch (fld) {
-	default:
-		pr_warn("Unknown ASID size (%d); assuming 8-bit\n", fld);
-		/* Fallthrough */
-	case 0:
-		asid_bits = 8;
-		break;
-	case 2:
-		asid_bits = 16;
-	}
-
-	/* If we end up with more CPUs than ASIDs, expect things to crash */
-	WARN_ON(NUM_USER_ASIDS < num_possible_cpus());
+	asid_bits = get_cpu_asid_bits();
+	/*
+	 * Expect allocation after rollover to fail if we don't have at least
+	 * one more ASID than CPUs. ASID #0 is reserved for init_mm.
+	 */
+	WARN_ON(NUM_USER_ASIDS - 1 <= num_possible_cpus());
 	atomic64_set(&asid_generation, ASID_FIRST_VERSION);
-	asid_map = kzalloc(BITS_TO_LONGS(NUM_USER_ASIDS) * sizeof(*asid_map),
+	asid_map = kcalloc(BITS_TO_LONGS(NUM_USER_ASIDS), sizeof(*asid_map),
 			   GFP_KERNEL);
 	if (!asid_map)
 		panic("Failed to allocate bitmap for %lu ASIDs\n",

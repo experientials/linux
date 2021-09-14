@@ -92,10 +92,12 @@
 	};
 
 	xin32k: xin32k {
-		compatible = "fixed-clock";
+		status = "okay";
+		compatible = "pwm-clock";
+		#clock-cells = <0>;
 		clock-frequency = <32768>;
 		clock-output-names = "xin32k";
-		#clock-cells = <0>;
+		pwms = <&pwm1 0 30518 0>; /* 1 / 30518 ns = 32.7675 KHz */
 	};
 
 	sdio_pwrseq: sdio-pwrseq {
@@ -862,10 +864,6 @@
 	status = "okay";
 };
 
-&dwc_control_usb {
-	otg_drv_gpio = <&gpio0 RK_PA4 GPIO_ACTIVE_LOW>;
-};
-
 &lvds {
 	status = "okay";
 
@@ -913,6 +911,10 @@
 
 &uart2 {
 	status = "disabled";
+};
+
+&uart4 {
+	status = "okay";
 };
 
 &pinctrl {

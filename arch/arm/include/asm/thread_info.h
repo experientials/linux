@@ -47,13 +47,6 @@ struct cpu_context_save {
  * __switch_to() assumes cpu_context follows immediately after cpu_domain.
  */
 struct thread_info {
-#ifdef CONFIG_ARCH_ROCKCHIP
-	/*
-	 * FIXME: prevent unknown write of cpu
-	 * we reservee 64 bytes to make sure cacheline aligned
-	 */
-	__u8			reserved[64];
-#endif
 	unsigned long		flags;		/* low level flags */
 	int			preempt_count;	/* 0 => preemptable, <0 => bug */
 	mm_segment_t		addr_limit;	/* address limit */
@@ -81,9 +74,6 @@ struct thread_info {
 	.preempt_count	= INIT_PREEMPT_COUNT,				\
 	.addr_limit	= KERNEL_DS,					\
 }
-
-#define init_thread_info	(init_thread_union.thread_info)
-#define init_stack		(init_thread_union.stack)
 
 /*
  * how to get the current stack pointer in C
@@ -131,8 +121,8 @@ extern void vfp_flush_hwstate(struct thread_info *);
 struct user_vfp;
 struct user_vfp_exc;
 
-extern int vfp_preserve_user_clear_hwstate(struct user_vfp __user *,
-					   struct user_vfp_exc __user *);
+extern int vfp_preserve_user_clear_hwstate(struct user_vfp *,
+					   struct user_vfp_exc *);
 extern int vfp_restore_user_hwstate(struct user_vfp *,
 				    struct user_vfp_exc *);
 #endif

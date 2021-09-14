@@ -69,6 +69,7 @@ static int __maybe_unused rk_spdif_runtime_suspend(struct device *dev)
 {
 	struct rk_spdif_dev *spdif = dev_get_drvdata(dev);
 
+	regcache_cache_only(spdif->regmap, true);
 	clk_disable_unprepare(spdif->mclk);
 	clk_disable_unprepare(spdif->hclk);
 
@@ -92,7 +93,16 @@ static int __maybe_unused rk_spdif_runtime_resume(struct device *dev)
 		return ret;
 	}
 
-	return 0;
+	regcache_cache_only(spdif->regmap, false);
+	regcache_mark_dirty(spdif->regmap);
+
+	ret = regcache_sync(spdif->regmap);
+	if (ret) {
+		clk_disable_unprepare(spdif->mclk);
+		clk_disable_unprepare(spdif->hclk);
+	}
+
+	return ret;
 }
 
 static int rk_spdif_hw_params(struct snd_pcm_substream *substream,
@@ -101,14 +111,11 @@ static int rk_spdif_hw_params(struct snd_pcm_substream *substream,
 {
 	struct rk_spdif_dev *spdif = snd_soc_dai_get_drvdata(dai);
 	unsigned int val = SPDIF_CFGR_HALFWORD_ENABLE;
-	int mclk;
+	int srate, mclk;
 	int ret;
 
-	/* bmc = 128fs */
-	mclk = 128 * params_rate(params);
-	ret = clk_set_rate(spdif->mclk, mclk);
-	if (ret)
-		return ret;
+	srate = params_rate(params);
+	mclk = srate * 128;
 
 	switch (params_format(params)) {
 	case SNDRV_PCM_FORMAT_S16_LE:
@@ -124,7 +131,14 @@ static int rk_spdif_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
-	val |= SPDIF_CFGR_CLK_DIV(0);
+	/* Set clock and calculate divider */
+	ret = clk_set_rate(spdif->mclk, mclk);
+	if (ret != 0) {
+		dev_err(spdif->dev, "Failed to set module clock rate: %d\n",
+			ret);
+		return ret;
+	}
+
 	ret = regmap_update_bits(spdif->regmap, SPDIF_CFGR,
 				 SPDIF_CFGR_CLK_DIV_MASK |
 				 SPDIF_CFGR_HALFWORD_ENABLE |
@@ -297,44 +311,22 @@ static int rk_spdif_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	spdif->hclk = devm_clk_get(&pdev->dev, "hclk");
-	if (IS_ERR(spdif->hclk)) {
-		dev_err(&pdev->dev, "Can't retrieve rk_spdif bus clock\n");
+	if (IS_ERR(spdif->hclk))
 		return PTR_ERR(spdif->hclk);
-	}
-	ret = clk_prepare_enable(spdif->hclk);
-	if (ret) {
-		dev_err(spdif->dev, "hclock enable failed %d\n", ret);
-		return ret;
-	}
 
 	spdif->mclk = devm_clk_get(&pdev->dev, "mclk");
-	if (IS_ERR(spdif->mclk)) {
-		dev_err(&pdev->dev, "Can't retrieve rk_spdif master clock\n");
-		ret = PTR_ERR(spdif->mclk);
-		goto err_disable_hclk;
-	}
-
-	ret = clk_prepare_enable(spdif->mclk);
-	if (ret) {
-		dev_err(spdif->dev, "clock enable failed %d\n", ret);
-		goto err_disable_clocks;
-	}
+	if (IS_ERR(spdif->mclk))
+		return PTR_ERR(spdif->mclk);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	regs = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(regs)) {
-		ret = PTR_ERR(regs);
-		goto err_disable_clocks;
-	}
+	if (IS_ERR(regs))
+		return PTR_ERR(regs);
 
 	spdif->regmap = devm_regmap_init_mmio_clk(&pdev->dev, "hclk", regs,
 						  &rk_spdif_regmap_config);
-	if (IS_ERR(spdif->regmap)) {
-		dev_err(&pdev->dev,
-			"Failed to initialise managed register map\n");
-		ret = PTR_ERR(spdif->regmap);
-		goto err_disable_clocks;
-	}
+	if (IS_ERR(spdif->regmap))
+		return PTR_ERR(spdif->regmap);
 
 	spdif->playback_dma_data.addr = res->start + SPDIF_SMPDR;
 	spdif->playback_dma_data.addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
@@ -343,79 +335,50 @@ static int rk_spdif_probe(struct platform_device *pdev)
 	spdif->dev = &pdev->dev;
 	dev_set_drvdata(&pdev->dev, spdif);
 
-	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
-	pm_request_idle(&pdev->dev);
+	if (!pm_runtime_enabled(&pdev->dev)) {
+		ret = rk_spdif_runtime_resume(&pdev->dev);
+		if (ret)
+			goto err_pm_runtime;
+	}
 
 	ret = devm_snd_soc_register_component(&pdev->dev,
 					      &rk_spdif_component,
 					      &rk_spdif_dai, 1);
 	if (ret) {
 		dev_err(&pdev->dev, "Could not register DAI\n");
-		goto err_pm_runtime;
+		goto err_pm_suspend;
 	}
 
 	ret = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
 	if (ret) {
 		dev_err(&pdev->dev, "Could not register PCM\n");
-		goto err_pm_runtime;
+		goto err_pm_suspend;
 	}
 
 	return 0;
 
+err_pm_suspend:
+	if (!pm_runtime_status_suspended(&pdev->dev))
+		rk_spdif_runtime_suspend(&pdev->dev);
 err_pm_runtime:
 	pm_runtime_disable(&pdev->dev);
-err_disable_clocks:
-	clk_disable_unprepare(spdif->mclk);
-err_disable_hclk:
-	clk_disable_unprepare(spdif->hclk);
 
 	return ret;
 }
 
 static int rk_spdif_remove(struct platform_device *pdev)
 {
-	struct rk_spdif_dev *spdif = dev_get_drvdata(&pdev->dev);
-
 	pm_runtime_disable(&pdev->dev);
 	if (!pm_runtime_status_suspended(&pdev->dev))
 		rk_spdif_runtime_suspend(&pdev->dev);
 
-	clk_disable_unprepare(spdif->mclk);
-	clk_disable_unprepare(spdif->hclk);
-
 	return 0;
 }
-
-#ifdef CONFIG_PM_SLEEP
-static int rockchip_spdif_suspend(struct device *dev)
-{
-	struct rk_spdif_dev *spdif = dev_get_drvdata(dev);
-
-	regcache_mark_dirty(spdif->regmap);
-
-	return 0;
-}
-
-static int rockchip_spdif_resume(struct device *dev)
-{
-	struct rk_spdif_dev *spdif = dev_get_drvdata(dev);
-	int ret;
-
-	ret = pm_runtime_get_sync(dev);
-	if (ret < 0)
-		return ret;
-	ret = regcache_sync(spdif->regmap);
-	pm_runtime_put(dev);
-
-	return ret;
-}
-#endif
 
 static const struct dev_pm_ops rk_spdif_pm_ops = {
 	SET_RUNTIME_PM_OPS(rk_spdif_runtime_suspend, rk_spdif_runtime_resume,
 			   NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(rockchip_spdif_suspend, rockchip_spdif_resume)
 };
 
 static struct platform_driver rk_spdif_driver = {

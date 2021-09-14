@@ -6,6 +6,7 @@ Required properties:
    - "rockchip,px30-i2s-tdm": for px30
    - "rockchip,rk1808-i2s-tdm": for rk1808
    - "rockchip,rk3308-i2s-tdm": for rk3308
+   - "rockchip,rv1126-i2s-tdm": for rv1126
 - reg: physical base address of the controller and length of memory mapped
   region.
 - interrupts: should contain the I2S interrupt.
@@ -20,8 +21,6 @@ Required properties:
 - rockchip,cru: cru phandle.
 - rockchip,grf: the phandle of the syscon node for GRF register.
 - rockchip,mclk-calibrate: enable mclk source calibration.
-- rockchip,io-multiplex: This is a boolean property. If present, the driver will
-  handle the IO multiplex during playback and capture.
 - rockchip,clk-trcm: tx and rx lrck/bclk common use.
    - 0: both tx_lrck/bclk and rx_lrck/bclk are used
    - 1: only tx_lrck/bclk is used
@@ -63,6 +62,9 @@ Optional properties:
   * sdo_3 --> data_3
   You need to add the property for i2s node on dts:
   - rockchip,i2s-tx-route = <2 1 0 3>;
+
+- rockchip,tdm-fsync-half-frame: This is a boolean value, if present, use half
+  frame fsync.
 
 Example for rk3308 I2S/TDM controller:
 

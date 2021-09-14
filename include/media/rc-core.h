@@ -291,20 +291,6 @@ int devm_rc_register_device(struct device *parent, struct rc_dev *dev);
  */
 void rc_unregister_device(struct rc_dev *dev);
 
-/**
- * rc_open - Opens a RC device
- *
- * @rdev: pointer to struct rc_dev.
- */
-int rc_open(struct rc_dev *rdev);
-
-/**
- * rc_open - Closes a RC device
- *
- * @rdev: pointer to struct rc_dev.
- */
-void rc_close(struct rc_dev *rdev);
-
 void rc_repeat(struct rc_dev *dev);
 void rc_keydown(struct rc_dev *dev, enum rc_proto protocol, u32 scancode,
 		u8 toggle);
@@ -331,6 +317,13 @@ struct ir_raw_event {
 	unsigned                carrier_report:1;
 };
 
+#define DEFINE_IR_RAW_EVENT(event) struct ir_raw_event event = {}
+
+static inline void init_ir_raw_event(struct ir_raw_event *ev)
+{
+	memset(ev, 0, sizeof(*ev));
+}
+
 #define IR_DEFAULT_TIMEOUT	MS_TO_NS(125)
 #define IR_MAX_DURATION         500000000	/* 500 ms */
 #define US_TO_NS(usec)		((usec) * 1000)
@@ -351,7 +344,9 @@ int ir_raw_encode_carrier(enum rc_proto protocol);
 
 static inline void ir_raw_event_reset(struct rc_dev *dev)
 {
-	ir_raw_event_store(dev, &((struct ir_raw_event) { .reset = true }));
+	struct ir_raw_event ev = { .reset = true };
+
+	ir_raw_event_store(dev, &ev);
 	dev->idle = true;
 	ir_raw_event_handle(dev);
 }

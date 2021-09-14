@@ -93,26 +93,19 @@ ENTRY(arm_copy_from_user)
 #ifdef CONFIG_CPU_SPECTRE
 	get_thread_info r3
 	ldr	r3, [r3, #TI_ADDR_LIMIT]
-	adds	ip, r1, r2	@ ip=addr+size
-	sub	r3, r3, #1	@ addr_limit - 1
-	cmpcc	ip, r3		@ if (addr+size > addr_limit - 1)
-	movcs	r1, #0		@ addr = NULL
-	csdb
+	uaccess_mask_range_ptr r1, r2, r3, ip
 #endif
 
 #include "copy_template.S"
 
 ENDPROC(arm_copy_from_user)
 
-	.pushsection .fixup,"ax"
+	.pushsection .text.fixup,"ax"
 	.align 0
 	copy_abort_preamble
-	ldmfd	sp!, {r1, r2}
-	sub	r3, r0, r1
-	rsb	r1, r3, r2
-	str	r1, [sp]
-	bl	__memzero
-	ldr	r0, [sp], #4
+	ldmfd	sp!, {r1, r2, r3}
+	sub	r0, r0, r1
+	rsb	r0, r0, r2
 	copy_abort_end
 	.popsection
 

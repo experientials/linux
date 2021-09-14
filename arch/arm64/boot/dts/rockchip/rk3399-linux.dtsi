@@ -47,7 +47,7 @@
 	compatible = "rockchip,linux", "rockchip,rk3399";
 
 	chosen {
-		bootargs = "earlycon=uart8250,mmio32,0xff1a0000 swiotlb=1 console=ttyFIQ0 ro root=PARTLABEL=rootfs rootfstype=ext4 rootwait overlayroot=device:dev=PARTLABEL=userdata,fstype=ext4,mkfs=1 coherent_pool=1m systemd.gpt_auto=0 cgroup_enable=memory swapaccount=1";
+		bootargs = "earlycon=uart8250,mmio32,0xff1a0000 swiotlb=1 console=ttyFIQ0 rw root=PARTUUID=614e0000-0000 rootfstype=ext4 rootwait coherent_pool=1m";
 	};
 
 	reserved-memory {
@@ -60,7 +60,7 @@
 			reg = <0x0 0x0 0x0 0x0>;
 		};
 
-		ramoops_mem: ramoops@110000 {
+		ramoops_mem: region@110000 {
 			reg = <0x0 0x110000 0x0 0xf0000>;
 			reg-names = "ramoops_mem";
 		};
@@ -84,18 +84,6 @@
 		rockchip,baudrate = <1500000>;  /* Only 115200 and 1500000 */
 		pinctrl-names = "default";
 		pinctrl-0 = <&uart2c_xfer>;
-	};
-
-	rga: rga@ff680000 {
-		compatible = "rockchip,rga2";
-		dev_mode = <1>;
-		reg = <0x0 0xff680000 0x0 0x1000>;
-		interrupts = <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH 0>;
-		clocks = <&cru ACLK_RGA>, <&cru HCLK_RGA>, <&cru SCLK_RGA_CORE>;
-		clock-names = "aclk_rga", "hclk_rga", "clk_rga";
-		power-domains = <&power RK3399_PD_RGA>;
-		dma-coherent;
-		status = "okay";
 	};
 
 	cif_isp0: cif_isp@ff910000 {
@@ -160,13 +148,8 @@
 		clocks = <&cru ACLK_RGA>, <&cru HCLK_RGA>, <&cru SCLK_RGA_CORE>;
 		clock-names = "aclk_rga", "hclk_rga", "clk_rga";
 		power-domains = <&power RK3399_PD_RGA>;
-		dma-coherent;
 		status = "okay";
 	};
-};
-
-&rng {
-	status = "okay";
 };
 
 &display_subsystem {
@@ -205,6 +188,23 @@
 	};
 };
 
+&edp {
+	/delete-property/pinctrl-names;
+	/delete-property/pinctrl-0;
+};
+
+&iep {
+	status = "okay";
+};
+
+&iep_mmu {
+	status = "okay";
+};
+
+&mpp_srv {
+	status = "okay";
+};
+
 &pvtm {
 	status = "okay";
 };
@@ -215,14 +215,24 @@
 	//allocator = <0>;
 };
 
-&uart2 {
-	status = "disabled";
+&rkvdec_mmu {
+	status = "okay";
 };
 
-&vpu {
+&vdpu {
 	status = "okay";
-	/* 0 means ion, 1 means drm */
-	//allocator = <0>;
+};
+
+&vepu {
+	status = "okay";
+};
+
+&vpu_mmu {
+	status = "okay";
+};
+
+&uart2 {
+	status = "disabled";
 };
 
 &pinctrl {
@@ -287,7 +297,6 @@
 				<4 27 RK_FUNC_GPIO &pcfg_pull_none>,
 				<2 11 RK_FUNC_3 &pcfg_pull_none>;
 		};
-
 		cam0_sleep_pins: cam0-sleep-pins {
 			rockchip,pins =
 				<4 27 RK_FUNC_3 &pcfg_pull_none>,

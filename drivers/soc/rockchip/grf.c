@@ -10,6 +10,7 @@
 
 #include <linux/err.h>
 #include <linux/mfd/syscon.h>
+#include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
@@ -29,7 +30,6 @@ struct rockchip_grf_info {
 };
 
 #define PX30_GRF_SOC_CON5		0x414
-#define RK3328_GRF_SOC_CON10    0x428
 
 static const struct rockchip_grf_value px30_defaults[] __initconst = {
 	/*
@@ -74,7 +74,6 @@ static const struct rockchip_grf_info rk3128_grf __initconst = {
 
 static const struct rockchip_grf_value rk3228_defaults[] __initconst = {
 	{ "jtag switching", RK3228_GRF_SOC_CON6, HIWORD_UPDATE(0, 1, 8) },
-	{ "gpio mute",      RK3328_GRF_SOC_CON10, HIWORD_UPDATE(0, 1, 1) },
 };
 
 static const struct rockchip_grf_info rk3228_grf __initconst = {
@@ -83,9 +82,11 @@ static const struct rockchip_grf_info rk3228_grf __initconst = {
 };
 
 #define RK3288_GRF_SOC_CON0		0x244
+#define RK3288_GRF_SOC_CON2		0x24c
 
 static const struct rockchip_grf_value rk3288_defaults[] __initconst = {
 	{ "jtag switching", RK3288_GRF_SOC_CON0, HIWORD_UPDATE(0, 1, 12) },
+	{ "pwm select", RK3288_GRF_SOC_CON2, HIWORD_UPDATE(1, 1, 0) },
 };
 
 static const struct rockchip_grf_info rk3288_grf __initconst = {
@@ -105,11 +106,9 @@ static const struct rockchip_grf_info rk3328_grf __initconst = {
 };
 
 #define RK3308_GRF_SOC_CON3		0x30c
-#define RK3308_GRF_SOC_CON13		0x608
 
 static const struct rockchip_grf_value rk3308_defaults[] __initconst = {
 	{ "uart dma mask", RK3308_GRF_SOC_CON3, HIWORD_UPDATE(0, 0x1f, 10) },
-	{ "uart2 auto switching", RK3308_GRF_SOC_CON13, HIWORD_UPDATE(0, 0x1, 12) },
 };
 
 static const struct rockchip_grf_info rk3308_grf __initconst = {
@@ -137,6 +136,32 @@ static const struct rockchip_grf_value rk3399_defaults[] __initconst = {
 static const struct rockchip_grf_info rk3399_grf __initconst = {
 	.values = rk3399_defaults,
 	.num_values = ARRAY_SIZE(rk3399_defaults),
+};
+
+#define DELAY_ONE_SECOND		0x16E3600
+
+#define RV1126_GRF1_SDDETFLT_CON	0x10254
+#define RV1126_GRF1_UART2RX_LOW_CON	0x10258
+#define RV1126_GRF1_IOFUNC_CON1		0x10264
+#define RV1126_GRF1_IOFUNC_CON3		0x1026C
+#define RV1126_JTAG_GROUP0		0x0      /* mux to sdmmc*/
+#define RV1126_JTAG_GROUP1		0x1      /* mux to uart2 */
+#define FORCE_JTAG_ENABLE		0x1
+#define FORCE_JTAG_DISABLE		0x0
+
+static const struct rockchip_grf_value rv1126_defaults[] __initconst = {
+	{ "jtag group0 force", RV1126_GRF1_IOFUNC_CON3,
+		HIWORD_UPDATE(FORCE_JTAG_DISABLE, 1, 4) },
+	{ "jtag group1 force", RV1126_GRF1_IOFUNC_CON3,
+		HIWORD_UPDATE(FORCE_JTAG_DISABLE, 1, 5) },
+	{ "jtag group1 tms low delay", RV1126_GRF1_UART2RX_LOW_CON, DELAY_ONE_SECOND },
+	{ "switch to jtag groupx", RV1126_GRF1_IOFUNC_CON1, HIWORD_UPDATE(RV1126_JTAG_GROUP0, 1, 15) },
+	{ "jtag group0 switching delay", RV1126_GRF1_SDDETFLT_CON, DELAY_ONE_SECOND * 5 },
+};
+
+static const struct rockchip_grf_info rv1126_grf __initconst = {
+	.values = rv1126_defaults,
+	.num_values = ARRAY_SIZE(rv1126_defaults),
 };
 
 static const struct of_device_id rockchip_grf_dt_match[] __initconst = {
@@ -167,6 +192,9 @@ static const struct of_device_id rockchip_grf_dt_match[] __initconst = {
 	}, {
 		.compatible = "rockchip,rk3399-grf",
 		.data = (void *)&rk3399_grf,
+	}, {
+		.compatible = "rockchip,rv1126-grf",
+		.data = (void *)&rv1126_grf,
 	},
 	{ /* sentinel */ },
 };
@@ -210,3 +238,6 @@ static int __init rockchip_grf_init(void)
 	return 0;
 }
 postcore_initcall(rockchip_grf_init);
+
+MODULE_DESCRIPTION("Rockchip GRF");
+MODULE_LICENSE("GPL");

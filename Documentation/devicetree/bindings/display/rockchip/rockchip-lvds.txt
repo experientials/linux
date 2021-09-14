@@ -3,9 +3,9 @@ Rockchip SoCs LVDS interface
 
 Required properties:
 - compatible: matching the soc type, one of
-	- "rockchip,px30-lvds";
-	- "rockchip,rk3126-lvds";
-	- "rockchip,rk3288-lvds";
+	- "rockchip,px30-lvds",
+	- "rockchip,rk3126-lvds",
+	- "rockchip,rk3288-lvds",
 	- "rockchip,rk3368-lvds";
 - phys : phandle for the PHY device
 - phy-names : should be "phy"
@@ -17,21 +17,20 @@ Optional properties:
 Required nodes:
 
 The lvds has two video ports as described by
-	Documentation/devicetree/bindings/media/video-interfaces.txt.
+	Documentation/devicetree/bindings/media/video-interfaces.txt
 Their connections are modeled using the OF graph bindings specified in
 	Documentation/devicetree/bindings/graph.txt.
 
-- video port 0 for the VOP inputs
-- video port 1 for either a panel or bridge
+- video port 0 for the VOP input, the remote endpoint maybe vopb or vopl
+- video port 1 for either a panel or subsequent encoder
 
 Example:
 
 &grf {
+	status = "okay";
+
 	lvds: lvds {
 		compatible = "rockchip,rk3288-lvds";
-		pinctrl-names = "default", "sleep";
-		pinctrl-0 = <&lcdc_rgb_pins>;
-		pinctrl-1 = <&lcdc_sleep_pins>;
 		phys = <&video_phy>;
 		phy-names = "phy";
 		status = "disabled";

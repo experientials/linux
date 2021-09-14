@@ -12,11 +12,22 @@
 
 LDFLAGS_vmlinux	:=--no-undefined -X
 CPPFLAGS_vmlinux.lds = -DTEXT_OFFSET=$(TEXT_OFFSET)
-OBJCOPYFLAGS	:=-O binary -R .note -R .note.gnu.build-id -R .comment -S
 GZFLAGS		:=-9
 
-ifneq ($(CONFIG_RELOCATABLE),)
-LDFLAGS_vmlinux		+= -pie -Bsymbolic
+ifeq ($(CONFIG_RELOCATABLE), y)
+# Pass --no-apply-dynamic-relocs to restore pre-binutils-2.27 behaviour
+# for relative relocs, since this leads to better Image compression
+# with the relocation offsets always being zero.
+LDFLAGS_vmlinux		+= -shared -Bsymbolic -z notext -z norelro \
+			$(call ld-option, --no-apply-dynamic-relocs)
+endif
+
+ifeq ($(CONFIG_ARM64_ERRATUM_843419),y)
+  ifeq ($(call ld-option, --fix-cortex-a53-843419),)
+$(warning ld does not support --fix-cortex-a53-843419; kernel may be susceptible to erratum)
+  else
+LDFLAGS_vmlinux	+= --fix-cortex-a53-843419
+  endif
 endif
 
 KBUILD_DEFCONFIG := defconfig
@@ -30,34 +41,44 @@ $(warning LSE atomics not supported by binutils)
   endif
 endif
 
-ifeq ($(cc-name),clang)
-# This is a workaround for https://bugs.llvm.org/show_bug.cgi?id=30792.
-# TODO: revert when this is fixed in LLVM.
-KBUILD_CFLAGS	+= -mno-implicit-float
-else
-KBUILD_CFLAGS	+= -mgeneral-regs-only
+ifeq ($(CONFIG_ARM64), y)
+brokengasinst := $(call as-instr,1:\n.inst 0\n.rept . - 1b\n\nnop\n.endr\n,,-DCONFIG_BROKEN_GAS_INST=1)
+
+  ifneq ($(brokengasinst),)
+$(warning Detected assembler with broken .inst; disassembly will be unreliable)
+  endif
 endif
-KBUILD_CFLAGS	+= $(lseinstr)
-KBUILD_CFLAGS	+= -fno-pic
+
+KBUILD_CFLAGS	+= -mgeneral-regs-only $(lseinstr) $(brokengasinst)
 KBUILD_CFLAGS	+= -fno-asynchronous-unwind-tables
-KBUILD_CFLAGS	+= $(call cc-option, -mpc-relative-literal-loads)
-KBUILD_AFLAGS	+= $(lseinstr)
+KBUILD_CFLAGS	+= $(call cc-disable-warning, psabi)
+KBUILD_AFLAGS	+= $(lseinstr) $(brokengasinst)
+
+KBUILD_CFLAGS	+= $(call cc-option,-mabi=lp64)
+KBUILD_AFLAGS	+= $(call cc-option,-mabi=lp64)
+
+ifeq ($(CONFIG_SHADOW_CALL_STACK), y)
+KBUILD_CFLAGS	+= -ffixed-x18
+endif
 
 ifeq ($(CONFIG_CPU_BIG_ENDIAN), y)
 KBUILD_CPPFLAGS	+= -mbig-endian
+CHECKFLAGS	+= -D__AARCH64EB__
 AS		+= -EB
-LD		+= -EB
+# Prefer the baremetal ELF build target, but not all toolchains include
+# it so fall back to the standard linux version if needed.
+KBUILD_LDFLAGS	+= -EB $(call ld-option, -maarch64elfb, -maarch64linuxb)
+UTS_MACHINE	:= aarch64_be
 else
 KBUILD_CPPFLAGS	+= -mlittle-endian
+CHECKFLAGS	+= -D__AARCH64EL__
 AS		+= -EL
-LD		+= -EL
+# Same as above, prefer ELF but fall back to linux target if needed.
+KBUILD_LDFLAGS	+= -EL $(call ld-option, -maarch64elf, -maarch64linux)
+UTS_MACHINE	:= aarch64
 endif
 
 CHECKFLAGS	+= -D__aarch64__
-
-ifeq ($(CONFIG_ARM64_MODULE_CMODEL_LARGE), y)
-KBUILD_CFLAGS_MODULE	+= -mcmodel=large
-endif
 
 ifeq ($(CONFIG_ARM64_MODULE_PLTS),y)
 KBUILD_LDFLAGS_MODULE	+= -T $(srctree)/arch/arm64/kernel/module.lds
@@ -75,16 +96,23 @@ else
 TEXT_OFFSET := 0x00080000
 endif
 
-ifeq ($(cc-name),clang)
-KBUILD_CFLAGS += $(call cc-disable-warning, asm-operand-widths)
+ifeq ($(CONFIG_KASAN_SW_TAGS), y)
+KASAN_SHADOW_SCALE_SHIFT := 4
+else
+KASAN_SHADOW_SCALE_SHIFT := 3
 endif
 
-# KASAN_SHADOW_OFFSET = VA_START + (1 << (VA_BITS - 3)) - (1 << 61)
+KBUILD_CFLAGS += -DKASAN_SHADOW_SCALE_SHIFT=$(KASAN_SHADOW_SCALE_SHIFT)
+KBUILD_CPPFLAGS += -DKASAN_SHADOW_SCALE_SHIFT=$(KASAN_SHADOW_SCALE_SHIFT)
+KBUILD_AFLAGS += -DKASAN_SHADOW_SCALE_SHIFT=$(KASAN_SHADOW_SCALE_SHIFT)
+
+# KASAN_SHADOW_OFFSET = VA_START + (1 << (VA_BITS - KASAN_SHADOW_SCALE_SHIFT))
+#				 - (1 << (64 - KASAN_SHADOW_SCALE_SHIFT))
 # in 32-bit arithmetic
 KASAN_SHADOW_OFFSET := $(shell printf "0x%08x00000000\n" $$(( \
-			(0xffffffff & (-1 << ($(CONFIG_ARM64_VA_BITS) - 32))) \
-			+ (1 << ($(CONFIG_ARM64_VA_BITS) - 32 - 3)) \
-			- (1 << (64 - 32 - 3)) )) )
+	(0xffffffff & (-1 << ($(CONFIG_ARM64_VA_BITS) - 32))) \
+	+ (1 << ($(CONFIG_ARM64_VA_BITS) - 32 - $(KASAN_SHADOW_SCALE_SHIFT))) \
+	- (1 << (64 - 32 - $(KASAN_SHADOW_SCALE_SHIFT))) )) )
 
 export	TEXT_OFFSET GZFLAGS
 
@@ -97,25 +125,20 @@ libs-y		:= arch/arm64/lib/ $(libs-y)
 core-$(CONFIG_EFI_STUB) += $(objtree)/drivers/firmware/efi/libstub/lib.a
 
 # Default target when executing plain make
-ifeq ($(CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE),y)
-KBUILD_IMAGE	:= $(subst $\",,$(CONFIG_BUILD_ARM64_APPENDED_KERNEL_IMAGE_NAME))
-else
-KBUILD_IMAGE	:= Image.gz
-endif
-
+boot		:= arch/arm64/boot
+KBUILD_IMAGE	:= $(boot)/Image.gz
 KBUILD_DTBS	:= dtbs
 
-all:	$(KBUILD_IMAGE) $(KBUILD_DTBS)
+all:	Image.gz $(KBUILD_DTBS)
 
-boot := arch/arm64/boot
 
 Image: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
-Image.%: vmlinux
+Image.%: Image
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
-zinstall install: vmlinux
+zinstall install:
 	$(Q)$(MAKE) $(build)=$(boot) $@
 
 %.dtb: scripts
@@ -129,9 +152,6 @@ dtbs: prepare scripts
 dtbs_install:
 	$(Q)$(MAKE) $(dtbinst)=$(boot)/dts
 
-Image-dtb Image.gz-dtb: vmlinux scripts dtbs
-	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
-
 PHONY += vdso_install
 vdso_install:
 	$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso $@
@@ -141,6 +161,7 @@ archclean:
 	$(Q)$(MAKE) $(clean)=$(boot)
 	$(Q)$(MAKE) $(clean)=$(boot)/dts
 
+ifeq ($(KBUILD_EXTMOD),)
 # We need to generate vdso-offsets.h before compiling certain files in kernel/.
 # In order to do that, we should use the archprepare target, but we can't since
 # asm-offsets.h is included in some files used to generate vdso-offsets.h, and
@@ -150,6 +171,7 @@ archclean:
 prepare: vdso_prepare
 vdso_prepare: prepare0
 	$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso include/generated/vdso-offsets.h
+endif
 
 define archhelp
   echo  '* Image.gz      - Compressed kernel image (arch/$(ARCH)/boot/Image.gz)'

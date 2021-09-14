@@ -1,8 +1,7 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * IP Packet Parser Module.
  *
- * Copyright (C) 1999-2018, Broadcom Corporation
+ * Copyright (C) 1999-2017, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -290,10 +289,10 @@ static void _tdata_psh_info_pool_deinit(dhd_pub_t *dhdp,
 }
 #endif /* BCMSDIO */
 
-static void dhd_tcpack_send(ulong data)
+static void dhd_tcpack_send(struct timer_list *t)
 {
 	tcpack_sup_module_t *tcpack_sup_mod;
-	tcpack_info_t *cur_tbl = (tcpack_info_t *)data;
+	tcpack_info_t *cur_tbl = from_timer(cur_tbl, t, timer);
 	dhd_pub_t *dhdp;
 	int ifidx;
 	void* pkt;
@@ -419,10 +418,9 @@ int dhd_tcpack_suppress_set(dhd_pub_t *dhdp, uint8 mode)
 		for (i = 0; i < TCPACK_INFO_MAXNUM; i++)
 		{
 			tcpack_sup_mod->tcpack_info_tbl[i].dhdp = dhdp;
-			init_timer(&tcpack_sup_mod->tcpack_info_tbl[i].timer);
-			tcpack_sup_mod->tcpack_info_tbl[i].timer.data =
-				(ulong)&tcpack_sup_mod->tcpack_info_tbl[i];
-			tcpack_sup_mod->tcpack_info_tbl[i].timer.function = dhd_tcpack_send;
+			timer_setup(&tcpack_sup_mod->tcpack_info_tbl[i].timer,
+				    dhd_tcpack_send,
+				    0);
 		}
 	}
 

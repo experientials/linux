@@ -1,9 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Provides code common for host and device side USB.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation, version 2.
  *
  * If either host side (ie. CONFIG_USB=y) or device side USB stack
  * (ie. CONFIG_USB_GADGET=y) is compiled in the kernel, this module is
@@ -65,18 +62,15 @@ EXPORT_SYMBOL_GPL(usb_speed_string);
 enum usb_device_speed usb_get_maximum_speed(struct device *dev)
 {
 	const char *maximum_speed;
-	int err;
-	int i;
+	int ret;
 
-	err = device_property_read_string(dev, "maximum-speed", &maximum_speed);
-	if (err < 0)
+	ret = device_property_read_string(dev, "maximum-speed", &maximum_speed);
+	if (ret < 0)
 		return USB_SPEED_UNKNOWN;
 
-	for (i = 0; i < ARRAY_SIZE(speed_names); i++)
-		if (strcmp(maximum_speed, speed_names[i]) == 0)
-			return i;
+	ret = match_string(speed_names, ARRAY_SIZE(speed_names), maximum_speed);
 
-	return USB_SPEED_UNKNOWN;
+	return (ret < 0) ? USB_SPEED_UNKNOWN : ret;
 }
 EXPORT_SYMBOL_GPL(usb_get_maximum_speed);
 
@@ -110,13 +104,10 @@ static const char *const usb_dr_modes[] = {
 
 static enum usb_dr_mode usb_get_dr_mode_from_string(const char *str)
 {
-	int i;
+	int ret;
 
-	for (i = 0; i < ARRAY_SIZE(usb_dr_modes); i++)
-		if (!strcmp(usb_dr_modes[i], str))
-			return i;
-
-	return USB_DR_MODE_UNKNOWN;
+	ret = match_string(usb_dr_modes, ARRAY_SIZE(usb_dr_modes), str);
+	return (ret < 0) ? USB_DR_MODE_UNKNOWN : ret;
 }
 
 enum usb_dr_mode usb_get_dr_mode(struct device *dev)
@@ -154,6 +145,8 @@ enum usb_dr_mode of_usb_get_dr_mode_by_phy(struct device_node *np, int arg0)
 
 	do {
 		controller = of_find_node_with_property(controller, "phys");
+		if (!of_device_is_available(controller))
+			continue;
 		index = 0;
 		do {
 			if (arg0 == -1) {
@@ -196,10 +189,7 @@ EXPORT_SYMBOL_GPL(of_usb_get_dr_mode_by_phy);
  */
 bool of_usb_host_tpl_support(struct device_node *np)
 {
-	if (of_find_property(np, "tpl-support", NULL))
-		return true;
-
-	return false;
+	return of_property_read_bool(np, "tpl-support");
 }
 EXPORT_SYMBOL_GPL(of_usb_host_tpl_support);
 
@@ -233,8 +223,8 @@ int of_usb_update_otg_caps(struct device_node *np,
 				otg_caps->otg_rev = otg_rev;
 			break;
 		default:
-			pr_err("%s: unsupported otg-rev: 0x%x\n",
-						np->full_name, otg_rev);
+			pr_err("%pOF: unsupported otg-rev: 0x%x\n",
+						np, otg_rev);
 			return -EINVAL;
 		}
 	} else {
@@ -246,11 +236,11 @@ int of_usb_update_otg_caps(struct device_node *np,
 		otg_caps->otg_rev = 0;
 	}
 
-	if (of_find_property(np, "hnp-disable", NULL))
+	if (of_property_read_bool(np, "hnp-disable"))
 		otg_caps->hnp_support = false;
-	if (of_find_property(np, "srp-disable", NULL))
+	if (of_property_read_bool(np, "srp-disable"))
 		otg_caps->srp_support = false;
-	if (of_find_property(np, "adp-disable", NULL) ||
+	if (of_property_read_bool(np, "adp-disable") ||
 				(otg_caps->otg_rev < 0x0200))
 		otg_caps->adp_support = false;
 
@@ -258,6 +248,31 @@ int of_usb_update_otg_caps(struct device_node *np,
 }
 EXPORT_SYMBOL_GPL(of_usb_update_otg_caps);
 
+/**
+ * usb_of_get_companion_dev - Find the companion device
+ * @dev: the device pointer to find a companion
+ *
+ * Find the companion device from platform bus.
+ *
+ * Takes a reference to the returned struct device which needs to be dropped
+ * after use.
+ *
+ * Return: On success, a pointer to the companion device, %NULL on failure.
+ */
+struct device *usb_of_get_companion_dev(struct device *dev)
+{
+	struct device_node *node;
+	struct platform_device *pdev = NULL;
+
+	node = of_parse_phandle(dev->of_node, "companion", 0);
+	if (node)
+		pdev = of_find_device_by_node(node);
+
+	of_node_put(node);
+
+	return pdev ? &pdev->dev : NULL;
+}
+EXPORT_SYMBOL_GPL(usb_of_get_companion_dev);
 #endif
 
 MODULE_LICENSE("GPL");

@@ -20,6 +20,8 @@
 #include <drm/drm_of.h>
 #include <drm/drmP.h>
 
+#include "../rockchip/rockchip_drm_drv.h"
+
 #define TVE_POWCR 0x03
 #define TVE_OFF 0X07
 #define TVE_ON 0x03
@@ -30,7 +32,7 @@ static const struct drm_display_mode rk1000_cvbs_mode[2] = {
 		   DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC),
 		   .vrefresh = 50, 0, },
 	{ DRM_MODE("720x480", DRM_MODE_TYPE_DRIVER, 27000, 720, 736,
-		   742, 858, 0, 480, 494, 500, 525, 0,
+		   742, 858, 0, 480, 486, 492, 529, 0,
 		   DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC),
 		   .vrefresh = 60, 0, },
 };
@@ -45,6 +47,7 @@ struct rk1000_tve {
 	struct regmap *ctlmap;
 	struct regmap *tvemap;
 	u32 preferred_mode;
+	struct rockchip_drm_sub_dev sub_dev;
 };
 
 enum {
@@ -103,7 +106,7 @@ static struct rk1000_tve *connector_to_rk1000(struct drm_connector *connector)
 static int rk1000_tv_write_block(struct rk1000_tve *rk1000,
 				 u8 reg, const u8 *buf, u8 len)
 {
-	int i, ret;
+	int i, ret = 0;
 
 	for (i = 0; i < len; i++) {
 		ret = regmap_write(rk1000->tvemap, reg + i, buf[i]);
@@ -117,7 +120,7 @@ static int rk1000_tv_write_block(struct rk1000_tve *rk1000,
 static int rk1000_control_write_block(struct rk1000_tve *rk1000,
 				      u8 reg, const u8 *buf, u8 len)
 {
-	int i, ret;
+	int i, ret = 0;
 
 	for (i = 0; i < len; i++) {
 		ret = regmap_write(rk1000->ctlmap, reg + i, buf[i]);
@@ -245,7 +248,6 @@ const struct drm_connector_helper_funcs rk1000_connector_helper_funcs = {
 };
 
 static const struct drm_connector_funcs rk1000_connector_funcs = {
-	.dpms = drm_atomic_helper_connector_dpms,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.detect = rk1000_connector_detect,
 	.destroy = drm_connector_cleanup,
@@ -261,9 +263,9 @@ rk1000_bridge_mode_set(struct drm_bridge *bridge,
 {
 	struct rk1000_tve *rk1000;
 
+	rk1000 = bridge_to_rk1000(bridge);
 	dev_dbg(rk1000->dev, "encoder mode set:%s\n", adjusted_mode->name);
 
-	rk1000 = bridge_to_rk1000(bridge);
 	if (adjusted_mode->vdisplay == 576)
 		rk1000->mode = CVBS_PAL;
 	else
@@ -300,6 +302,9 @@ static int rk1000_bridge_attach(struct drm_bridge *bridge)
 	}
 
 	rk1000->encoder = bridge->encoder;
+	drm_connector_helper_add(&rk1000->connector,
+				 &rk1000_connector_helper_funcs);
+
 	ret = drm_connector_init(bridge->dev, &rk1000->connector,
 				 &rk1000_connector_funcs,
 				 DRM_MODE_CONNECTOR_TV);
@@ -307,15 +312,23 @@ static int rk1000_bridge_attach(struct drm_bridge *bridge)
 		dev_err(rk1000->dev, "Failed to initialize connector\n");
 		return ret;
 	}
-	drm_connector_helper_add(&rk1000->connector,
-				 &rk1000_connector_helper_funcs);
-	ret = drm_mode_connector_attach_encoder(&rk1000->connector,
-						bridge->encoder);
+	ret = drm_connector_attach_encoder(&rk1000->connector,
+					   bridge->encoder);
 	if (ret)
 		dev_err(rk1000->dev, "rk1000 attach failed ret:%d", ret);
-	rk1000->connector.port = rk1000->dev->of_node;
+
+	rk1000->sub_dev.connector = &rk1000->connector;
+	rk1000->sub_dev.of_node = rk1000->dev->of_node;
+	rockchip_drm_register_sub_dev(&rk1000->sub_dev);
 
 	return ret;
+}
+
+static void rk1000_bridge_detach(struct drm_bridge *bridge)
+{
+	struct rk1000_tve *rk1000 = bridge_to_rk1000(bridge);
+
+	rockchip_drm_unregister_sub_dev(&rk1000->sub_dev);
 }
 
 static struct drm_bridge_funcs rk1000_bridge_funcs = {
@@ -323,6 +336,7 @@ static struct drm_bridge_funcs rk1000_bridge_funcs = {
 	.disable = rk1000_bridge_disable,
 	.mode_set = rk1000_bridge_mode_set,
 	.attach = rk1000_bridge_attach,
+	.detach = rk1000_bridge_detach,
 };
 
 static int rk1000_probe(struct i2c_client *client,
@@ -385,11 +399,7 @@ static int rk1000_probe(struct i2c_client *client,
 	rk1000->bridge.funcs = &rk1000_bridge_funcs;
 	rk1000->bridge.of_node = rk1000->dev->of_node;
 
-	ret = drm_bridge_add(&rk1000->bridge);
-	if (ret) {
-		dev_err(rk1000->dev, "failed to add rk1000 bridge\n");
-		return ret;
-	}
+	drm_bridge_add(&rk1000->bridge);
 
 	i2c_set_clientdata(client, rk1000);
 	dev_dbg(rk1000->dev, "rk1000 probe ok\n");

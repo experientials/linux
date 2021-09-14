@@ -1,16 +1,7 @@
-/* rc-ir-raw.c - handle IR pulse/space events
- *
- * Copyright (C) 2010 by Mauro Carvalho Chehab
- *
- * This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0
+// rc-ir-raw.c - handle IR pulse/space events
+//
+// Copyright (C) 2010 by Mauro Carvalho Chehab
 
 #include <linux/export.h>
 #include <linux/kthread.h>
@@ -23,7 +14,7 @@
 static LIST_HEAD(ir_raw_client_list);
 
 /* Used to handle IR raw handler extensions */
-static DEFINE_MUTEX(ir_raw_handler_lock);
+DEFINE_MUTEX(ir_raw_handler_lock);
 static LIST_HEAD(ir_raw_handler_list);
 static atomic64_t available_protocols = ATOMIC64_INIT(0);
 
@@ -111,7 +102,7 @@ EXPORT_SYMBOL_GPL(ir_raw_event_store);
 int ir_raw_event_store_edge(struct rc_dev *dev, bool pulse)
 {
 	ktime_t			now;
-	struct ir_raw_event	ev = {};
+	DEFINE_IR_RAW_EVENT(ev);
 
 	if (!dev->raw)
 		return -EINVAL;
@@ -166,7 +157,7 @@ EXPORT_SYMBOL_GPL(ir_raw_event_store_with_timeout);
 /**
  * ir_raw_event_store_with_filter() - pass next pulse/space to decoders with some processing
  * @dev:	the struct rc_dev device descriptor
- * @type:	the type of the event that has occurred
+ * @ev:		the event that has occurred
  *
  * This routine (which may be called from an interrupt context) works
  * in similar manner to ir_raw_event_store_edge.
@@ -219,7 +210,7 @@ void ir_raw_event_set_idle(struct rc_dev *dev, bool idle)
 	if (idle) {
 		dev->raw->this_ev.timeout = true;
 		ir_raw_event_store(dev, &dev->raw->this_ev);
-		dev->raw->this_ev = (struct ir_raw_event) {};
+		init_ir_raw_event(&dev->raw->this_ev);
 	}
 
 	if (dev->s_idle)
@@ -571,10 +562,10 @@ static void ir_raw_edge_handle(struct timer_list *t)
 	spin_lock_irqsave(&dev->raw->edge_spinlock, flags);
 	interval = ktime_sub(ktime_get(), dev->raw->last_event);
 	if (ktime_to_ns(interval) >= dev->timeout) {
-		struct ir_raw_event ev = {
-			.timeout = true,
-			.duration = ktime_to_ns(interval)
-		};
+		DEFINE_IR_RAW_EVENT(ev);
+
+		ev.timeout = true;
+		ev.duration = ktime_to_ns(interval);
 
 		ir_raw_event_store(dev, &ev);
 	} else {
@@ -681,9 +672,17 @@ void ir_raw_event_unregister(struct rc_dev *dev)
 		if (handler->raw_unregister &&
 		    (handler->protocols & dev->enabled_protocols))
 			handler->raw_unregister(dev);
-	mutex_unlock(&ir_raw_handler_lock);
+
+	lirc_bpf_free(dev);
 
 	ir_raw_event_free(dev);
+
+	/*
+	 * A user can be calling bpf(BPF_PROG_{QUERY|ATTACH|DETACH}), so
+	 * ensure that the raw member is null on unlock; this is how
+	 * "device gone" is checked.
+	 */
+	mutex_unlock(&ir_raw_handler_lock);
 }
 
 /*

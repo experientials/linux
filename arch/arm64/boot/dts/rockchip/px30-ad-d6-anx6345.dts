@@ -555,7 +555,27 @@
 	status = "okay";
 };
 
-&vpu_combo {
+&mpp_srv {
+	status = "okay";
+};
+
+&vdpu {
+	status = "okay";
+};
+
+&vepu {
+	status = "okay";
+};
+
+&vpu_mmu {
+	status = "okay";
+};
+
+&hevc {
+	status = "okay";
+};
+
+&hevc_mmu {
 	status = "okay";
 };
 
@@ -589,7 +609,6 @@
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&lcdc_rgb_pins>;
 	pinctrl-1 = <&lcdc_sleep_pins>;
-	rockchip,data-sync;
 	status = "okay";
 
 	ports {

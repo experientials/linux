@@ -442,10 +442,9 @@ static void clean_buf(const struct ubifs_info *c, void **buf, int lnum,
 {
 	int empty_offs, pad_len;
 
-	lnum = lnum;
 	dbg_rcvry("cleaning corruption at %d:%d", lnum, *offs);
 
-	ubifs_assert(!(*offs & 7));
+	ubifs_assert(c, !(*offs & 7));
 	empty_offs = ALIGN(*offs, c->min_io_size);
 	pad_len = empty_offs - *offs;
 	ubifs_pad(c, *buf, pad_len);
@@ -645,7 +644,7 @@ struct ubifs_scan_leb *ubifs_recover_leb(struct ubifs_info *c, int lnum,
 	if (IS_ERR(sleb))
 		return sleb;
 
-	ubifs_assert(len >= 8);
+	ubifs_assert(c, len >= 8);
 	while (len >= 8) {
 		dbg_scan("look at LEB %d:%d (%d bytes left)",
 			 lnum, offs, len);
@@ -674,10 +673,43 @@ struct ubifs_scan_leb *ubifs_recover_leb(struct ubifs_info *c, int lnum,
 			offs += ret;
 			buf += ret;
 			len -= ret;
-		} else if (ret == SCANNED_EMPTY_SPACE ||
-			   ret == SCANNED_GARBAGE     ||
-			   ret == SCANNED_A_BAD_PAD_NODE ||
-			   ret == SCANNED_A_CORRUPT_NODE) {
+		} else if (ret == SCANNED_A_CORRUPT_NODE) {
+			dbg_rcvry("found corruption (%d) at %d:%d",
+				  ret, lnum, offs);
+			if (ubifs_check_node(c, buf, lnum, offs, 1, 1) == -EUCLEAN &&
+			    !no_more_nodes(c, buf, len, lnum, offs)) {
+				int skip;
+				struct ubifs_ch *ch = buf;
+
+				/*
+				 * If the flash voltage power down suddenly in the programming
+				 * process, it may lead to abnormal data written by the flash
+				 * in the low-voltage operation process, and the last data
+				 * should be discarded.
+				 */
+				ubifs_msg(c, "recovery corrupt node\n");
+				skip = ALIGN(offs + le32_to_cpu(ch->len), c->max_write_size) - offs;
+				memset(buf + skip, 0xff, len - skip);
+			}
+
+			break;
+		} else if (ret == SCANNED_EMPTY_SPACE) {
+			dbg_rcvry("found corruption (%d) at %d:%d",
+				  ret, lnum, offs);
+			if (!is_empty(buf, len) && !is_last_write(c, buf, offs)) {
+				/*
+				 * If the flash voltage power down suddenly in the programming
+				 * process, it may lead to the data was programmed to the wroge
+				 * page written by the flash in the low-voltage operation process,
+				 * and the data should be discarded.
+				 */
+				ubifs_msg(c, "recovery empty space\n");
+				memset(buf, 0xff, len);
+			}
+
+			break;
+		} else if (ret == SCANNED_GARBAGE     ||
+			   ret == SCANNED_A_BAD_PAD_NODE) {
 			dbg_rcvry("found corruption (%d) at %d:%d",
 				  ret, lnum, offs);
 			break;
@@ -967,7 +999,7 @@ int ubifs_recover_inl_heads(struct ubifs_info *c, void *sbuf)
 {
 	int err;
 
-	ubifs_assert(!c->ro_mount || c->remounting_rw);
+	ubifs_assert(c, !c->ro_mount || c->remounting_rw);
 
 	dbg_rcvry("checking index head at %d:%d", c->ihead_lnum, c->ihead_offs);
 	err = recover_head(c, c->ihead_lnum, c->ihead_offs, sbuf);
@@ -1188,8 +1220,8 @@ int ubifs_rcvry_gc_commit(struct ubifs_info *c)
 		return grab_empty_leb(c);
 	}
 
-	ubifs_assert(!(lp.flags & LPROPS_INDEX));
-	ubifs_assert(lp.free + lp.dirty >= wbuf->offs);
+	ubifs_assert(c, !(lp.flags & LPROPS_INDEX));
+	ubifs_assert(c, lp.free + lp.dirty >= wbuf->offs);
 
 	/*
 	 * We run the commit before garbage collection otherwise subsequent
@@ -1217,7 +1249,7 @@ int ubifs_rcvry_gc_commit(struct ubifs_info *c)
 		return err;
 	}
 
-	ubifs_assert(err == LEB_RETAINED);
+	ubifs_assert(c, err == LEB_RETAINED);
 	if (err != LEB_RETAINED)
 		return -EINVAL;
 
@@ -1508,7 +1540,7 @@ int ubifs_recover_size(struct ubifs_info *c)
 				struct inode *inode;
 				struct ubifs_inode *ui;
 
-				ubifs_assert(!e->inode);
+				ubifs_assert(c, !e->inode);
 
 				inode = ubifs_iget(c->vfs_sb, e->inum);
 				if (IS_ERR(inode))

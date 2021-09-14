@@ -1,7 +1,8 @@
 /*
  * dw-hdmi-i2s-audio.c
  *
- * Copyright (c) 2016 Kuninori Morimoto <kuninori.morimoto.gx@renesas.com>
+ * Copyright (c) 2017 Renesas Solutions Corp.
+ * Kuninori Morimoto <kuninori.morimoto.gx@renesas.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -16,7 +17,8 @@
 
 #define DRIVER_NAME "dw-hdmi-i2s-audio"
 
-static inline void hdmi_write(struct dw_hdmi_i2s_audio_data *audio, u8 val, int offset)
+static inline void hdmi_write(struct dw_hdmi_i2s_audio_data *audio,
+			      u8 val, int offset)
 {
 	struct dw_hdmi *hdmi = audio->hdmi;
 
@@ -168,7 +170,7 @@ static int dw_hdmi_i2s_hw_params(struct device *dev, void *data,
 			 HDMI_FC_AUDSCHNLS7_SAMPFREQ_MASK,
 			 HDMI_FC_AUDSCHNLS7);
 	hdmi_write(audio,
-		   ((~val) << HDMI_FC_AUDSCHNLS8_ORIGSAMPFREQ_OFFSET),
+		   (((u8)~val) << HDMI_FC_AUDSCHNLS8_ORIGSAMPFREQ_OFFSET),
 		   HDMI_FC_AUDSCHNLS8);
 
 	/* Refer to CEA861-E Audio infoFrame
@@ -190,12 +192,12 @@ static int dw_hdmi_i2s_hw_params(struct device *dev, void *data,
 	/* Set LFEPBLDOWN-MIX INH and LSV */
 	hdmi_write(audio, 0x00, HDMI_FC_AUDICONF3);
 
+	dw_hdmi_audio_enable(hdmi);
+
 	hdmi_update_bits(audio, HDMI_AUD_CONF0_SW_RESET,
 			 HDMI_AUD_CONF0_SW_RESET, HDMI_AUD_CONF0);
 	hdmi_update_bits(audio, HDMI_MC_SWRSTZ_I2S_RESET_MSK,
 			 HDMI_MC_SWRSTZ_I2S_RESET_MSK, HDMI_MC_SWRSTZ);
-
-	dw_hdmi_audio_enable(hdmi);
 
 	return 0;
 }
@@ -215,9 +217,30 @@ static void dw_hdmi_i2s_audio_shutdown(struct device *dev, void *data)
 			 HDMI_AUD_CONF0);
 }
 
+static int dw_hdmi_i2s_get_dai_id(struct snd_soc_component *component,
+				  struct device_node *endpoint)
+{
+	struct of_endpoint of_ep;
+	int ret;
+
+	ret = of_graph_parse_endpoint(endpoint, &of_ep);
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * HDMI sound should be located as reg = <2>
+	 * Then, it is sound port 0
+	 */
+	if (of_ep.port == 2)
+		return 0;
+
+	return -EINVAL;
+}
+
 static struct hdmi_codec_ops dw_hdmi_i2s_ops = {
 	.hw_params	= dw_hdmi_i2s_hw_params,
 	.audio_shutdown	= dw_hdmi_i2s_audio_shutdown,
+	.get_dai_id	= dw_hdmi_i2s_get_dai_id,
 };
 
 static int snd_dw_hdmi_probe(struct platform_device *pdev)
@@ -225,6 +248,7 @@ static int snd_dw_hdmi_probe(struct platform_device *pdev)
 	struct dw_hdmi_i2s_audio_data *audio = pdev->dev.platform_data;
 	struct platform_device_info pdevinfo;
 	struct hdmi_codec_pdata pdata;
+	struct platform_device *platform;
 
 	pdata.ops		= &dw_hdmi_i2s_ops;
 	pdata.i2s		= 1;
@@ -239,26 +263,29 @@ static int snd_dw_hdmi_probe(struct platform_device *pdev)
 	pdevinfo.size_data	= sizeof(pdata);
 	pdevinfo.dma_mask	= DMA_BIT_MASK(32);
 
-	audio->pdev = platform_device_register_full(&pdevinfo);
-	return IS_ERR_OR_NULL(audio->pdev);
+	platform = platform_device_register_full(&pdevinfo);
+	if (IS_ERR(platform))
+		return PTR_ERR(platform);
+
+	dev_set_drvdata(&pdev->dev, platform);
+
+	return 0;
 }
 
 static int snd_dw_hdmi_remove(struct platform_device *pdev)
 {
-	struct dw_hdmi_i2s_audio_data *audio = pdev->dev.platform_data;
+	struct platform_device *platform = dev_get_drvdata(&pdev->dev);
 
-	if (!IS_ERR_OR_NULL(audio->pdev))
-		platform_device_unregister(audio->pdev);
+	platform_device_unregister(platform);
 
 	return 0;
 }
 
 static struct platform_driver snd_dw_hdmi_driver = {
 	.probe	= snd_dw_hdmi_probe,
-	.remove = snd_dw_hdmi_remove,
+	.remove	= snd_dw_hdmi_remove,
 	.driver	= {
 		.name = DRIVER_NAME,
-		.owner = THIS_MODULE,
 	},
 };
 module_platform_driver(snd_dw_hdmi_driver);

@@ -17,9 +17,11 @@
 #ifndef _ROCKCHIP_DRM_DRV_H
 #define _ROCKCHIP_DRM_DRV_H
 
+#include <drm/drm_crtc.h>
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_gem.h>
+#include <drm/rockchip_drm.h>
 
 #include <linux/module.h>
 #include <linux/component.h>
@@ -31,6 +33,12 @@
 struct drm_device;
 struct drm_connector;
 struct iommu_domain;
+
+struct rockchip_drm_sub_dev {
+	struct list_head list;
+	struct drm_connector *connector;
+	struct device_node *of_node;
+};
 
 /*
  * Rockchip drm private crtc funcs.
@@ -46,7 +54,8 @@ struct rockchip_crtc_funcs {
 	size_t (*bandwidth)(struct drm_crtc *crtc,
 			    struct drm_crtc_state *crtc_state,
 			    unsigned int *plane_num_total);
-	void (*cancel_pending_vblank)(struct drm_crtc *crtc, struct drm_file *file_priv);
+	void (*cancel_pending_vblank)(struct drm_crtc *crtc,
+				      struct drm_file *file_priv);
 	int (*debugfs_init)(struct drm_minor *minor, struct drm_crtc *crtc);
 	int (*debugfs_dump)(struct drm_crtc *crtc, struct seq_file *s);
 	void (*regs_dump)(struct drm_crtc *crtc, struct seq_file *s);
@@ -55,17 +64,6 @@ struct rockchip_crtc_funcs {
 					   int output_type);
 	void (*crtc_close)(struct drm_crtc *crtc);
 	void (*crtc_send_mcu_cmd)(struct drm_crtc *crtc, u32 type, u32 value);
-};
-
-struct drm_rockchip_subdrv {
-	struct list_head list;
-	struct device *dev;
-	struct drm_device *drm_dev;
-
-	int (*open)(struct drm_device *drm_dev, struct device *dev,
-		    struct drm_file *file);
-	void (*close)(struct drm_device *drm_dev, struct device *dev,
-		      struct drm_file *file);
 };
 
 struct rockchip_atomic_commit {
@@ -99,10 +97,8 @@ struct rockchip_hdr_state {
 	bool hdr2sdr_en;
 	struct rockchip_sdr2hdr_state sdr2hdr_state;
 };
-
 struct rockchip_crtc_state {
 	struct drm_crtc_state base;
-	struct drm_property_blob *cabc_lut;
 	struct drm_tv_connector_state *tv_state;
 	int left_margin;
 	int right_margin;
@@ -117,16 +113,13 @@ struct rockchip_crtc_state {
 	int afbdc_win_vir_width;
 	int afbdc_win_xoffset;
 	int afbdc_win_yoffset;
-	int cabc_mode;
-	int cabc_stage_up;
-	int cabc_stage_down;
-	int cabc_global_dn;
-	int cabc_calc_pixel_num;
 	int dsp_layer_sel;
 	int output_type;
 	int output_mode;
+	int output_bpc;
 	int output_flags;
-	int bus_format;
+	u32 bus_format;
+	u32 bus_flags;
 	int yuv_overlay;
 	int post_r2y_en;
 	int post_y2r_en;
@@ -134,33 +127,17 @@ struct rockchip_crtc_state {
 	int bcsh_en;
 	int color_space;
 	int eotf;
-	int pdaf_work_mode;
-	int pdaf_type;
+	u8 mode_update;
 	struct rockchip_hdr_state hdr;
-	struct drm_framebuffer *crtc_primary_fb;
 };
-
 #define to_rockchip_crtc_state(s) \
 		container_of(s, struct rockchip_crtc_state, base)
 
-/*
- * Rockchip drm_file private structure.
- *
- * @gem_cpu_acquire_list: list of GEM objects we hold acquires on
- */
-struct rockchip_drm_file_private {
-	struct list_head		gem_cpu_acquire_list;
-	struct rockchip_drm_rga_private *rga_priv;
-};
-
 struct rockchip_logo {
-	struct sg_table *sgt;
-	struct drm_mm_node mm;
 	dma_addr_t dma_addr;
 	void *kvaddr;
 	phys_addr_t start;
 	phys_addr_t size;
-	size_t iommu_map_size;
 	int count;
 };
 
@@ -169,27 +146,17 @@ struct rockchip_logo {
  *
  * @crtc: array of enabled CRTCs, used to map from "pipe" to drm_crtc.
  * @num_pipe: number of pipes for this device.
- * @cpu_fence_context: fence context used for CPU acquire/release
- * @cpu_fence_seqno: fence sequence number
+ * @mm_lock: protect drm_mm on multi-threads.
  */
 struct rockchip_drm_private {
 	struct rockchip_logo *logo;
-	struct drm_property *logo_ymirror_prop;
-	struct drm_property *cabc_mode_property;
-	struct drm_property *cabc_lut_property;
-	struct drm_property *cabc_stage_up_property;
-	struct drm_property *cabc_stage_down_property;
-	struct drm_property *cabc_global_dn_property;
-	struct drm_property *cabc_calc_pixel_num_property;
 	struct drm_property *eotf_prop;
 	struct drm_property *color_space_prop;
 	struct drm_property *global_alpha_prop;
 	struct drm_property *blend_mode_prop;
 	struct drm_property *alpha_scale_prop;
-	struct drm_property *pdaf_type;
-	struct drm_property *work_mode;
-	struct drm_property *pdaf_data_type;
-	void *backlight;
+	struct drm_property *async_commit_prop;
+	struct drm_property *share_id_prop;
 	struct drm_fb_helper *fbdev_helper;
 	struct drm_gem_object *fbdev_bo;
 	const struct rockchip_crtc_funcs *crtc_funcs[ROCKCHIP_MAX_CRTC];
@@ -201,34 +168,69 @@ struct rockchip_drm_private {
 	struct work_struct commit_work;
 	struct iommu_domain *domain;
 	struct gen_pool *secure_buffer_pool;
-#ifdef CONFIG_DRM_DMA_SYNC
-	unsigned int cpu_fence_context;
-	atomic_t cpu_fence_seqno;
-#endif
 	/* protect drm_mm on multi-threads */
 	struct mutex mm_lock;
 	struct drm_mm mm;
 	struct rockchip_dclk_pll default_pll;
 	struct rockchip_dclk_pll hdmi_pll;
 	struct devfreq *devfreq;
-	bool dmc_support;
+	u8 dmc_support;
+	struct list_head psr_list;
+	struct mutex psr_list_lock;
+
+	/**
+	 * @loader_protect
+	 * ignore restore_fbdev_mode_atomic when in logo on state
+	 */
+	bool loader_protect;
 };
 
 #ifndef MODULE
 void rockchip_free_loader_memory(struct drm_device *drm);
 #endif
 void rockchip_drm_atomic_work(struct work_struct *work);
-int rockchip_register_crtc_funcs(struct drm_crtc *crtc,
-				 const struct rockchip_crtc_funcs *crtc_funcs);
-void rockchip_unregister_crtc_funcs(struct drm_crtc *crtc);
 int rockchip_drm_dma_attach_device(struct drm_device *drm_dev,
 				   struct device *dev);
 void rockchip_drm_dma_detach_device(struct drm_device *drm_dev,
 				    struct device *dev);
-int rockchip_drm_wait_line_flag(struct drm_crtc *crtc, unsigned int line_num,
-				unsigned int mstimeout);
+int rockchip_register_crtc_funcs(struct drm_crtc *crtc,
+				 const struct rockchip_crtc_funcs *crtc_funcs);
+void rockchip_unregister_crtc_funcs(struct drm_crtc *crtc);
+int rockchip_drm_wait_vact_end(struct drm_crtc *crtc, unsigned int mstimeout);
 
-int rockchip_drm_register_subdrv(struct drm_rockchip_subdrv *subdrv);
-int rockchip_drm_unregister_subdrv(struct drm_rockchip_subdrv *subdrv);
+void rockchip_drm_register_sub_dev(struct rockchip_drm_sub_dev *sub_dev);
+void rockchip_drm_unregister_sub_dev(struct rockchip_drm_sub_dev *sub_dev);
+struct rockchip_drm_sub_dev *rockchip_drm_get_sub_dev(struct device_node *node);
+int rockchip_drm_add_modes_noedid(struct drm_connector *connector);
+#if IS_ENABLED(CONFIG_DRM_ROCKCHIP)
+int rockchip_drm_get_sub_dev_type(void);
+#else
+static inline int rockchip_drm_get_sub_dev_type(void)
+{
+	return DRM_MODE_CONNECTOR_Unknown;
+}
+#endif
 
+#if IS_ENABLED(CONFIG_DRM_ROCKCHIP)
+int rockchip_drm_crtc_send_mcu_cmd(struct drm_device *drm_dev,
+				   struct device_node *np_crtc,
+				   u32 type, u32 value);
+#else
+static inline int rockchip_drm_crtc_send_mcu_cmd(struct drm_device *drm_dev,
+						 struct device_node *np_crtc,
+						 u32 type, u32 value)
+{
+	return 0;
+}
+#endif
+
+extern struct platform_driver cdn_dp_driver;
+extern struct platform_driver dw_hdmi_rockchip_pltfm_driver;
+extern struct platform_driver dw_mipi_dsi_driver;
+extern struct platform_driver inno_hdmi_driver;
+extern struct platform_driver rockchip_dp_driver;
+extern struct platform_driver rockchip_lvds_driver;
+extern struct platform_driver rockchip_tve_driver;
+extern struct platform_driver vop_platform_driver;
+extern struct platform_driver rockchip_rgb_driver;
 #endif /* _ROCKCHIP_DRM_DRV_H_ */

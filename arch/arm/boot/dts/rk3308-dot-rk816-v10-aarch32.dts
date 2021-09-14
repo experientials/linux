@@ -60,8 +60,6 @@
 
 	charge-animation {
 		compatible = "rockchip,uboot-charge";
-		rockchip,uboot-charge-on = <1>;
-		rockchip,uboot-low-power-voltage = <3500>;
 		status = "okay";
 	};
 
@@ -74,11 +72,11 @@
 		status = "okay";
 		compatible = "gpio-leds";
 
-		blue-led {
+		red-led {
 			gpios = <&gpio2 RK_PA1 GPIO_ACTIVE_LOW>;
-			label = "battery_full";
+			label = "redled";
 			default-state = "off";
-			linux,default-trigger = "battery-full";
+			linux,default-trigger = "default-off";
 		};
 
 		green-led {
@@ -88,11 +86,11 @@
 			linux,default-trigger = "default-off";
 		};
 
-		red-led {
+		blue-led {
 			gpios = <&gpio2 RK_PA2 GPIO_ACTIVE_LOW>;
-			label = "battery_charging";
-			default-state = "off";
-			linux,default-trigger = "battery-charging";
+			label = "blueled";
+			default-state = "on";
+			linux,default-trigger = "default-on";
 		};
 	};
 
@@ -117,7 +115,7 @@
 
 	sound_pcm {
 		compatible = "simple-audio-card";
-		simple-audio-card,format = "dsp_a";
+		simple-audio-card,format = "dsp_b";
 		simple-audio-card,name = "rockchip,rk3308-pcm";
 		simple-audio-card,mclk-fs = <256>;
 		simple-audio-card,cpu {
@@ -264,7 +262,6 @@
 				regulator-name = "vcc_ddr";
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-initial-mode = <1>;
 			};
 
 			vcc_io: DCDC_REG4 {
@@ -421,13 +418,10 @@
 	};
 };
 
-&ramoops_mem {
-	reg = <0x0 0x30000 0x0 0x20000>;
-};
-
 &ramoops {
-	record-size = <0x0 0x00000>;
-	console-size = <0x0 0x20000>;
+	reg = <0x0 0x30000 0x0 0x20000>;
+	record-size = <0x00000>;
+	console-size = <0x20000>;
 };
 
 &rockchip_suspend {

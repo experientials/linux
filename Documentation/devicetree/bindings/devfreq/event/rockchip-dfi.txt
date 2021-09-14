@@ -10,6 +10,7 @@ Required properties:
   - "rockchip,rk3328-dfi" - for RK3328 SoCs.
   - "rockchip,rk3368-dfi" - for RK3368 SoCs.
   - "rockchip,rk3399-dfi" - for RK3399 SoCs.
+  - "rockchip,rv1126-dfi" - for RV1126 SoCs.
 
 Required properties for RK3368:
 - rockchip,grf: phandle to the syscon managing the "general register files"
@@ -21,11 +22,10 @@ Required properties for RK3399:
 - clock-names : the name of clock used by the DFI, must be "pclk_ddr_mon";
 
 Example:
-	dfi: dfi@0xff630000 {
-		reg = <0x00 0xff630000 0x00 0x4000>;
+	dfi: dfi@ff630000 {
 		compatible = "rockchip,rk3399-dfi";
+		reg = <0x00 0xff630000 0x00 0x4000>;
 		rockchip,pmu = <&pmugrf>;
 		clocks = <&cru PCLK_DDR_MON>;
 		clock-names = "pclk_ddr_mon";
-		status = "disabled";
 	};

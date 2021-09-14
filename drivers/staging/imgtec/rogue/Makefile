@@ -4,6 +4,7 @@ ccflags-y += -include $(srctree)/drivers/staging/imgtec/config_kernel.h \
  -I$(srctree)/$(src) \
  -I$(srctree)/$(src)/hwdefs \
  -I$(srctree)/$(src)/hwdefs/km \
+ -I$(srctree)/drivers/dma-buf \
  -I$(srctree)/$(src)/rk3368
 ccflags-$(CONFIG_X86) += -mno-soft-float
 
@@ -149,6 +150,8 @@ ccflags-$(CONFIG_POWERVR_ROGUE_PDUMP) += -DPDUMP=1
 
 # Android native synchronisation
 pvrsrvkm-$(CONFIG_SYNC) += ../pvr_sync.o
+
+pvrsrvkm-$(CONFIG_SYNC_FILE) += ../pvr_sync_file.o
 
 # Generated bridge code
 pvrsrvkm-y += generated/mm_bridge/server_mm_bridge.o

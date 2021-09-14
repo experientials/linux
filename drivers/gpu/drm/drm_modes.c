@@ -49,13 +49,7 @@
  */
 void drm_mode_debug_printmodeline(const struct drm_display_mode *mode)
 {
-	DRM_DEBUG_KMS("Modeline %d:\"%s\" %d %d %d %d %d %d %d %d %d %d "
-			"0x%x 0x%x\n",
-		mode->base.id, mode->name, mode->vrefresh, mode->clock,
-		mode->hdisplay, mode->hsync_start,
-		mode->hsync_end, mode->htotal,
-		mode->vdisplay, mode->vsync_start,
-		mode->vsync_end, mode->vtotal, mode->type, mode->flags);
+	DRM_DEBUG_KMS("Modeline " DRM_MODE_FMT "\n", DRM_MODE_ARG(mode));
 }
 EXPORT_SYMBOL(drm_mode_debug_printmodeline);
 
@@ -77,7 +71,7 @@ struct drm_display_mode *drm_mode_create(struct drm_device *dev)
 	if (!nmode)
 		return NULL;
 
-	if (drm_mode_object_get(dev, &nmode->base, DRM_MODE_OBJECT_MODE)) {
+	if (drm_mode_object_add(dev, &nmode->base, DRM_MODE_OBJECT_MODE)) {
 		kfree(nmode);
 		return NULL;
 	}
@@ -98,7 +92,7 @@ void drm_mode_destroy(struct drm_device *dev, struct drm_display_mode *mode)
 	if (!mode)
 		return;
 
-	drm_mode_object_put(dev, &mode->base);
+	drm_mode_object_unregister(dev, &mode->base);
 
 	kfree(mode);
 }
@@ -165,6 +159,7 @@ struct drm_display_mode *drm_cvt_mode(struct drm_device *dev, int hdisplay,
 	unsigned int vfieldrate, hperiod;
 	int hdisplay_rnd, hmargin, vdisplay_rnd, vmargin, vsync;
 	int interlace;
+	u64 tmp;
 
 	/* allocate the drm_display_mode structure. If failure, we will
 	 * return directly
@@ -238,7 +233,7 @@ struct drm_display_mode *drm_cvt_mode(struct drm_device *dev, int hdisplay,
 		/* 3) Nominal HSync width (% of line period) - default 8 */
 #define CVT_HSYNC_PERCENTAGE	8
 		unsigned int hblank_percentage;
-		int vsyncandback_porch, vback_porch, hblank;
+		int vsyncandback_porch, __maybe_unused vback_porch, hblank;
 
 		/* estimated the horizontal period */
 		tmp1 = HV_FACTOR * 1000000  -
@@ -322,8 +317,11 @@ struct drm_display_mode *drm_cvt_mode(struct drm_device *dev, int hdisplay,
 		drm_mode->vsync_end = drm_mode->vsync_start + vsync;
 	}
 	/* 15/13. Find pixel clock frequency (kHz for xf86) */
-	drm_mode->clock = drm_mode->htotal * HV_FACTOR * 1000 / hperiod;
-	drm_mode->clock -= drm_mode->clock % CVT_CLOCK_STEP;
+	tmp = drm_mode->htotal; /* perform intermediate calcs in u64 */
+	tmp *= HV_FACTOR * 1000;
+	do_div(tmp, hperiod);
+	tmp -= drm_mode->clock % CVT_CLOCK_STEP;
+	drm_mode->clock = tmp;
 	/* 18/16. Find actual vertical frame frequency */
 	/* ignore - just set the mode flag for interlaced */
 	if (interlaced) {
@@ -388,9 +386,10 @@ drm_gtf_mode_complex(struct drm_device *dev, int hdisplay, int vdisplay,
 	int top_margin, bottom_margin;
 	int interlace;
 	unsigned int hfreq_est;
-	int vsync_plus_bp, vback_porch;
-	unsigned int vtotal_lines, vfieldrate_est, hperiod;
-	unsigned int vfield_rate, vframe_rate;
+	int vsync_plus_bp, __maybe_unused vback_porch;
+	unsigned int vtotal_lines, __maybe_unused vfieldrate_est;
+	unsigned int __maybe_unused hperiod;
+	unsigned int vfield_rate, __maybe_unused vframe_rate;
 	int left_margin, right_margin;
 	unsigned int total_active_pixels, ideal_duty_cycle;
 	unsigned int hblank, total_pixels, pixel_freq;
@@ -544,6 +543,7 @@ EXPORT_SYMBOL(drm_gtf_mode_complex);
  *
  * This function is to create the modeline based on the GTF algorithm.
  * Generalized Timing Formula is derived from:
+ *
  *	GTF Spreadsheet by Andy Morrish (1/5/97)
  *	available at http://www.vesa.org
  *
@@ -552,11 +552,12 @@ EXPORT_SYMBOL(drm_gtf_mode_complex);
  * I also refer to the function of fb_get_mode in the file of
  * drivers/video/fbmon.c
  *
- * Standard GTF parameters:
- * M = 600
- * C = 40
- * K = 128
- * J = 20
+ * Standard GTF parameters::
+ *
+ *     M = 600
+ *     C = 40
+ *     K = 128
+ *     J = 20
  *
  * Returns:
  * The modeline based on the GTF algorithm stored in a drm_display_mode object.
@@ -611,13 +612,6 @@ void drm_display_mode_from_videomode(const struct videomode *vm,
 		dmode->flags |= DRM_MODE_FLAG_DBLSCAN;
 	if (vm->flags & DISPLAY_FLAGS_DOUBLECLK)
 		dmode->flags |= DRM_MODE_FLAG_DBLCLK;
-	if (vm->flags & DISPLAY_FLAGS_PIXDATA_POSEDGE)
-		dmode->flags |= DRM_MODE_FLAG_PPIXDATA;
-	if (vm->flags & DISPLAY_FLAGS_MIRROR_Y)
-		dmode->flags |= DRM_MODE_FLAG_YMIRROR;
-	if (vm->flags & DISPLAY_FLAGS_MIRROR_X)
-		dmode->flags |= DRM_MODE_FLAG_XMIRROR;
-
 	drm_mode_set_name(dmode);
 }
 EXPORT_SYMBOL_GPL(drm_display_mode_from_videomode);
@@ -662,11 +656,43 @@ void drm_display_mode_to_videomode(const struct drm_display_mode *dmode,
 }
 EXPORT_SYMBOL_GPL(drm_display_mode_to_videomode);
 
+/**
+ * drm_bus_flags_from_videomode - extract information about pixelclk and
+ * DE polarity from videomode and store it in a separate variable
+ * @vm: videomode structure to use
+ * @bus_flags: information about pixelclk, sync and DE polarity will be stored
+ * here
+ *
+ * Sets DRM_BUS_FLAG_DE_(LOW|HIGH),  DRM_BUS_FLAG_PIXDATA_(POS|NEG)EDGE and
+ * DISPLAY_FLAGS_SYNC_(POS|NEG)EDGE in @bus_flags according to DISPLAY_FLAGS
+ * found in @vm
+ */
+void drm_bus_flags_from_videomode(const struct videomode *vm, u32 *bus_flags)
+{
+	*bus_flags = 0;
+	if (vm->flags & DISPLAY_FLAGS_PIXDATA_POSEDGE)
+		*bus_flags |= DRM_BUS_FLAG_PIXDATA_POSEDGE;
+	if (vm->flags & DISPLAY_FLAGS_PIXDATA_NEGEDGE)
+		*bus_flags |= DRM_BUS_FLAG_PIXDATA_NEGEDGE;
+
+	if (vm->flags & DISPLAY_FLAGS_SYNC_POSEDGE)
+		*bus_flags |= DRM_BUS_FLAG_SYNC_POSEDGE;
+	if (vm->flags & DISPLAY_FLAGS_SYNC_NEGEDGE)
+		*bus_flags |= DRM_BUS_FLAG_SYNC_NEGEDGE;
+
+	if (vm->flags & DISPLAY_FLAGS_DE_LOW)
+		*bus_flags |= DRM_BUS_FLAG_DE_LOW;
+	if (vm->flags & DISPLAY_FLAGS_DE_HIGH)
+		*bus_flags |= DRM_BUS_FLAG_DE_HIGH;
+}
+EXPORT_SYMBOL_GPL(drm_bus_flags_from_videomode);
+
 #ifdef CONFIG_OF
 /**
  * of_get_drm_display_mode - get a drm_display_mode from devicetree
  * @np: device_node with the timing specification
  * @dmode: will be set to the return value
+ * @bus_flags: information about pixelclk, sync and DE polarity
  * @index: index into the list of display timings in devicetree
  *
  * This function is expensive and should only be used, if only one mode is to be
@@ -677,7 +703,8 @@ EXPORT_SYMBOL_GPL(drm_display_mode_to_videomode);
  * 0 on success, a negative errno code when no of videomode node was found.
  */
 int of_get_drm_display_mode(struct device_node *np,
-			    struct drm_display_mode *dmode, int index)
+			    struct drm_display_mode *dmode, u32 *bus_flags,
+			    int index)
 {
 	struct videomode vm;
 	int ret;
@@ -687,9 +714,11 @@ int of_get_drm_display_mode(struct device_node *np,
 		return ret;
 
 	drm_display_mode_from_videomode(&vm, dmode);
+	if (bus_flags)
+		drm_bus_flags_from_videomode(&vm, bus_flags);
 
-	pr_debug("%s: got %dx%d display mode from %s\n",
-		of_node_full_name(np), vm.hactive, vm.vactive, np->name);
+	pr_debug("%pOF: got %dx%d display mode from %s\n",
+		np, vm.hactive, vm.vactive, np->name);
 	drm_mode_debug_printmodeline(dmode);
 
 	return 0;
@@ -715,7 +744,8 @@ void drm_mode_set_name(struct drm_display_mode *mode)
 }
 EXPORT_SYMBOL(drm_mode_set_name);
 
-/** drm_mode_hsync - get the hsync of a mode
+/**
+ * drm_mode_hsync - get the hsync of a mode
  * @mode: mode
  *
  * Returns:
@@ -751,28 +781,47 @@ EXPORT_SYMBOL(drm_mode_hsync);
 int drm_mode_vrefresh(const struct drm_display_mode *mode)
 {
 	int refresh = 0;
-	unsigned int calc_val;
 
 	if (mode->vrefresh > 0)
 		refresh = mode->vrefresh;
 	else if (mode->htotal > 0 && mode->vtotal > 0) {
-		int vtotal;
-		vtotal = mode->vtotal;
-		/* work out vrefresh the value will be x1000 */
-		calc_val = (mode->clock * 1000);
-		calc_val /= mode->htotal;
-		refresh = (calc_val + vtotal / 2) / vtotal;
+		unsigned int num, den;
+
+		num = mode->clock * 1000;
+		den = mode->htotal * mode->vtotal;
 
 		if (mode->flags & DRM_MODE_FLAG_INTERLACE)
-			refresh *= 2;
+			num *= 2;
 		if (mode->flags & DRM_MODE_FLAG_DBLSCAN)
-			refresh /= 2;
+			den *= 2;
 		if (mode->vscan > 1)
-			refresh /= mode->vscan;
+			den *= mode->vscan;
+
+		refresh = DIV_ROUND_CLOSEST(num, den);
 	}
 	return refresh;
 }
 EXPORT_SYMBOL(drm_mode_vrefresh);
+
+/**
+ * drm_mode_get_hv_timing - Fetches hdisplay/vdisplay for given mode
+ * @mode: mode to query
+ * @hdisplay: hdisplay value to fill in
+ * @vdisplay: vdisplay value to fill in
+ *
+ * The vdisplay value will be doubled if the specified mode is a stereo mode of
+ * the appropriate layout.
+ */
+void drm_mode_get_hv_timing(const struct drm_display_mode *mode,
+			    int *hdisplay, int *vdisplay)
+{
+	struct drm_display_mode adjusted = *mode;
+
+	drm_mode_set_crtcinfo(&adjusted, CRTC_STEREO_DOUBLE_ONLY);
+	*hdisplay = adjusted.crtc_hdisplay;
+	*vdisplay = adjusted.crtc_vdisplay;
+}
+EXPORT_SYMBOL(drm_mode_get_hv_timing);
 
 /**
  * drm_mode_set_crtcinfo - set CRTC modesetting timing parameters
@@ -791,7 +840,7 @@ EXPORT_SYMBOL(drm_mode_vrefresh);
  */
 void drm_mode_set_crtcinfo(struct drm_display_mode *p, int adjust_flags)
 {
-	if ((p == NULL) || ((p->type & DRM_MODE_TYPE_CRTC_C) == DRM_MODE_TYPE_BUILTIN))
+	if (!p)
 		return;
 
 	p->crtc_clock = p->clock;
@@ -898,6 +947,99 @@ struct drm_display_mode *drm_mode_duplicate(struct drm_device *dev,
 }
 EXPORT_SYMBOL(drm_mode_duplicate);
 
+static bool drm_mode_match_timings(const struct drm_display_mode *mode1,
+				   const struct drm_display_mode *mode2)
+{
+	return mode1->hdisplay == mode2->hdisplay &&
+		mode1->hsync_start == mode2->hsync_start &&
+		mode1->hsync_end == mode2->hsync_end &&
+		mode1->htotal == mode2->htotal &&
+		mode1->hskew == mode2->hskew &&
+		mode1->vdisplay == mode2->vdisplay &&
+		mode1->vsync_start == mode2->vsync_start &&
+		mode1->vsync_end == mode2->vsync_end &&
+		mode1->vtotal == mode2->vtotal &&
+		mode1->vscan == mode2->vscan;
+}
+
+static bool drm_mode_match_clock(const struct drm_display_mode *mode1,
+				  const struct drm_display_mode *mode2)
+{
+	/*
+	 * do clock check convert to PICOS
+	 * so fb modes get matched the same
+	 */
+	if (mode1->clock && mode2->clock)
+		return KHZ2PICOS(mode1->clock) == KHZ2PICOS(mode2->clock);
+	else
+		return mode1->clock == mode2->clock;
+}
+
+static bool drm_mode_match_flags(const struct drm_display_mode *mode1,
+				 const struct drm_display_mode *mode2)
+{
+	return (mode1->flags & ~DRM_MODE_FLAG_3D_MASK) ==
+		(mode2->flags & ~DRM_MODE_FLAG_3D_MASK);
+}
+
+static bool drm_mode_match_3d_flags(const struct drm_display_mode *mode1,
+				    const struct drm_display_mode *mode2)
+{
+	return (mode1->flags & DRM_MODE_FLAG_3D_MASK) ==
+		(mode2->flags & DRM_MODE_FLAG_3D_MASK);
+}
+
+static bool drm_mode_match_aspect_ratio(const struct drm_display_mode *mode1,
+					const struct drm_display_mode *mode2)
+{
+	return mode1->picture_aspect_ratio == mode2->picture_aspect_ratio;
+}
+
+/**
+ * drm_mode_match - test modes for (partial) equality
+ * @mode1: first mode
+ * @mode2: second mode
+ * @match_flags: which parts need to match (DRM_MODE_MATCH_*)
+ *
+ * Check to see if @mode1 and @mode2 are equivalent.
+ *
+ * Returns:
+ * True if the modes are (partially) equal, false otherwise.
+ */
+bool drm_mode_match(const struct drm_display_mode *mode1,
+		    const struct drm_display_mode *mode2,
+		    unsigned int match_flags)
+{
+	if (!mode1 && !mode2)
+		return true;
+
+	if (!mode1 || !mode2)
+		return false;
+
+	if (match_flags & DRM_MODE_MATCH_TIMINGS &&
+	    !drm_mode_match_timings(mode1, mode2))
+		return false;
+
+	if (match_flags & DRM_MODE_MATCH_CLOCK &&
+	    !drm_mode_match_clock(mode1, mode2))
+		return false;
+
+	if (match_flags & DRM_MODE_MATCH_FLAGS &&
+	    !drm_mode_match_flags(mode1, mode2))
+		return false;
+
+	if (match_flags & DRM_MODE_MATCH_3D_FLAGS &&
+	    !drm_mode_match_3d_flags(mode1, mode2))
+		return false;
+
+	if (match_flags & DRM_MODE_MATCH_ASPECT_RATIO &&
+	    !drm_mode_match_aspect_ratio(mode1, mode2))
+		return false;
+
+	return true;
+}
+EXPORT_SYMBOL(drm_mode_match);
+
 /**
  * drm_mode_equal - test modes for equality
  * @mode1: first mode
@@ -908,23 +1050,15 @@ EXPORT_SYMBOL(drm_mode_duplicate);
  * Returns:
  * True if the modes are equal, false otherwise.
  */
-bool drm_mode_equal(const struct drm_display_mode *mode1, const struct drm_display_mode *mode2)
+bool drm_mode_equal(const struct drm_display_mode *mode1,
+		    const struct drm_display_mode *mode2)
 {
-	if (!mode1 && !mode2)
-		return true;
-
-	if (!mode1 || !mode2)
-		return false;
-
-	/* do clock check convert to PICOS so fb modes get matched
-	 * the same */
-	if (mode1->clock && mode2->clock) {
-		if (KHZ2PICOS(mode1->clock) != KHZ2PICOS(mode2->clock))
-			return false;
-	} else if (mode1->clock != mode2->clock)
-		return false;
-
-	return drm_mode_equal_no_clocks(mode1, mode2);
+	return drm_mode_match(mode1, mode2,
+			      DRM_MODE_MATCH_TIMINGS |
+			      DRM_MODE_MATCH_CLOCK |
+			      DRM_MODE_MATCH_FLAGS |
+			      DRM_MODE_MATCH_3D_FLAGS|
+			      DRM_MODE_MATCH_ASPECT_RATIO);
 }
 EXPORT_SYMBOL(drm_mode_equal);
 
@@ -939,13 +1073,13 @@ EXPORT_SYMBOL(drm_mode_equal);
  * Returns:
  * True if the modes are equal, false otherwise.
  */
-bool drm_mode_equal_no_clocks(const struct drm_display_mode *mode1, const struct drm_display_mode *mode2)
+bool drm_mode_equal_no_clocks(const struct drm_display_mode *mode1,
+			      const struct drm_display_mode *mode2)
 {
-	if ((mode1->flags & DRM_MODE_FLAG_3D_MASK) !=
-	    (mode2->flags & DRM_MODE_FLAG_3D_MASK))
-		return false;
-
-	return drm_mode_equal_no_clocks_no_stereo(mode1, mode2);
+	return drm_mode_match(mode1, mode2,
+			      DRM_MODE_MATCH_TIMINGS |
+			      DRM_MODE_MATCH_FLAGS |
+			      DRM_MODE_MATCH_3D_FLAGS);
 }
 EXPORT_SYMBOL(drm_mode_equal_no_clocks);
 
@@ -963,37 +1097,24 @@ EXPORT_SYMBOL(drm_mode_equal_no_clocks);
 bool drm_mode_equal_no_clocks_no_stereo(const struct drm_display_mode *mode1,
 					const struct drm_display_mode *mode2)
 {
-	if (mode1->hdisplay == mode2->hdisplay &&
-	    mode1->hsync_start == mode2->hsync_start &&
-	    mode1->hsync_end == mode2->hsync_end &&
-	    mode1->htotal == mode2->htotal &&
-	    mode1->hskew == mode2->hskew &&
-	    mode1->vdisplay == mode2->vdisplay &&
-	    mode1->vsync_start == mode2->vsync_start &&
-	    mode1->vsync_end == mode2->vsync_end &&
-	    mode1->vtotal == mode2->vtotal &&
-	    mode1->vscan == mode2->vscan &&
-	    (mode1->flags & ~DRM_MODE_FLAG_3D_MASK) ==
-	     (mode2->flags & ~DRM_MODE_FLAG_3D_MASK))
-		return true;
-
-	return false;
+	return drm_mode_match(mode1, mode2,
+			      DRM_MODE_MATCH_TIMINGS |
+			      DRM_MODE_MATCH_FLAGS);
 }
 EXPORT_SYMBOL(drm_mode_equal_no_clocks_no_stereo);
 
-/**
- * drm_mode_validate_basic - make sure the mode is somewhat sane
- * @mode: mode to check
- *
- * Check that the mode timings are at least somewhat reasonable.
- * Any hardware specific limits are left up for each driver to check.
- *
- * Returns:
- * The mode status
- */
-enum drm_mode_status
+static enum drm_mode_status
 drm_mode_validate_basic(const struct drm_display_mode *mode)
 {
+	if (mode->type & ~DRM_MODE_TYPE_ALL)
+		return MODE_BAD;
+
+	if (mode->flags & ~DRM_MODE_FLAG_ALL)
+		return MODE_BAD;
+
+	if ((mode->flags & DRM_MODE_FLAG_3D_MASK) > DRM_MODE_FLAG_3D_MAX)
+		return MODE_BAD;
+
 	if (mode->clock == 0)
 		return MODE_CLOCK_LOW;
 
@@ -1011,7 +1132,35 @@ drm_mode_validate_basic(const struct drm_display_mode *mode)
 
 	return MODE_OK;
 }
-EXPORT_SYMBOL(drm_mode_validate_basic);
+
+/**
+ * drm_mode_validate_driver - make sure the mode is somewhat sane
+ * @dev: drm device
+ * @mode: mode to check
+ *
+ * First do basic validation on the mode, and then allow the driver
+ * to check for device/driver specific limitations via the optional
+ * &drm_mode_config_helper_funcs.mode_valid hook.
+ *
+ * Returns:
+ * The mode status
+ */
+enum drm_mode_status
+drm_mode_validate_driver(struct drm_device *dev,
+			const struct drm_display_mode *mode)
+{
+	enum drm_mode_status status;
+
+	status = drm_mode_validate_basic(mode);
+	if (status != MODE_OK)
+		return status;
+
+	if (dev->mode_config.funcs->mode_valid)
+		return dev->mode_config.funcs->mode_valid(dev, mode);
+	else
+		return MODE_OK;
+}
+EXPORT_SYMBOL(drm_mode_validate_driver);
 
 /**
  * drm_mode_validate_size - make sure modes adhere to size constraints
@@ -1109,14 +1258,14 @@ static const char * const drm_mode_status_names[] = {
 	MODE_STATUS(NO_REDUCED),
 	MODE_STATUS(NO_STEREO),
 	MODE_STATUS(NO_420),
-	MODE_STATUS(UNVERIFIED),
+	MODE_STATUS(STALE),
 	MODE_STATUS(BAD),
 	MODE_STATUS(ERROR),
 };
 
 #undef MODE_STATUS
 
-static const char *drm_get_mode_status_name(enum drm_mode_status status)
+const char *drm_get_mode_status_name(enum drm_mode_status status)
 {
 	int index = status + 3;
 
@@ -1205,9 +1354,8 @@ void drm_mode_sort(struct list_head *mode_list)
 EXPORT_SYMBOL(drm_mode_sort);
 
 /**
- * drm_mode_connector_list_update - update the mode list for the connector
+ * drm_connector_list_update - update the mode list for the connector
  * @connector: the connector to update
- * @merge_type_bits: whether to merge or overwrite type bits
  *
  * This moves the modes from the @connector probed_modes list
  * to the actual mode list. It compares the probed mode against the current
@@ -1216,33 +1364,48 @@ EXPORT_SYMBOL(drm_mode_sort);
  * This is just a helper functions doesn't validate any modes itself and also
  * doesn't prune any invalid modes. Callers need to do that themselves.
  */
-void drm_mode_connector_list_update(struct drm_connector *connector,
-				    bool merge_type_bits)
+void drm_connector_list_update(struct drm_connector *connector)
 {
-	struct drm_display_mode *mode;
 	struct drm_display_mode *pmode, *pt;
-	int found_it;
 
 	WARN_ON(!mutex_is_locked(&connector->dev->mode_config.mutex));
 
-	list_for_each_entry_safe(pmode, pt, &connector->probed_modes,
-				 head) {
-		found_it = 0;
+	list_for_each_entry_safe(pmode, pt, &connector->probed_modes, head) {
+		struct drm_display_mode *mode;
+		bool found_it = false;
+
 		/* go through current modes checking for the new probed mode */
 		list_for_each_entry(mode, &connector->modes, head) {
-			if (drm_mode_equal(pmode, mode)) {
-				found_it = 1;
-				/* if equal delete the probed mode */
-				mode->status = pmode->status;
-				/* Merge type bits together */
-				if (merge_type_bits)
-					mode->type |= pmode->type;
-				else
-					mode->type = pmode->type;
-				list_del(&pmode->head);
-				drm_mode_destroy(connector->dev, pmode);
-				break;
+			if (!drm_mode_equal(pmode, mode))
+				continue;
+
+			found_it = true;
+
+			/*
+			 * If the old matching mode is stale (ie. left over
+			 * from a previous probe) just replace it outright.
+			 * Otherwise just merge the type bits between all
+			 * equal probed modes.
+			 *
+			 * If two probed modes are considered equal, pick the
+			 * actual timings from the one that's marked as
+			 * preferred (in case the match isn't 100%). If
+			 * multiple or zero preferred modes are present, favor
+			 * the mode added to the probed_modes list first.
+			 */
+			if (mode->status == MODE_STALE) {
+				drm_mode_copy(mode, pmode);
+			} else if ((mode->type & DRM_MODE_TYPE_PREFERRED) == 0 &&
+				   (pmode->type & DRM_MODE_TYPE_PREFERRED) != 0) {
+				pmode->type |= mode->type;
+				drm_mode_copy(mode, pmode);
+			} else {
+				mode->type |= pmode->type;
 			}
+
+			list_del(&pmode->head);
+			drm_mode_destroy(connector->dev, pmode);
+			break;
 		}
 
 		if (!found_it) {
@@ -1250,7 +1413,7 @@ void drm_mode_connector_list_update(struct drm_connector *connector,
 		}
 	}
 }
-EXPORT_SYMBOL(drm_mode_connector_list_update);
+EXPORT_SYMBOL(drm_connector_list_update);
 
 /**
  * drm_mode_parse_command_line_for_connector - parse command line modeline for connector
@@ -1263,7 +1426,7 @@ EXPORT_SYMBOL(drm_mode_connector_list_update);
  * modeline in fb_mode_option will be parsed instead.
  *
  * This uses the same parameters as the fb modedb.c, except for an extra
- * force-enable, force-enable-digital and force-disable bit at the end:
+ * force-enable, force-enable-digital and force-disable bit at the end::
  *
  *	<xres>x<yres>[M][R][-<bpp>][@<refresh>][i][m][eDd]
  *
@@ -1392,8 +1555,7 @@ bool drm_mode_parse_command_line_for_connector(const char *mode_option,
 	}
 done:
 	if (i >= 0) {
-		printk(KERN_WARNING
-			"parse error at position %i in video mode '%s'\n",
+		pr_warn("[drm] parse error at position %i in video mode '%s'\n",
 			i, name);
 		mode->specified = false;
 		return false;
@@ -1455,12 +1617,8 @@ drm_mode_create_from_cmdline_mode(struct drm_device *dev,
 
 	mode->type |= DRM_MODE_TYPE_USERDEF;
 	/* fix up 1368x768: GFT/CVT can't express 1366 width due to alignment */
-	if (cmd->xres == 1366 && mode->hdisplay == 1368) {
-		mode->hdisplay = 1366;
-		mode->hsync_start--;
-		mode->hsync_end--;
-		drm_mode_set_name(mode);
-	}
+	if (cmd->xres == 1366)
+		drm_mode_fixup_1366x768(mode);
 	drm_mode_set_crtcinfo(mode, CRTC_INTERLACE_HALVE_V);
 	return mode;
 }
@@ -1498,12 +1656,33 @@ void drm_mode_convert_to_umode(struct drm_mode_modeinfo *out,
 	out->vrefresh = in->vrefresh;
 	out->flags = in->flags;
 	out->type = in->type;
+
+	switch (in->picture_aspect_ratio) {
+	case HDMI_PICTURE_ASPECT_4_3:
+		out->flags |= DRM_MODE_FLAG_PIC_AR_4_3;
+		break;
+	case HDMI_PICTURE_ASPECT_16_9:
+		out->flags |= DRM_MODE_FLAG_PIC_AR_16_9;
+		break;
+	case HDMI_PICTURE_ASPECT_64_27:
+		out->flags |= DRM_MODE_FLAG_PIC_AR_64_27;
+		break;
+	case HDMI_PICTURE_ASPECT_256_135:
+		out->flags |= DRM_MODE_FLAG_PIC_AR_256_135;
+		break;
+	case HDMI_PICTURE_ASPECT_RESERVED:
+	default:
+		out->flags |= DRM_MODE_FLAG_PIC_AR_NONE;
+		break;
+	}
+
 	strncpy(out->name, in->name, DRM_DISPLAY_MODE_LEN);
 	out->name[DRM_DISPLAY_MODE_LEN-1] = 0;
 }
 
 /**
  * drm_crtc_convert_umode - convert a modeinfo into a drm_display_mode
+ * @dev: drm device
  * @out: drm_display_mode to return to the user
  * @in: drm_mode_modeinfo to use
  *
@@ -1513,18 +1692,12 @@ void drm_mode_convert_to_umode(struct drm_mode_modeinfo *out,
  * Returns:
  * Zero on success, negative errno on failure.
  */
-int drm_mode_convert_umode(struct drm_display_mode *out,
+int drm_mode_convert_umode(struct drm_device *dev,
+			   struct drm_display_mode *out,
 			   const struct drm_mode_modeinfo *in)
 {
-	int ret = -EINVAL;
-
-	if (in->clock > INT_MAX || in->vrefresh > INT_MAX) {
-		ret = -ERANGE;
-		goto out;
-	}
-
-	if ((in->flags & DRM_MODE_FLAG_3D_MASK) > DRM_MODE_FLAG_3D_MAX)
-		goto out;
+	if (in->clock > INT_MAX || in->vrefresh > INT_MAX)
+		return -ERANGE;
 
 	out->clock = in->clock;
 	out->hdisplay = in->hdisplay;
@@ -1539,27 +1712,54 @@ int drm_mode_convert_umode(struct drm_display_mode *out,
 	out->vscan = in->vscan;
 	out->vrefresh = in->vrefresh;
 	out->flags = in->flags;
-	out->type = in->type;
+	/*
+	 * Old xf86-video-vmware (possibly others too) used to
+	 * leave 'type' unititialized. Just ignore any bits we
+	 * don't like. It's a just hint after all, and more
+	 * useful for the kernel->userspace direction anyway.
+	 */
+	out->type = in->type & DRM_MODE_TYPE_ALL;
 	strncpy(out->name, in->name, DRM_DISPLAY_MODE_LEN);
 	out->name[DRM_DISPLAY_MODE_LEN-1] = 0;
 
-	out->status = drm_mode_validate_basic(out);
+	/* Clearing picture aspect ratio bits from out flags,
+	 * as the aspect-ratio information is not stored in
+	 * flags for kernel-mode, but in picture_aspect_ratio.
+	 */
+	out->flags &= ~DRM_MODE_FLAG_PIC_AR_MASK;
+
+	switch (in->flags & DRM_MODE_FLAG_PIC_AR_MASK) {
+	case DRM_MODE_FLAG_PIC_AR_4_3:
+		out->picture_aspect_ratio |= HDMI_PICTURE_ASPECT_4_3;
+		break;
+	case DRM_MODE_FLAG_PIC_AR_16_9:
+		out->picture_aspect_ratio |= HDMI_PICTURE_ASPECT_16_9;
+		break;
+	case DRM_MODE_FLAG_PIC_AR_64_27:
+		out->picture_aspect_ratio |= HDMI_PICTURE_ASPECT_64_27;
+		break;
+	case DRM_MODE_FLAG_PIC_AR_256_135:
+		out->picture_aspect_ratio |= HDMI_PICTURE_ASPECT_256_135;
+		break;
+	default:
+		out->picture_aspect_ratio = HDMI_PICTURE_ASPECT_NONE;
+		break;
+	}
+
+	out->status = drm_mode_validate_driver(dev, out);
 	if (out->status != MODE_OK)
-		goto out;
+		return -EINVAL;
 
 	drm_mode_set_crtcinfo(out, CRTC_INTERLACE_HALVE_V);
 
-	ret = 0;
-
-out:
-	return ret;
+	return 0;
 }
 
 /**
  * drm_mode_is_420_only - if a given videomode can be only supported in YCBCR420
  * output format
  *
- * @connector: drm connector under action.
+ * @display: display under action
  * @mode: video mode to be tested.
  *
  * Returns:

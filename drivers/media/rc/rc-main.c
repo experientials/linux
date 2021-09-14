@@ -1,16 +1,7 @@
-/* rc-main.c - Remote Controller core module
- *
- * Copyright (C) 2009-2010 by Mauro Carvalho Chehab
- *
- * This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation version 2 of the License.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0
+// rc-main.c - Remote Controller core module
+//
+// Copyright (C) 2009-2010 by Mauro Carvalho Chehab
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
@@ -172,10 +163,11 @@ static struct rc_map_list empty_map = {
  * @name:	name to assign to the table
  * @rc_proto:	ir type to assign to the new table
  * @size:	initial size of the table
- * @return:	zero on success or a negative error code
  *
  * This routine will initialize the rc_map and will allocate
  * memory to hold at least the specified number of elements.
+ *
+ * return:	zero on success or a negative error code
  */
 static int ir_create_table(struct rc_dev *dev, struct rc_map *rc_map,
 			   const char *name, u64 rc_proto, size_t size)
@@ -219,10 +211,11 @@ static void ir_free_table(struct rc_map *rc_map)
  * @dev:	the rc_dev device
  * @rc_map:	the rc_map to resize
  * @gfp_flags:	gfp flags to use when allocating memory
- * @return:	zero on success or a negative error code
  *
  * This routine will shrink the rc_map if it has lots of
  * unused entries and grow it if it is full.
+ *
+ * return:	zero on success or a negative error code
  */
 static int ir_resize_table(struct rc_dev *dev, struct rc_map *rc_map,
 			   gfp_t gfp_flags)
@@ -267,11 +260,13 @@ static int ir_resize_table(struct rc_dev *dev, struct rc_map *rc_map,
  * @dev:	the struct rc_dev device descriptor
  * @rc_map:	scancode table to be adjusted
  * @index:	index of the mapping that needs to be updated
- * @keycode:	the desired keycode
- * @return:	previous keycode assigned to the mapping
+ * @new_keycode: the desired keycode
  *
  * This routine is used to update scancode->keycode mapping at given
  * position.
+ *
+ * return:	previous keycode assigned to the mapping
+ *
  */
 static unsigned int ir_update_mapping(struct rc_dev *dev,
 				      struct rc_map *rc_map,
@@ -279,6 +274,7 @@ static unsigned int ir_update_mapping(struct rc_dev *dev,
 				      unsigned int new_keycode)
 {
 	int old_keycode = rc_map->scan[index].keycode;
+	int i;
 
 	/* Did the user wish to remove the mapping? */
 	if (new_keycode == KEY_RESERVED || new_keycode == KEY_UNKNOWN) {
@@ -293,9 +289,20 @@ static unsigned int ir_update_mapping(struct rc_dev *dev,
 			old_keycode == KEY_RESERVED ? "New" : "Replacing",
 			rc_map->scan[index].scancode, new_keycode);
 		rc_map->scan[index].keycode = new_keycode;
+		__set_bit(new_keycode, dev->input_dev->keybit);
 	}
 
 	if (old_keycode != KEY_RESERVED) {
+		/* A previous mapping was updated... */
+		__clear_bit(old_keycode, dev->input_dev->keybit);
+		/* ... but another scancode might use the same keycode */
+		for (i = 0; i < rc_map->len; i++) {
+			if (rc_map->scan[i].keycode == old_keycode) {
+				__set_bit(old_keycode, dev->input_dev->keybit);
+				break;
+			}
+		}
+
 		/* Possibly shrink the keytable, failure is not a problem */
 		ir_resize_table(dev, rc_map, GFP_ATOMIC);
 	}
@@ -310,12 +317,13 @@ static unsigned int ir_update_mapping(struct rc_dev *dev,
  * @scancode:	the desired scancode
  * @resize:	controls whether we allowed to resize the table to
  *		accommodate not yet present scancodes
- * @return:	index of the mapping containing scancode in question
- *		or -1U in case of failure.
  *
  * This routine is used to locate given scancode in rc_map.
  * If scancode is not yet present the routine will allocate a new slot
  * for it.
+ *
+ * return:	index of the mapping containing scancode in question
+ *		or -1U in case of failure.
  */
 static unsigned int ir_establish_scancode(struct rc_dev *dev,
 					  struct rc_map *rc_map,
@@ -365,11 +373,12 @@ static unsigned int ir_establish_scancode(struct rc_dev *dev,
 /**
  * ir_setkeycode() - set a keycode in the scancode->keycode table
  * @idev:	the struct input_dev device descriptor
- * @scancode:	the desired scancode
- * @keycode:	result
- * @return:	-EINVAL if the keycode could not be inserted, otherwise zero.
+ * @ke:		Input keymap entry
+ * @old_keycode: result
  *
  * This routine is used to handle evdev EVIOCSKEY ioctl.
+ *
+ * return:	-EINVAL if the keycode could not be inserted, otherwise zero.
  */
 static int ir_setkeycode(struct input_dev *idev,
 			 const struct input_keymap_entry *ke,
@@ -412,11 +421,11 @@ out:
 /**
  * ir_setkeytable() - sets several entries in the scancode->keycode table
  * @dev:	the struct rc_dev device descriptor
- * @to:		the struct rc_map to copy entries to
  * @from:	the struct rc_map to copy entries from
- * @return:	-ENOMEM if all keycodes could not be inserted, otherwise zero.
  *
  * This routine is used to handle table initialization.
+ *
+ * return:	-ENOMEM if all keycodes could not be inserted, otherwise zero.
  */
 static int ir_setkeytable(struct rc_dev *dev,
 			  const struct rc_map *from)
@@ -464,10 +473,11 @@ static int rc_map_cmp(const void *key, const void *elt)
  * ir_lookup_by_scancode() - locate mapping by scancode
  * @rc_map:	the struct rc_map to search
  * @scancode:	scancode to look for in the table
- * @return:	index in the table, -1U if not found
  *
  * This routine performs binary search in RC keykeymap table for
  * given scancode.
+ *
+ * return:	index in the table, -1U if not found
  */
 static unsigned int ir_lookup_by_scancode(const struct rc_map *rc_map,
 					  unsigned int scancode)
@@ -485,11 +495,11 @@ static unsigned int ir_lookup_by_scancode(const struct rc_map *rc_map,
 /**
  * ir_getkeycode() - get a keycode from the scancode->keycode table
  * @idev:	the struct input_dev device descriptor
- * @scancode:	the desired scancode
- * @keycode:	used to return the keycode, if found, or KEY_RESERVED
- * @return:	always returns zero.
+ * @ke:		Input keymap entry
  *
  * This routine is used to handle evdev EVIOCGKEY ioctl.
+ *
+ * return:	always returns zero.
  */
 static int ir_getkeycode(struct input_dev *idev,
 			 struct input_keymap_entry *ke)
@@ -546,11 +556,12 @@ out:
  * rc_g_keycode_from_table() - gets the keycode that corresponds to a scancode
  * @dev:	the struct rc_dev descriptor of the device
  * @scancode:	the scancode to look for
- * @return:	the corresponding keycode, or KEY_RESERVED
  *
  * This routine is used by drivers which need to convert a scancode to a
  * keycode. Normally it should not be used since drivers should have no
  * interest in keycodes.
+ *
+ * return:	the corresponding keycode, or KEY_RESERVED
  */
 u32 rc_g_keycode_from_table(struct rc_dev *dev, u32 scancode)
 {
@@ -616,7 +627,8 @@ EXPORT_SYMBOL_GPL(rc_keyup);
 
 /**
  * ir_timer_keyup() - generates a keyup event after a timeout
- * @cookie:	a pointer to the struct rc_dev for the device
+ *
+ * @t:		a pointer to the struct timer_list
  *
  * This routine will generate a keyup event some time after a keydown event
  * is generated when no further activity has been detected.
@@ -882,7 +894,8 @@ bool rc_validate_scancode(enum rc_proto proto, u32 scancode)
  *			  provides sensible defaults
  * @dev:	the struct rc_dev descriptor of the device
  * @filter:	the scancode and mask
- * @return:	0 or -EINVAL if the filter is not valid
+ *
+ * return:	0 or -EINVAL if the filter is not valid
  */
 static int rc_validate_filter(struct rc_dev *dev,
 			      struct rc_scancode_filter *filter)
@@ -1744,18 +1757,10 @@ static int rc_prepare_rx_device(struct rc_dev *dev)
 		dev->enabled_protocols = rc_proto;
 	}
 
-	/* Keyboard events */
 	set_bit(EV_KEY, dev->input_dev->evbit);
 	set_bit(EV_REP, dev->input_dev->evbit);
 	set_bit(EV_MSC, dev->input_dev->evbit);
 	set_bit(MSC_SCAN, dev->input_dev->mscbit);
-	bitmap_fill(dev->input_dev->keybit, KEY_CNT);
-
-	/* Pointer/mouse events */
-	set_bit(EV_REL, dev->input_dev->evbit);
-	set_bit(REL_X, dev->input_dev->relbit);
-	set_bit(REL_Y, dev->input_dev->relbit);
-
 	if (dev->open)
 		dev->input_dev->open = ir_open;
 	if (dev->close)
@@ -1869,23 +1874,28 @@ int rc_register_device(struct rc_dev *dev)
 
 	dev->registered = true;
 
-	if (dev->driver_type != RC_DRIVER_IR_RAW_TX) {
-		rc = rc_setup_rx_device(dev);
-		if (rc)
-			goto out_dev;
-	}
-
-	/* Ensure that the lirc kfifo is setup before we start the thread */
+	/*
+	 * once the the input device is registered in rc_setup_rx_device,
+	 * userspace can open the input device and rc_open() will be called
+	 * as a result. This results in driver code being allowed to submit
+	 * keycodes with rc_keydown, so lirc must be registered first.
+	 */
 	if (dev->allowed_protocols != RC_PROTO_BIT_CEC) {
 		rc = ir_lirc_register(dev);
 		if (rc < 0)
-			goto out_rx;
+			goto out_dev;
+	}
+
+	if (dev->driver_type != RC_DRIVER_IR_RAW_TX) {
+		rc = rc_setup_rx_device(dev);
+		if (rc)
+			goto out_lirc;
 	}
 
 	if (dev->driver_type == RC_DRIVER_IR_RAW) {
 		rc = ir_raw_event_register(dev);
 		if (rc < 0)
-			goto out_lirc;
+			goto out_rx;
 	}
 
 	dev_dbg(&dev->dev, "Registered rc%u (driver: %s)\n", dev->minor,
@@ -1893,11 +1903,11 @@ int rc_register_device(struct rc_dev *dev)
 
 	return 0;
 
+out_rx:
+	rc_free_rx_device(dev);
 out_lirc:
 	if (dev->allowed_protocols != RC_PROTO_BIT_CEC)
 		ir_lirc_unregister(dev);
-out_rx:
-	rc_free_rx_device(dev);
 out_dev:
 	device_del(&dev->dev);
 out_rx_free:
@@ -2010,4 +2020,4 @@ subsys_initcall(rc_core_init);
 module_exit(rc_core_exit);
 
 MODULE_AUTHOR("Mauro Carvalho Chehab");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

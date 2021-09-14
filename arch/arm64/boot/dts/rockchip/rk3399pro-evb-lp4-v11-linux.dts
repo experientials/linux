@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
-// Copyright (c) 2019 Fuzhou Rockchip Electronics Co., Ltd
+// Copyright (c) 2020 Fuzhou Rockchip Electronics Co., Ltd
 
 /dts-v1/;
-#include <dt-bindings/soc/rockchip-io-domain.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/pinctrl/rockchip.h>
 #include <dt-bindings/input/input.h>
@@ -114,6 +113,21 @@
 		interrupts = <GIC_SPI 150 IRQ_TYPE_LEVEL_HIGH 0>;
 	};
 
+	hdmi_sound: hdmi-sound {
+		status = "okay";
+		compatible = "simple-audio-card";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,mclk-fs = <256>;
+		simple-audio-card,name = "rockchip,hdmi";
+
+		simple-audio-card,cpu {
+			sound-dai = <&i2s2>;
+		};
+		simple-audio-card,codec {
+			sound-dai = <&hdmi>;
+		};
+	};
+
 	panel: panel {
 		compatible = "simple-panel";
 		backlight = <&backlight>;
@@ -158,22 +172,7 @@
 		rockchip,codec = <&rk809_codec>;
 	};
 
-	hdmi_sound: hdmi-sound {
-		status = "okay";
-		compatible = "simple-audio-card";
-		simple-audio-card,format = "i2s";
-		simple-audio-card,mclk-fs = <256>;
-		simple-audio-card,name = "rockchip,hdmi";
-
-		simple-audio-card,cpu {
-			sound-dai = <&i2s2>;
-		};
-		simple-audio-card,codec {
-			sound-dai = <&hdmi>;
-		};
-	};
-
-	rk_headset {
+	rk_headset: rk-headset {
 		compatible = "rockchip_headset";
 		headset_gpio = <&gpio0 RK_PB5 GPIO_ACTIVE_HIGH>;
 		pinctrl-names = "default";
@@ -195,6 +194,11 @@
 		 * - PDN (power down when low)
 		 */
 		reset-gpios = <&gpio2 RK_PD3 GPIO_ACTIVE_LOW>;
+	};
+
+	usbacm_video_control: usbacm-video-control {
+		compatible = "rockchip,usbacm-video-control";
+		status = "disabled";
 	};
 
 	vcc_phy: vcc-phy-regulator {
@@ -271,6 +275,10 @@
 	status = "okay";
 };
 
+&dfi {
+	status = "okay";
+};
+
 &dmc {
 	status = "okay";
 	center-supply = <&vdd_center>;
@@ -279,9 +287,9 @@
 	system-status-freq = <
 		/*system status         freq(KHz)*/
 		SYS_STATUS_NORMAL       856000
-		SYS_STATUS_REBOOT       416000
-		SYS_STATUS_SUSPEND      416000
-		SYS_STATUS_VIDEO_1080P  416000
+		SYS_STATUS_REBOOT       856000
+		SYS_STATUS_SUSPEND      328000
+		SYS_STATUS_VIDEO_1080P  666000
 		SYS_STATUS_VIDEO_4K     856000
 		SYS_STATUS_VIDEO_4K_10B 856000
 		SYS_STATUS_PERFORMANCE  856000
@@ -289,71 +297,76 @@
 		SYS_STATUS_DUALVIEW     856000
 		SYS_STATUS_ISP          856000
 	>;
-	vop-pn-msch-readlatency = <
-	/* plane_number  readlatency */
-		0	0
-		4	0x20
-	>;
 	vop-bw-dmc-freq = <
 	/* min_bw(MB/s) max_bw(MB/s) freq(KHz) */
-		763     1893     416000
+		0       762      416000
+		763     3012     666000
 		3013    99999    856000
 	>;
-	auto-min-freq = <416000>;
+
+	vop-pn-msch-readlatency = <
+		0	0x20
+		4	0x20
+	>;
+
+	auto-min-freq = <328000>;
 	auto-freq-en = <0>;
 };
 
 &dmc_opp_table {
-	compatible = "operating-points-v2";
+		compatible = "operating-points-v2";
 
-	opp-200000000 {
-		opp-hz = /bits/ 64 <200000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-300000000 {
-		opp-hz = /bits/ 64 <300000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-400000000 {
-		opp-hz = /bits/ 64 <400000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-416000000 {
-		opp-hz = /bits/ 64 <416000000>;
-		opp-microvolt = <900000>;
-	};
-	opp-528000000 {
-		opp-hz = /bits/ 64 <528000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-600000000 {
-		opp-hz = /bits/ 64 <600000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-800000000 {
-		opp-hz = /bits/ 64 <800000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-856000000 {
-		opp-hz = /bits/ 64 <856000000>;
-		opp-microvolt = <900000>;
-	};
-	opp-928000000 {
-		opp-hz = /bits/ 64 <928000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-1056000000 {
-		opp-hz = /bits/ 64 <1056000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
+		opp-200000000 {
+			opp-hz = /bits/ 64 <200000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-300000000 {
+			opp-hz = /bits/ 64 <300000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-328000000 {
+			opp-hz = /bits/ 64 <328000000>;
+			opp-microvolt = <900000>;
+		};
+		opp-400000000 {
+			opp-hz = /bits/ 64 <400000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-416000000 {
+			opp-hz = /bits/ 64 <416000000>;
+			opp-microvolt = <900000>;
+		};
+		opp-528000000 {
+			opp-hz = /bits/ 64 <528000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-600000000 {
+			opp-hz = /bits/ 64 <600000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-666000000 {
+			opp-hz = /bits/ 64 <666000000>;
+			opp-microvolt = <900000>;
+		};
+		opp-800000000 {
+			opp-hz = /bits/ 64 <800000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-856000000 {
+			opp-hz = /bits/ 64 <856000000>;
+			opp-microvolt = <900000>;
+		};
+		opp-928000000 {
+			opp-hz = /bits/ 64 <928000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
 };
 
 &dp_in_vopb {
@@ -792,14 +805,6 @@
 		layout = <3>;
 	};
 
-	vm149c: vm149c@0c {
-		compatible = "silicon touch,vm149c";
-		status = "okay";
-		reg = <0x0c>;
-		rockchip,camera-module-index = <0>;
-		rockchip,camera-module-facing = "back";
-	};
-
 	ov13850: ov13850@10 {
 		compatible = "ovti,ov13850";
 		status = "okay";
@@ -812,11 +817,6 @@
 		pwdn-gpios = <&gpio4 25 GPIO_ACTIVE_HIGH>;
 		pinctrl-names = "rockchip,camera_default";
 		pinctrl-0 = <&cif_clkout>;
-		rockchip,camera-module-index = <0>;
-		rockchip,camera-module-facing = "back";
-		rockchip,camera-module-name = "CMK-CT0116";
-		rockchip,camera-module-lens-name = "Largan-50013A1";
-		lens-focus = <&vm149c>;
 
 		port {
 			ucam_out0: endpoint {
@@ -896,28 +896,6 @@
 
 &io_domains {
 	status = "okay";
-	/*
-	 * If the uboot use rkdevelop branch, the io-domain is not set
-	 * during uboot phase, it will cause the io voltage is not suit for
-	 * the hardware,maybe will damage the io of rk3399, so we add
-	 * uboot-set value to make sure the value is same with the kernel,
-	 * ofcause you must make sure firstly the value here is suit for your
-	 * hardware. The available value is defined in
-	 * include/dt-bindings/soc/rockchip-io-domain.h, they are
-	 * also list here for more convenient configuration:
-	 * bt656-supply: RK3399_BT656_VDD_1V8 or RK3399_BT656_VDD_3V3
-	 * audio-supply: RK3399_AUDIO_VDD_1V8 or RK3399_AUDIO_VDD_3V3
-	 * gpio1830-supply: RK3399_GPIO1833_VDD_1V8 or RK3399_GPIO1833_VDD_3V3
-	 * sdmmc-supply: don't need to configure because the voltage
-	 *                       is set in source code during runtime.
-	 * NOTE:
-	 * 1. The value in uboot-set must be enclosed in "()", otherwise will
-	 *     cause compile error.
-	 * 2. The uboot-set configuration must be cooperated with submit
-	 *     in u-boot.
-	 */
-	uboot-set = <(RK3399_BT656_VDD_1V8 | RK3399_AUDIO_VDD_1V8 |
-				RK3399_GPIO1833_VDD_3V3)>;
 	bt656-supply = <&vcca_1v8>;
 	audio-supply = <&vcca_1v8>;
 	sdmmc-supply = <&vccio_sd>;
@@ -1012,18 +990,6 @@
 
 &pmu_io_domains {
 	status = "okay";
-	/*
-	 * If the uboot use rkdevelop branch, the pmu_io_domain is not set
-	 * during uboot phase, it will cause the io voltage is not suit for
-	 * the hardware,maybe will damage the io of rk3399, so we add
-	 * uboot-set value to make sure the value is same with the kernel,
-	 * ofcause you must make sure firstly the value here is suit for your
-	 * hardware. The available value is defined in
-	 * include/dt-bindings/soc/rockchip-io-domain.h, they are
-	 * also list here for more convenient configuration:
-	 * pmu1830-supply: RK3399_PMU1830_VDD_1V8 or RK3399_PMU1830_VDD_3V0
-	 */
-	uboot-set = <RK3399_PMU1830_VDD_1V8>;
 	pmu1830-supply = <&vcc_1v8>;
 };
 
@@ -1062,12 +1028,6 @@
 			remote-endpoint = <&dphy_tx1rx1_out>;
 		};
 	};
-};
-
-&rkvdec {
-	status = "okay";
-	/* 0 means ion, 1 means drm */
-	//allocator = <0>;
 };
 
 &rockchip_suspend {
@@ -1173,7 +1133,6 @@
 &usb_host1_ehci {
 	status = "okay";
 };
-
 &usb_host0_ohci {
 	status = "okay";
 };
@@ -1183,7 +1142,6 @@
 };
 
 &usbdrd3_0 {
-	extcon = <&fusb0>;
 	status = "okay";
 };
 
@@ -1193,6 +1151,7 @@
 
 &usbdrd_dwc3_0 {
 	status = "okay";
+	extcon = <&fusb0>;
 };
 
 &usbdrd_dwc3_1 {
@@ -1213,12 +1172,6 @@
 
 &vopl_mmu {
 	status = "okay";
-};
-
-&vpu {
-	status = "okay";
-	/* 0 means ion, 1 means drm */
-	//allocator = <0>;
 };
 
 &pinctrl {

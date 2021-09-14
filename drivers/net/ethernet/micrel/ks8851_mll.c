@@ -30,6 +30,7 @@
 #include <linux/ethtool.h>
 #include <linux/cache.h>
 #include <linux/crc32.h>
+#include <linux/crc32poly.h>
 #include <linux/mii.h>
 #include <linux/platform_device.h>
 #include <linux/delay.h>
@@ -475,24 +476,6 @@ static int msg_enable;
  */
 
 /**
- * ks_rdreg8 - read 8 bit register from device
- * @ks	  : The chip information
- * @offset: The register address
- *
- * Read a 8bit register from the chip, returning the result
- */
-static u8 ks_rdreg8(struct ks_net *ks, int offset)
-{
-	u16 data;
-	u8 shift_bit = offset & 0x03;
-	u8 shift_data = (offset & 1) << 3;
-	ks->cmd_reg_cache = (u16) offset | (u16)(BE0 << shift_bit);
-	iowrite16(ks->cmd_reg_cache, ks->hw_addr_cmd);
-	data  = ioread16(ks->hw_addr);
-	return (u8)(data >> shift_data);
-}
-
-/**
  * ks_rdreg16 - read 16 bit register from device
  * @ks	  : The chip information
  * @offset: The register address
@@ -502,25 +485,9 @@ static u8 ks_rdreg8(struct ks_net *ks, int offset)
 
 static u16 ks_rdreg16(struct ks_net *ks, int offset)
 {
-	ks->cmd_reg_cache = (u16)offset | ((BE1 | BE0) << (offset & 0x02));
+	ks->cmd_reg_cache = (u16)offset | ((BE3 | BE2) >> (offset & 0x02));
 	iowrite16(ks->cmd_reg_cache, ks->hw_addr_cmd);
 	return ioread16(ks->hw_addr);
-}
-
-/**
- * ks_wrreg8 - write 8bit register value to chip
- * @ks: The chip information
- * @offset: The register address
- * @value: The value to write
- *
- */
-static void ks_wrreg8(struct ks_net *ks, int offset, u8 value)
-{
-	u8  shift_bit = (offset & 0x03);
-	u16 value_write = (u16)(value << ((offset & 1) << 3));
-	ks->cmd_reg_cache = (u16)offset | (BE0 << shift_bit);
-	iowrite16(ks->cmd_reg_cache, ks->hw_addr_cmd);
-	iowrite16(value_write, ks->hw_addr);
 }
 
 /**
@@ -533,7 +500,7 @@ static void ks_wrreg8(struct ks_net *ks, int offset, u8 value)
 
 static void ks_wrreg16(struct ks_net *ks, int offset, u16 value)
 {
-	ks->cmd_reg_cache = (u16)offset | ((BE1 | BE0) << (offset & 0x02));
+	ks->cmd_reg_cache = (u16)offset | ((BE3 | BE2) >> (offset & 0x02));
 	iowrite16(ks->cmd_reg_cache, ks->hw_addr_cmd);
 	iowrite16(value, ks->hw_addr);
 }
@@ -549,7 +516,7 @@ static inline void ks_inblk(struct ks_net *ks, u16 *wptr, u32 len)
 {
 	len >>= 1;
 	while (len--)
-		*wptr++ = (u16)ioread16(ks->hw_addr);
+		*wptr++ = be16_to_cpu(ioread16(ks->hw_addr));
 }
 
 /**
@@ -563,7 +530,7 @@ static inline void ks_outblk(struct ks_net *ks, u16 *wptr, u32 len)
 {
 	len >>= 1;
 	while (len--)
-		iowrite16(*wptr++, ks->hw_addr);
+		iowrite16(cpu_to_be16(*wptr++), ks->hw_addr);
 }
 
 static void ks_disable_int(struct ks_net *ks)
@@ -642,8 +609,7 @@ static void ks_read_config(struct ks_net *ks)
 	u16 reg_data = 0;
 
 	/* Regardless of bus width, 8 bit read should always work.*/
-	reg_data = ks_rdreg8(ks, KS_CCR) & 0x00FF;
-	reg_data |= ks_rdreg8(ks, KS_CCR+1) << 8;
+	reg_data = ks_rdreg16(ks, KS_CCR);
 
 	/* addr/data bus are multiplexed */
 	ks->sharedbus = (reg_data & CCR_SHARED) == CCR_SHARED;
@@ -747,7 +713,7 @@ static inline void ks_read_qmu(struct ks_net *ks, u16 *buf, u32 len)
 
 	/* 1. set sudo DMA mode */
 	ks_wrreg16(ks, KS_RXFDPR, RXFDPR_RXFPAI);
-	ks_wrreg8(ks, KS_RXQCR, (ks->rc_rxqcr | RXQCR_SDA) & 0xff);
+	ks_wrreg16(ks, KS_RXQCR, ks->rc_rxqcr | RXQCR_SDA);
 
 	/* 2. read prepend data */
 	/**
@@ -764,7 +730,7 @@ static inline void ks_read_qmu(struct ks_net *ks, u16 *buf, u32 len)
 	ks_inblk(ks, buf, ALIGN(len, 4));
 
 	/* 4. reset sudo DMA Mode */
-	ks_wrreg8(ks, KS_RXQCR, ks->rc_rxqcr);
+	ks_wrreg16(ks, KS_RXQCR, ks->rc_rxqcr);
 }
 
 /**
@@ -997,13 +963,13 @@ static void ks_write_qmu(struct ks_net *ks, u8 *pdata, u16 len)
 	ks->txh.txw[1] = cpu_to_le16(len);
 
 	/* 1. set sudo-DMA mode */
-	ks_wrreg8(ks, KS_RXQCR, (ks->rc_rxqcr | RXQCR_SDA) & 0xff);
+	ks_wrreg16(ks, KS_RXQCR, ks->rc_rxqcr | RXQCR_SDA);
 	/* 2. write status/lenth info */
 	ks_outblk(ks, ks->txh.txw, 4);
 	/* 3. write pkt data */
 	ks_outblk(ks, (u16 *)pdata, ALIGN(len, 4));
 	/* 4. reset sudo-DMA mode */
-	ks_wrreg8(ks, KS_RXQCR, ks->rc_rxqcr);
+	ks_wrreg16(ks, KS_RXQCR, ks->rc_rxqcr);
 	/* 5. Enqueue Tx(move the pkt from TX buffer into TXQ) */
 	ks_wrreg16(ks, KS_TXQCR, TXQCR_METFE);
 	/* 6. wait until TXQCR_METFE is auto-cleared */
@@ -1020,9 +986,9 @@ static void ks_write_qmu(struct ks_net *ks, u8 *pdata, u16 len)
  * spin_lock_irqsave is required because tx and rx should be mutual exclusive.
  * So while tx is in-progress, prevent IRQ interrupt from happenning.
  */
-static int ks_start_xmit(struct sk_buff *skb, struct net_device *netdev)
+static netdev_tx_t ks_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
-	int retv = NETDEV_TX_OK;
+	netdev_tx_t retv = NETDEV_TX_OK;
 	struct ks_net *ks = netdev_priv(netdev);
 
 	disable_irq(netdev->irq);
@@ -1078,7 +1044,7 @@ static void ks_stop_rx(struct ks_net *ks)
 
 }  /* ks_stop_rx */
 
-static unsigned long const ethernet_polynomial = 0x04c11db7U;
+static unsigned long const ethernet_polynomial = CRC32_POLY_BE;
 
 static unsigned long ether_gen_crc(int length, u8 *data)
 {
@@ -1285,7 +1251,6 @@ static const struct net_device_ops ks_netdev_ops = {
 	.ndo_start_xmit		= ks_start_xmit,
 	.ndo_set_mac_address	= ks_set_mac_address,
 	.ndo_set_rx_mode	= ks_set_rx_mode,
-	.ndo_change_mtu		= eth_change_mtu,
 	.ndo_validate_addr	= eth_validate_addr,
 };
 
@@ -1312,16 +1277,21 @@ static void ks_set_msglevel(struct net_device *netdev, u32 to)
 	ks->msg_enable = to;
 }
 
-static int ks_get_settings(struct net_device *netdev, struct ethtool_cmd *cmd)
+static int ks_get_link_ksettings(struct net_device *netdev,
+				 struct ethtool_link_ksettings *cmd)
 {
 	struct ks_net *ks = netdev_priv(netdev);
-	return mii_ethtool_gset(&ks->mii, cmd);
+
+	mii_ethtool_get_link_ksettings(&ks->mii, cmd);
+
+	return 0;
 }
 
-static int ks_set_settings(struct net_device *netdev, struct ethtool_cmd *cmd)
+static int ks_set_link_ksettings(struct net_device *netdev,
+				 const struct ethtool_link_ksettings *cmd)
 {
 	struct ks_net *ks = netdev_priv(netdev);
-	return mii_ethtool_sset(&ks->mii, cmd);
+	return mii_ethtool_set_link_ksettings(&ks->mii, cmd);
 }
 
 static u32 ks_get_link(struct net_device *netdev)
@@ -1340,10 +1310,10 @@ static const struct ethtool_ops ks_ethtool_ops = {
 	.get_drvinfo	= ks_get_drvinfo,
 	.get_msglevel	= ks_get_msglevel,
 	.set_msglevel	= ks_set_msglevel,
-	.get_settings	= ks_get_settings,
-	.set_settings	= ks_set_settings,
 	.get_link	= ks_get_link,
 	.nway_reset	= ks_nway_reset,
+	.get_link_ksettings = ks_get_link_ksettings,
+	.set_link_ksettings = ks_set_link_ksettings,
 };
 
 /* MII interface controls */

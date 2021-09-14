@@ -14,23 +14,20 @@ Required properties:
 		"rockchip,rk3308-vop";
 		"rockchip,rk1808-vop-lit";
 		"rockchip,rk1808-vop-raw";
+		"rockchip,rv1126-vop";
 		"rockchip,rk3288-vop-lit";
 		"rockchip,rk3288-vop-big";
 		"rockchip,rk3368-vop";
 		"rockchip,rk3366-vop";
-		"rockchip,rk3366-vop-lit";
 		"rockchip,rk3399-vop-big";
 		"rockchip,rk3399-vop-lit";
-		"rockchip,rk322x-vop";
+		"rockchip,rk3228-vop";
 		"rockchip,rk3328-vop";
 
 - reg: Address and length of the register set for the device.
 - reg-names: The names of register regions. contain following regions:
   - "regs" : (Required) Base address and size of the controllers.
-  - "cabc_lut" : (Optinal) cabc function lut table registers,
-                   take care of this register's length, driver would use
-                   register's length to decide cabc lut table size.
-  - "gamma_lut" : (Optinal) gamma function lut table registers,
+  - "gamma_lut" : (Optional) gamma function lut table registers,
                    take care of this register's length, driver would use
                    register's length to decide gamma table size.
 
@@ -45,7 +42,7 @@ Required properties:
 		aclk_vop: for ddr buffer transfer.
 		hclk_vop: for ahb bus to R/W the phy regs.
 		dclk_vop: pixel clock.
-		dclk_source: optinal, dclk sources from display plls.
+		dclk_source: optional, dclk sources from display plls.
 
 - resets: Must contain an entry for each entry in reset-names.
   See ../reset/reset.txt for details.
@@ -58,6 +55,7 @@ Required properties:
 
 - port: A port node with endpoint definitions as defined in
   Documentation/devicetree/bindings/media/video-interfaces.txt.
+- rockchip,dual-channel-swap: boolean, optional config for vop dual channel swap
 
 Example:
 SoC specific DT entry:

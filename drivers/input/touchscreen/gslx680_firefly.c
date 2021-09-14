@@ -34,6 +34,8 @@
 #include <linux/of_gpio.h>
 #include "tp_suspend.h"
 
+#include <linux/uaccess.h>
+
 #include <linux/wakelock.h>
 #include "gslx680_firefly.h"
 //#define GSL_DEBUG
@@ -360,8 +362,8 @@ static void gsl_load_fw(struct i2c_client *client)
 	u8 send_flag = 1;
 	u8 *cur = buf + 1;
 	u32 source_line = 0;
-	u32 source_len;
-	const struct fw_data *ptr_fw;
+	u32 source_len = 0;
+	const struct fw_data *ptr_fw = NULL;
 
 	printk("=============gsl_load_fw start==============\n");
 	if (1 == global_fw){						//for 10.1 lvds

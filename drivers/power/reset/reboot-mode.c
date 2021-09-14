@@ -14,26 +14,18 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/reboot.h>
+#include <linux/reboot-mode.h>
 #include <linux/sysfs.h>
-#include "reboot-mode.h"
 
 #define PREFIX "mode-"
 
 struct mode_info {
-	char mode[32];
-	unsigned int magic;
+	const char *mode;
+	u32 magic;
 	struct list_head list;
 };
 
-struct reboot_mode_driver {
-	struct list_head head;
-	int (*write)(int magic);
-	int (*read)(void);
-	struct notifier_block reboot_notifier;
-	struct notifier_block panic_notifier;
-};
-
-static char *boot_mode = "coldboot";
+static const char *boot_mode = "coldboot";
 
 static ssize_t boot_mode_show(struct kobject *kobj, struct kobj_attribute *attr,
 			      char *buf)
@@ -72,7 +64,7 @@ static void reboot_mode_write(struct reboot_mode_driver *reboot,
 	if (!magic)
 		magic = get_reboot_mode_magic(reboot, NULL);
 	if (magic)
-		reboot->write(magic);
+		reboot->write(reboot, magic);
 }
 
 static int reboot_mode_notify(struct notifier_block *this,
@@ -101,7 +93,7 @@ static int reboot_mode_panic_notify(struct notifier_block *this,
 static int boot_mode_parse(struct reboot_mode_driver *reboot)
 {
 	struct mode_info *info;
-	unsigned int magic = reboot->read();
+	unsigned int magic = reboot->read(reboot);
 
 	list_for_each_entry(info, &reboot->head, list) {
 		if (info->magic == magic) {
@@ -110,54 +102,152 @@ static int boot_mode_parse(struct reboot_mode_driver *reboot)
 		}
 	}
 
-	pr_info("Boot mode: %s\n", boot_mode);
-
 	return 0;
 }
 
-int reboot_mode_register(struct device *dev, int (*write)(int),
-			 int (*read)(void))
+/**
+ * reboot_mode_register - register a reboot mode driver
+ * @reboot: reboot mode driver
+ *
+ * Returns: 0 on success or a negative error code on failure.
+ */
+int reboot_mode_register(struct reboot_mode_driver *reboot)
 {
-	struct reboot_mode_driver *reboot;
 	struct mode_info *info;
 	struct property *prop;
+	struct device_node *np = reboot->dev->of_node;
 	size_t len = strlen(PREFIX);
 	int ret;
 
-	reboot = devm_kzalloc(dev, sizeof(*reboot), GFP_KERNEL);
-	if (!reboot)
-		return -ENOMEM;
-
-	reboot->write = write;
-	reboot->read = read;
 	INIT_LIST_HEAD(&reboot->head);
-	for_each_property_of_node(dev->of_node, prop) {
-		if (len > strlen(prop->name) || strncmp(prop->name, PREFIX, len))
+
+	for_each_property_of_node(np, prop) {
+		if (strncmp(prop->name, PREFIX, len))
 			continue;
-		info = devm_kzalloc(dev, sizeof(*info), GFP_KERNEL);
-		if (!info)
-			return -ENOMEM;
-		strcpy(info->mode, prop->name + len);
-		if (of_property_read_u32(dev->of_node, prop->name, &info->magic)) {
-			dev_err(dev, "reboot mode %s without magic number\n",
+
+		info = devm_kzalloc(reboot->dev, sizeof(*info), GFP_KERNEL);
+		if (!info) {
+			ret = -ENOMEM;
+			goto error;
+		}
+
+		if (of_property_read_u32(np, prop->name, &info->magic)) {
+			dev_err(reboot->dev, "reboot mode %s without magic number\n",
 				info->mode);
-			devm_kfree(dev, info);
+			devm_kfree(reboot->dev, info);
 			continue;
 		}
+
+		info->mode = kstrdup_const(prop->name + len, GFP_KERNEL);
+		if (!info->mode) {
+			ret =  -ENOMEM;
+			goto error;
+		} else if (info->mode[0] == '\0') {
+			kfree_const(info->mode);
+			ret = -EINVAL;
+			dev_err(reboot->dev, "invalid mode name(%s): too short!\n",
+				prop->name);
+			goto error;
+		}
+
 		list_add_tail(&info->list, &reboot->head);
 	}
+
 	boot_mode_parse(reboot);
 	reboot->reboot_notifier.notifier_call = reboot_mode_notify;
 	reboot->panic_notifier.notifier_call = reboot_mode_panic_notify;
-	ret = register_reboot_notifier(&reboot->reboot_notifier);
-	ret += atomic_notifier_chain_register(&panic_notifier_list,
+	register_reboot_notifier(&reboot->reboot_notifier);
+	register_pre_restart_handler(&reboot->reboot_notifier);
+	atomic_notifier_chain_register(&panic_notifier_list,
 				       &reboot->panic_notifier);
-	ret += sysfs_create_file(kernel_kobj, &kobj_boot_mode.attr);
+	ret = sysfs_create_file(kernel_kobj, &kobj_boot_mode.attr);
+
+	return ret;
+
+error:
+	list_for_each_entry(info, &reboot->head, list)
+		kfree_const(info->mode);
 
 	return ret;
 }
 EXPORT_SYMBOL_GPL(reboot_mode_register);
 
+/**
+ * reboot_mode_unregister - unregister a reboot mode driver
+ * @reboot: reboot mode driver
+ */
+int reboot_mode_unregister(struct reboot_mode_driver *reboot)
+{
+	struct mode_info *info;
+
+	unregister_reboot_notifier(&reboot->reboot_notifier);
+
+	list_for_each_entry(info, &reboot->head, list)
+		kfree_const(info->mode);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(reboot_mode_unregister);
+
+static void devm_reboot_mode_release(struct device *dev, void *res)
+{
+	reboot_mode_unregister(*(struct reboot_mode_driver **)res);
+}
+
+/**
+ * devm_reboot_mode_register() - resource managed reboot_mode_register()
+ * @dev: device to associate this resource with
+ * @reboot: reboot mode driver
+ *
+ * Returns: 0 on success or a negative error code on failure.
+ */
+int devm_reboot_mode_register(struct device *dev,
+			      struct reboot_mode_driver *reboot)
+{
+	struct reboot_mode_driver **dr;
+	int rc;
+
+	dr = devres_alloc(devm_reboot_mode_release, sizeof(*dr), GFP_KERNEL);
+	if (!dr)
+		return -ENOMEM;
+
+	rc = reboot_mode_register(reboot);
+	if (rc) {
+		devres_free(dr);
+		return rc;
+	}
+
+	*dr = reboot;
+	devres_add(dev, dr);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(devm_reboot_mode_register);
+
+static int devm_reboot_mode_match(struct device *dev, void *res, void *data)
+{
+	struct reboot_mode_driver **p = res;
+
+	if (WARN_ON(!p || !*p))
+		return 0;
+
+	return *p == data;
+}
+
+/**
+ * devm_reboot_mode_unregister() - resource managed reboot_mode_unregister()
+ * @dev: device to associate this resource with
+ * @reboot: reboot mode driver
+ */
+void devm_reboot_mode_unregister(struct device *dev,
+				 struct reboot_mode_driver *reboot)
+{
+	WARN_ON(devres_release(dev,
+			       devm_reboot_mode_release,
+			       devm_reboot_mode_match, reboot));
+}
+EXPORT_SYMBOL_GPL(devm_reboot_mode_unregister);
+
 MODULE_AUTHOR("Andy Yan <andy.yan@rock-chips.com");
-MODULE_DESCRIPTION("System reboot mode driver");
+MODULE_DESCRIPTION("System reboot mode core library");
 MODULE_LICENSE("GPL v2");

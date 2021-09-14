@@ -20,6 +20,7 @@
 #endif
 
 #include <dt-bindings/sensor-dev.h>
+#include <linux/module.h>
 
 #define SENSOR_ON		1
 #define SENSOR_OFF		0
@@ -50,8 +51,12 @@ enum sensor_id {
 	ACCEL_ID_MMA8450,
 	ACCEL_ID_MMA845X,
 	ACCEL_ID_MMA7660,
+	ACCEL_ID_SC7660,
+	ACCEL_ID_SC7A20,
+	ACCEL_ID_SC7A30,
 	ACCEL_ID_MPU6050,
 	ACCEL_ID_MXC6225,
+	ACCEL_ID_MXC6655XA,
 	ACCEL_ID_DMARD10,
 	ACCEL_ID_LSM303D,
 	ACCEL_ID_MC3230,
@@ -60,6 +65,7 @@ enum sensor_id {
 	ACCEL_ID_LSM330,
 	ACCEL_ID_BMA2XX,
 	ACCEL_ID_STK8BAXX,
+	ACCEL_ID_MIR3DA,
 	COMPASS_ID_ALL,
 	COMPASS_ID_AK8975,
 	COMPASS_ID_AK8963,
@@ -234,14 +240,18 @@ struct akm_platform_data {
 	int gpio_RST;
 };
 
-extern int sensor_register_slave(int type, struct i2c_client *client,
+extern int sensor_register_device(struct i2c_client *client,
 			struct sensor_platform_data *slave_pdata,
-			struct sensor_operate *(*get_sensor_ops)(void));
+			const struct i2c_device_id *devid,
+			struct sensor_operate *ops);
 
 
-extern int sensor_unregister_slave(int type, struct i2c_client *client,
+extern int sensor_unregister_device(struct i2c_client *client,
 			struct sensor_platform_data *slave_pdata,
-			struct sensor_operate *(*get_sensor_ops)(void));
+			struct sensor_operate *ops);
+
+extern void sensor_shutdown(struct i2c_client *client);
+extern const struct dev_pm_ops sensor_pm_ops;
 
 #define DBG(x...)
 

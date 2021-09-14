@@ -216,18 +216,6 @@
 	vref-supply = <&vccadc_ref>;
 };
 
-&vpu {
-	status = "okay";
-	/* 0 means ion, 1 means drm */
-	//allocator = <0>;
-};
-
-&rkvdec {
-	status = "okay";
-	/* 0 means ion, 1 means drm */
-	//allocator = <0>;
-};
-
 &backlight {
 	status = "okay";
 	enable-gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
@@ -311,6 +299,30 @@
 				pixelclk-active = <0>;
 			};
 		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				panel_in_dsi: endpoint {
+					remote-endpoint = <&dsi_out_panel>;
+				};
+			};
+		};
+	};
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+			dsi_out_panel: endpoint {
+				remote-endpoint = <&panel_in_dsi>;
+			};
+		};
 	};
 };
 
@@ -371,19 +383,11 @@
 		clocks = <&ext_cam_clk>;
 		clock-names = "refclk";
 		reset-gpios = <&gpio2 7 GPIO_ACTIVE_LOW>;
-		/* hardware irq-pin is dangling
-		 * connect it to other gpio then configurate follow interrupt
-		 * or del config just using software poll
-		 */
-		//interrupt-parent = <&gpio2>;
-		//interrupts = <12 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-parent = <&gpio2>;
+		interrupts = <12 IRQ_TYPE_LEVEL_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&hdmiin_gpios>;
 		status = "disabled";
-		rockchip,camera-module-index = <0>;
-		rockchip,camera-module-facing = "back";
-		rockchip,camera-module-name = "default";
-		rockchip,camera-module-lens-name = "default";
 		port {
 			hdmiin_out0: endpoint {
 				/* Unlinked mipi dphy rx0 */
@@ -416,10 +420,6 @@
 		pwdn-gpios = <&gpio1 4 GPIO_ACTIVE_HIGH>;
 		pinctrl-names = "rockchip,camera_default";
 		pinctrl-0 = <&cif_clkout>;
-		rockchip,camera-module-index = <0>;
-		rockchip,camera-module-facing = "back";
-		rockchip,camera-module-name = "CMK-CT0116";
-		rockchip,camera-module-lens-name = "Largan-50013A1";
 		lens-focus = <&vm149c>;
 
 		port {
@@ -468,10 +468,6 @@
 				<2 12 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
-};
-
-&uart2 {
-	status = "disabled";
 };
 
 &vopb {

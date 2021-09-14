@@ -12,15 +12,12 @@
  * GNU General Public License for more details.
  */
 
-#include <linux/arm-smccc.h>
 #include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
-#include <linux/phy/phy.h>
 #include <linux/reset.h>
-#include <soc/rockchip/rockchip_phy_typec.h>
 
 #include "cdn-dp-core.h"
 #include "cdn-dp-reg.h"
@@ -82,8 +79,8 @@ void cdn_dp_clock_reset(struct cdn_dp_device *dp)
 	      SOURCE_CRYPTO_SYS_CLK_EN;
 	writel(val, dp->regs + SOURCE_CRYPTO_CAR);
 
-	val = ~(MAILBOX_INT_MASK_BIT | PIF_INT_MASK_BIT) & ALL_INT_MASK;
-	writel(val, dp->regs + APB_INT_MASK);
+	/* enable Mailbox and PIF interrupt */
+	writel(0, dp->regs + APB_INT_MASK);
 }
 
 static int cdn_dp_mailbox_read(struct cdn_dp_device *dp)
@@ -116,7 +113,7 @@ static int cdp_dp_mailbox_write(struct cdn_dp_device *dp, u8 val)
 
 static int cdn_dp_mailbox_validate_receive(struct cdn_dp_device *dp,
 					   u8 module_id, u8 opcode,
-					   u8 req_size)
+					   u16 req_size)
 {
 	u32 mbox_size, i;
 	u8 header[4];
@@ -150,7 +147,7 @@ static int cdn_dp_mailbox_validate_receive(struct cdn_dp_device *dp,
 }
 
 static int cdn_dp_mailbox_read_receive(struct cdn_dp_device *dp,
-				       u8 *buff, u8 buff_size)
+				       u8 *buff, u16 buff_size)
 {
 	u32 i;
 	int ret;
@@ -379,7 +376,7 @@ int cdn_dp_load_firmware(struct cdn_dp_device *dp, const u32 *i_mem,
 	reg = readl(dp->regs + VER_LIB_H_ADDR) & 0xff;
 	dp->fw_version |= reg << 24;
 
-	dev_dbg(dp->dev, "firmware version: %x\n", dp->fw_version);
+	DRM_DEV_DEBUG(dp->dev, "firmware version: %x\n", dp->fw_version);
 
 	return 0;
 }
@@ -628,7 +625,7 @@ int cdn_dp_train_link(struct cdn_dp_device *dp)
 	ret = cdn_dp_reg_write(dp, SOURCE_HDTX_CAR, 0xf);
 	if (ret) {
 		DRM_DEV_ERROR(dp->dev,
-		"Failed to write SOURCE_HDTX_CAR register %d\n", ret);
+			"Failed to write SOURCE_HDTX_CAR register %d\n", ret);
 		goto do_fw_training;
 	}
 	dp->use_fw_training = false;
@@ -673,7 +670,7 @@ static int cdn_dp_get_msa_misc(struct video_info *video,
 			       struct drm_display_mode *mode)
 {
 	u32 msa_misc;
-	u8 val[2];
+	u8 val[2] = {0};
 
 	switch (video->color_fmt) {
 	case PXL_RGB:
@@ -716,52 +713,13 @@ static int cdn_dp_get_msa_misc(struct video_info *video,
 	return msa_misc;
 }
 
-int cdn_dp_tu_size_cal(struct cdn_dp_device *dp, u8 lanes, u8 link_bw)
-{
-	struct video_info *video = &dp->video_info;
-	struct drm_display_mode *mode = &dp->mode;
-	u8 bit_per_pix, tu_size_reg = TU_SIZE;
-	u32 link_rate, rem;
-	u64 symbol;
-	int ret;
-
-	bit_per_pix = (video->color_fmt == YCBCR_4_2_2) ?
-			(video->color_depth * 2) : (video->color_depth * 3);
-
-	link_rate = drm_dp_bw_code_to_link_rate(link_bw) / 1000;
-
-	/*
-	 * get a best tu_size and valid symbol:
-	 * 1. chose Lclk freq(162Mhz, 270Mhz, 540Mhz), set TU to 32
-	 * 2. calculate VS(valid symbol) = TU * Pclk * Bpp / (Lclk * Lanes)
-	 * 3. if VS > *.85 or VS < *.1 or VS < 2 or TU < VS + 4, then set
-	 *    TU += 2 and repeat 2nd step.
-	 */
-	do {
-		tu_size_reg += 2;
-		symbol = tu_size_reg * mode->clock * bit_per_pix;
-		do_div(symbol, lanes * link_rate * 8);
-		rem = do_div(symbol, 1000);
-		if (tu_size_reg > 64) {
-			ret = -EINVAL;
-			return ret;
-		}
-	} while ((symbol <= 1) || (tu_size_reg - symbol < 4) ||
-		 (rem > 850) || (rem < 100));
-
-	dp->tu_size = tu_size_reg;
-	dp->tu_symbol = symbol;
-	return 0;
-}
-
 int cdn_dp_config_video(struct cdn_dp_device *dp)
 {
 	struct video_info *video = &dp->video_info;
 	struct drm_display_mode *mode = &dp->mode;
-	u8 tu_size_reg = dp->tu_size;
-	u64 symbol = dp->tu_symbol;
-	u32 val, link_rate;
-	u8 bit_per_pix;
+	u64 symbol;
+	u32 val, link_rate, rem;
+	u8 bit_per_pix, tu_size_reg = TU_SIZE;
 	int ret;
 
 	bit_per_pix = (video->color_fmt == YCBCR_4_2_2) ?
@@ -776,6 +734,29 @@ int cdn_dp_config_video(struct cdn_dp_device *dp)
 	ret = cdn_dp_reg_write(dp, HSYNC2VSYNC_POL_CTRL, 0);
 	if (ret)
 		goto err_config_video;
+
+	/*
+	 * get a best tu_size and valid symbol:
+	 * 1. chose Lclk freq(162Mhz, 270Mhz, 540Mhz), set TU to 32
+	 * 2. calculate VS(valid symbol) = TU * Pclk * Bpp / (Lclk * Lanes)
+	 * 3. if VS > *.85 or VS < *.1 or VS < 2 or TU < VS + 4, then set
+	 *    TU += 2 and repeat 2nd step.
+	 */
+	do {
+		tu_size_reg += 2;
+		symbol = tu_size_reg * mode->clock * bit_per_pix;
+		do_div(symbol, dp->link.num_lanes * link_rate * 8);
+		rem = do_div(symbol, 1000);
+		if (tu_size_reg > 64) {
+			ret = -EINVAL;
+			DRM_DEV_ERROR(dp->dev,
+				      "tu error, clk:%d, lanes:%d, rate:%d\n",
+				      mode->clock, dp->link.num_lanes,
+				      link_rate);
+			goto err_config_video;
+		}
+	} while ((symbol <= 1) || (tu_size_reg - symbol < 4) ||
+		 (rem > 850) || (rem < 100));
 
 	val = symbol + (tu_size_reg << 8);
 	val |= TU_CNT_RST_EN;
@@ -1092,114 +1073,3 @@ err_audio_config:
 		DRM_DEV_ERROR(dp->dev, "audio config failed: %d\n", ret);
 	return ret;
 }
-
-int cdn_dp_hdcp_tx_configuration(struct cdn_dp_device *dp, int tx_mode,
-						 bool active)
-{
-	u8 msg;
-
-	msg = tx_mode;
-	if (active)
-		msg |= HDCP_TX_ACTIVATE;
-
-	return cdn_dp_mailbox_send(dp, MB_MODULE_ID_HDCP_TX,
-				   HDCP_TX_CONFIGURATION, sizeof(msg), &msg);
-}
-
-int cdn_dp_hdcp_tx_status_req(struct cdn_dp_device *dp, uint16_t *tx_status)
-{
-	u8 status[5];
-	int ret;
-
-	ret = cdn_dp_mailbox_send(dp, MB_MODULE_ID_HDCP_TX,
-				  HDCP_TX_STATUS_CHANGE, 0, NULL);
-	if (ret)
-		goto err_hdcp_tx_status_rq;
-
-	ret = cdn_dp_mailbox_validate_receive(dp, MB_MODULE_ID_HDCP_TX,
-					      HDCP_TX_STATUS_CHANGE,
-					      sizeof(status));
-	if (ret)
-		goto err_hdcp_tx_status_rq;
-
-	ret = cdn_dp_mailbox_read_receive(dp, status, sizeof(status));
-	if (ret)
-		goto err_hdcp_tx_status_rq;
-
-	*tx_status = status[0] << 8 | status[1];
-
-err_hdcp_tx_status_rq:
-	if (ret)
-		DRM_DEV_ERROR(dp->dev, "hdcp tx status failed: %d\n", ret);
-	return ret;
-}
-
-int cdn_dp_hdcp_tx_is_receiver_id_valid_req(struct cdn_dp_device *dp)
-{
-	int ret;
-	u32 mbox_size, i;
-	u8 header[4], *resp;
-
-	ret = cdn_dp_mailbox_send(dp, MB_MODULE_ID_HDCP_TX,
-				  HDCP_TX_IS_RECEIVER_ID_VALID,
-				  0, NULL);
-	if (ret)
-		goto err_hdcp_tx_is_receiver_id_valid_req;
-
-	/*
-	 * The size of HDCP_TX_IS_RECEIVER_ID_VALID_RESP is variable, which
-	 * is dependent on HDCP device type. It will response receiver ID
-	 * list if the device is a repeater.
-	 * So we need to distinguish the size.
-	 */
-	for (i = 0; i < 4; i++) {
-		ret = cdn_dp_mailbox_read(dp);
-		if (ret < 0)
-			goto err_hdcp_tx_is_receiver_id_valid_req;
-
-		header[i] = ret;
-	}
-
-	mbox_size = (header[2] << 8) | header[3];
-
-	if (header[0] != HDCP_TX_IS_RECEIVER_ID_VALID ||
-	    header[1] != MB_MODULE_ID_HDCP_TX ||
-	    !IS_HDCP_TX_RECEIVER_ID_VALID_RESP_SIZE_VALID(mbox_size)) {
-		ret = -EINVAL;
-		for (i = 0; i < mbox_size; i++)
-			if (cdn_dp_mailbox_read(dp) < 0)
-				break;
-
-		goto err_hdcp_tx_is_receiver_id_valid_req;
-	}
-
-	resp = kzalloc(mbox_size, GFP_KERNEL);
-	if (IS_ERR(resp) || IS_ERR_OR_NULL(resp)) {
-		ret = -ENOMEM;
-		goto err_hdcp_tx_is_receiver_id_valid_req;
-	}
-
-	ret = cdn_dp_mailbox_read_receive(dp, resp, mbox_size);
-
-	/* TODO judge the all receivers are in revocation list. */
-	kfree(resp);
-
-err_hdcp_tx_is_receiver_id_valid_req:
-	if (ret)
-		DRM_DEV_ERROR(dp->dev,
-			      "hdcp receivers id verification failed: %d\n",
-			      ret);
-	return ret;
-}
-
-int cdn_dp_hdcp_tx_respond_id_valid(struct cdn_dp_device *dp, bool valid)
-{
-	u8 msg = 0;
-
-	if (valid)
-		msg = 0x01;
-	return cdn_dp_mailbox_send(dp, MB_MODULE_ID_HDCP_TX,
-				   HDCP_TX_RESPOND_RECEIVER_ID_VALID,
-				   sizeof(msg), &msg);
-}
-

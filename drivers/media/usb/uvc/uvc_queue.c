@@ -43,6 +43,11 @@ uvc_queue_to_stream(struct uvc_video_queue *queue)
 	return container_of(queue, struct uvc_streaming, queue);
 }
 
+static inline struct uvc_buffer *uvc_vbuf_to_buffer(struct vb2_v4l2_buffer *buf)
+{
+	return container_of(buf, struct uvc_buffer, buf);
+}
+
 /*
  * Return all queued buffers to videobuf2 in the requested state.
  *
@@ -69,11 +74,10 @@ static void uvc_queue_return_buffers(struct uvc_video_queue *queue,
  * videobuf2 queue operations
  */
 
-static int uvc_queue_setup(struct vb2_queue *vq, const void *parg,
+static int uvc_queue_setup(struct vb2_queue *vq,
 			   unsigned int *nbuffers, unsigned int *nplanes,
-			   unsigned int sizes[], void *alloc_ctxs[])
+			   unsigned int sizes[], struct device *alloc_devs[])
 {
-	const struct v4l2_format *fmt = parg;
 	struct uvc_video_queue *queue = vb2_get_drv_priv(vq);
 	struct uvc_streaming *stream;
 	unsigned int size;
@@ -85,13 +89,17 @@ static int uvc_queue_setup(struct vb2_queue *vq, const void *parg,
 
 	default:
 		stream = uvc_queue_to_stream(queue);
-		/* Make sure the image size is large enough. */
-		if (fmt && fmt->fmt.pix.sizeimage < stream->ctrl.dwMaxVideoFrameSize)
-			return -EINVAL;
-		size = fmt ? fmt->fmt.pix.sizeimage :
-		       stream->ctrl.dwMaxVideoFrameSize;
+		size = stream->ctrl.dwMaxVideoFrameSize;
 		break;
 	}
+
+	/*
+	 * When called with plane sizes, validate them. The driver supports
+	 * single planar formats only, and requires buffers to be large enough
+	 * to store a complete frame.
+	 */
+	if (*nplanes)
+		return *nplanes != 1 || sizes[0] < size ? -EINVAL : 0;
 
 	*nplanes = 1;
 	sizes[0] = size;
@@ -102,7 +110,7 @@ static int uvc_buffer_prepare(struct vb2_buffer *vb)
 {
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 	struct uvc_video_queue *queue = vb2_get_drv_priv(vb->vb2_queue);
-	struct uvc_buffer *buf = container_of(vbuf, struct uvc_buffer, buf);
+	struct uvc_buffer *buf = uvc_vbuf_to_buffer(vbuf);
 
 	if (vb->type == V4L2_BUF_TYPE_VIDEO_OUTPUT &&
 	    vb2_get_plane_payload(vb, 0) > vb2_plane_size(vb, 0)) {
@@ -129,7 +137,7 @@ static void uvc_buffer_queue(struct vb2_buffer *vb)
 {
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 	struct uvc_video_queue *queue = vb2_get_drv_priv(vb->vb2_queue);
-	struct uvc_buffer *buf = container_of(vbuf, struct uvc_buffer, buf);
+	struct uvc_buffer *buf = uvc_vbuf_to_buffer(vbuf);
 	unsigned long flags;
 
 	spin_lock_irqsave(&queue->irqlock, flags);
@@ -152,7 +160,7 @@ static void uvc_buffer_finish(struct vb2_buffer *vb)
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 	struct uvc_video_queue *queue = vb2_get_drv_priv(vb->vb2_queue);
 	struct uvc_streaming *stream = uvc_queue_to_stream(queue);
-	struct uvc_buffer *buf = container_of(vbuf, struct uvc_buffer, buf);
+	struct uvc_buffer *buf = uvc_vbuf_to_buffer(vbuf);
 
 	if (vb->state == VB2_BUF_STATE_DONE)
 		uvc_video_clock_update(stream, vbuf, buf);
@@ -163,6 +171,8 @@ static int uvc_start_streaming(struct vb2_queue *vq, unsigned int count)
 	struct uvc_video_queue *queue = vb2_get_drv_priv(vq);
 	struct uvc_streaming *stream = uvc_queue_to_stream(queue);
 	int ret;
+
+	lockdep_assert_irqs_enabled();
 
 	queue->buf_used = 0;
 
@@ -181,6 +191,8 @@ static void uvc_stop_streaming(struct vb2_queue *vq)
 {
 	struct uvc_video_queue *queue = vb2_get_drv_priv(vq);
 
+	lockdep_assert_irqs_enabled();
+
 	if (vq->type != V4L2_BUF_TYPE_META_CAPTURE)
 		uvc_video_enable(uvc_queue_to_stream(queue), 0);
 
@@ -189,7 +201,7 @@ static void uvc_stop_streaming(struct vb2_queue *vq)
 	spin_unlock_irq(&queue->irqlock);
 }
 
-static struct vb2_ops uvc_queue_qops = {
+static const struct vb2_ops uvc_queue_qops = {
 	.queue_setup = uvc_queue_setup,
 	.buf_prepare = uvc_buffer_prepare,
 	.buf_queue = uvc_buffer_queue,
@@ -361,10 +373,10 @@ unsigned long uvc_queue_get_unmapped_area(struct uvc_video_queue *queue,
 }
 #endif
 
-unsigned int uvc_queue_poll(struct uvc_video_queue *queue, struct file *file,
+__poll_t uvc_queue_poll(struct uvc_video_queue *queue, struct file *file,
 			    poll_table *wait)
 {
-	unsigned int ret;
+	__poll_t ret;
 
 	mutex_lock(&queue->mutex);
 	ret = vb2_poll(&queue->queue, file, wait);
@@ -448,13 +460,13 @@ struct uvc_buffer *uvc_queue_get_current_buffer(struct uvc_video_queue *queue)
 }
 
 /*
- * uvc_queue_requeue: Requeue a buffer on our internal irqqueue
+ * uvc_queue_buffer_requeue: Requeue a buffer on our internal irqqueue
  *
- * Reuse a buffer through our internal queue without the need to 'prepare'
+ * Reuse a buffer through our internal queue without the need to 'prepare'.
  * The buffer will be returned to userspace through the uvc_buffer_queue call if
- * the device has been disconnected
+ * the device has been disconnected.
  */
-static void uvc_queue_requeue(struct uvc_video_queue *queue,
+static void uvc_queue_buffer_requeue(struct uvc_video_queue *queue,
 		struct uvc_buffer *buf)
 {
 	buf->error = 0;
@@ -472,7 +484,7 @@ static void uvc_queue_buffer_complete(struct kref *ref)
 	struct uvc_video_queue *queue = vb2_get_drv_priv(vb->vb2_queue);
 
 	if ((queue->flags & UVC_QUEUE_DROP_CORRUPTED) && buf->error) {
-		uvc_queue_requeue(queue, buf);
+		uvc_queue_buffer_requeue(queue, buf);
 		return;
 	}
 
@@ -483,7 +495,7 @@ static void uvc_queue_buffer_complete(struct kref *ref)
 
 /*
  * Release a reference on the buffer. Complete the buffer when the last
- * reference is released
+ * reference is released.
  */
 void uvc_queue_buffer_release(struct uvc_buffer *buf)
 {

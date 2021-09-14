@@ -70,8 +70,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "pvrsrv_device.h"
 #include "syscommon.h"
-#include "rgxdevice.h"
 #include "rgxinit.h"
+#include "rgxdevice.h"
 #include "pvr_dvfs_device.h"
 #include "power.h"
 
@@ -103,17 +103,15 @@ static IMG_INT32 devfreq_target(struct device *dev, long unsigned *requested_fre
 	if (g_gpu_performance == 1)
 		*requested_freq = psDVFSDevice->psDevFreq->max_freq;
 
-	rcu_read_lock();
 	opp = devfreq_recommended_opp(dev, requested_freq, flags);
 	if (IS_ERR(opp)) {
-		rcu_read_unlock();
 		PVR_DPF((PVR_DBG_ERROR, "Invalid OPP"));
 		return PTR_ERR(opp);
 	}
 
 	ui32Freq = OPP_GET_FREQ(opp);
 	ui32Volt = OPP_GET_VOLTAGE(opp);
-	rcu_read_unlock();
+	dev_pm_opp_put(opp);
 
 	ui32CurFreq = psRGXTimingInfo->ui32CoreClockSpeed;
 	ui32CurVolt = psRGXTimingInfo->ui32CoreVoltage;
@@ -240,15 +238,22 @@ static int GetOPPValues(struct device *dev,
 	struct OPP_STRUCT *opp;
 	int count, i, err = 0;
 	unsigned long freq;
-	unsigned long *freq_table;
 
+	/* ChromiumOS kernels are carrying a fix which changes the type of
+	 * freq_table in struct devfreq_dev_profile to 'unsigned long'.
+	 * However, this change has not been merged upstream, so we need
+	 * to support using the older 'unsigned int' type too.
+	 */
+#if defined(CHROMIUMOS_WORKAROUNDS_KERNEL318)
+	unsigned long *freq_table;
+#else
+	unsigned long *freq_table;
+#endif
 
 	/* Start RCU read-side critical section to access device opp_list. */
-	rcu_read_lock();
 	count = OPP_GET_OPP_COUNT(dev);
 	if (count < 0) {
 		dev_err(dev, "Could not fetch OPP count, %d\n", count);
-		rcu_read_unlock();
 		return count;
 	}
 
@@ -259,7 +264,6 @@ static int GetOPPValues(struct device *dev,
 #endif
 
 	if (!freq_table) {
-		rcu_read_unlock();
 		return -ENOMEM;
 	}
 
@@ -278,6 +282,7 @@ static int GetOPPValues(struct device *dev,
 	freq_table[0] = freq;
 	*min_freq = freq;
 	*min_volt = OPP_GET_VOLTAGE(opp);
+	dev_pm_opp_put(opp);
 	dev_info(dev, "opp[%d/%d]: (%lu Hz, %lu uV)\n", 1, count,
 		freq, *min_volt);
 
@@ -297,11 +302,10 @@ static int GetOPPValues(struct device *dev,
 		*max_freq = freq;
 		dev_info(dev, "opp[%d/%d]: (%lu Hz, %lu uV)\n", i + 1, count,
 			freq, OPP_GET_VOLTAGE(opp));
+		dev_pm_opp_put(opp);
 	}
 
 exit:
-
-	rcu_read_unlock();
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
 	if (!err)
@@ -474,7 +478,6 @@ PVRSRV_ERROR InitDVFS(PVRSRV_DEVICE_NODE *psDeviceNode)
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR,"PVRSRVInit: Failed to suspend DVFS"));
-		eError = eError;
 		goto err_exit;
 	}
 

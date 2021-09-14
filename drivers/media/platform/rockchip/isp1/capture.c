@@ -40,7 +40,6 @@
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-subdev.h>
 #include <media/videobuf2-dma-contig.h>
-#include <linux/dma-iommu.h>
 #include "dev.h"
 #include "regs.h"
 
@@ -81,12 +80,6 @@
 #define STREAM_MAX_MP_SP_INPUT_HEIGHT STREAM_MAX_MP_RSZ_OUTPUT_HEIGHT
 #define STREAM_MIN_MP_SP_INPUT_WIDTH		32
 #define STREAM_MIN_MP_SP_INPUT_HEIGHT		32
-
-/*
- * Round up height when allocate memory so that Rockchip encoder can
- * use DMA buffer directly, though this may waste a bit of memory.
- */
-#define MEMORY_ALIGN_ROUND_UP_HEIGHT		16
 
 /* Get xsubs and ysubs for fourcc formats
  *
@@ -338,14 +331,6 @@ static const struct capture_fmt mp_fmts[] = {
 		.mplanes = 1,
 		.write_format = MI_CTRL_MP_WRITE_RAW12,
 	},
-	/* MP rgb24 only for sensor is output rgb24 */
-	{
-		.fourcc = V4L2_PIX_FMT_RGB24,
-		.fmt_type = FMT_BAYER,
-		.bpp = { 24 },
-		.mplanes = 1,
-		.write_format = MI_CTRL_MP_WRITE_YUV_PLA_OR_RAW8,
-	}
 };
 
 static const struct capture_fmt sp_fmts[] = {
@@ -1141,7 +1126,7 @@ static int mi_frame_end(struct rkisp1_stream *stream)
 		}
 		stream->curr_buf->vb.sequence =
 				atomic_read(&isp_sd->frm_sync_seq) - 1;
-		stream->curr_buf->vb.timestamp = ns_to_timeval(ns);
+		stream->curr_buf->vb.vb2_buf.timestamp = ns;
 		vb2_buffer_done(&stream->curr_buf->vb.vb2_buf,
 				VB2_BUF_STATE_DONE);
 		stream->curr_buf = NULL;
@@ -1296,36 +1281,26 @@ static int rkisp1_start(struct rkisp1_stream *stream)
 }
 
 static int rkisp1_queue_setup(struct vb2_queue *queue,
-			      const void *parg,
 			      unsigned int *num_buffers,
 			      unsigned int *num_planes,
 			      unsigned int sizes[],
-			      void *alloc_ctxs[])
+			      struct device *alloc_ctxs[])
 {
 	struct rkisp1_stream *stream = queue->drv_priv;
 	struct rkisp1_device *dev = stream->ispdev;
-	const struct v4l2_format *pfmt = parg;
 	const struct v4l2_pix_format_mplane *pixm = NULL;
 	const struct capture_fmt *isp_fmt = NULL;
 	u32 i;
 
-	if (pfmt) {
-		pixm = &pfmt->fmt.pix_mp;
-		isp_fmt = find_fmt(stream, pixm->pixelformat);
-	} else {
-		pixm = &stream->out_fmt;
-		isp_fmt = &stream->out_isp_fmt;
-	}
-
+	pixm = &stream->out_fmt;
+	isp_fmt = &stream->out_isp_fmt;
 	*num_planes = isp_fmt->mplanes;
 
 	for (i = 0; i < isp_fmt->mplanes; i++) {
 		const struct v4l2_plane_pix_format *plane_fmt;
-		int h = round_up(pixm->height, MEMORY_ALIGN_ROUND_UP_HEIGHT);
 
 		plane_fmt = &pixm->plane_fmt[i];
-		sizes[i] = plane_fmt->sizeimage / pixm->height * h;
-		alloc_ctxs[i] = dev->alloc_ctx;
+		sizes[i] = plane_fmt->sizeimage;
 	}
 
 	v4l2_dbg(1, rkisp1_debug, &dev->v4l2_dev, "%s count %d, size %d\n",
@@ -1449,7 +1424,7 @@ static void rkisp1_stop_streaming(struct vb2_queue *queue)
 
 	rkisp1_stream_stop(stream);
 	/* call to the other devices */
-	media_entity_pipeline_stop(&node->vdev.entity);
+	media_pipeline_stop(&node->vdev.entity);
 	ret = dev->pipe.set_stream(&dev->pipe, false);
 	if (ret < 0)
 		v4l2_err(v4l2_dev, "pipeline stream-off failed error:%d\n",
@@ -1577,7 +1552,7 @@ rkisp1_start_streaming(struct vb2_queue *queue, unsigned int count)
 	if (ret < 0)
 		goto stop_stream;
 
-	ret = media_entity_pipeline_start(&node->vdev.entity, &dev->pipe.pipe);
+	ret = media_pipeline_start(&node->vdev.entity, &dev->pipe.pipe);
 	if (ret < 0) {
 		v4l2_err(&dev->v4l2_dev, "start pipeline failed %d\n", ret);
 		goto pipe_stream_off;
@@ -1618,10 +1593,6 @@ static int rkisp_init_vb2_queue(struct vb2_queue *q,
 				struct rkisp1_stream *stream,
 				enum v4l2_buf_type buf_type)
 {
-	struct rkisp1_vdev_node *node;
-
-	node = queue_to_node(q);
-
 	q->type = buf_type;
 	q->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF;
 	q->drv_priv = stream;
@@ -1631,6 +1602,7 @@ static int rkisp_init_vb2_queue(struct vb2_queue *q,
 	q->min_buffers_needed = CIF_ISP_REQ_BUFS_MIN;
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	q->lock = &stream->ispdev->apilock;
+	q->dev = stream->ispdev->dev;
 
 	return vb2_queue_init(q);
 }
@@ -1762,16 +1734,14 @@ int rkisp1_fh_open(struct file *filp)
 {
 	struct rkisp1_stream *stream = video_drvdata(filp);
 	struct rkisp1_device *dev = stream->ispdev;
-	struct video_device *vdev = &stream->vnode.vdev;
 	int ret;
 
 	ret = v4l2_fh_open(filp);
 	if (!ret) {
 		atomic_inc(&dev->open_cnt);
-		ret = dev->pipe.pm_use(&vdev->entity, 1);
+		ret = v4l2_pipeline_pm_use(&stream->vnode.vdev.entity, 1);
 		if (ret < 0)
-			v4l2_err(&dev->v4l2_dev,
-				"set pipeline power failed %d\n", ret);
+			vb2_fop_release(filp);
 	}
 
 	return ret;
@@ -1781,19 +1751,16 @@ int rkisp1_fop_release(struct file *file)
 {
 	struct rkisp1_stream *stream = video_drvdata(file);
 	struct rkisp1_device *dev = stream->ispdev;
-	struct video_device *vdev = &stream->vnode.vdev;
 	int ret;
 
 	ret = vb2_fop_release(file);
 	if (!ret) {
-		ret = dev->pipe.pm_use(&vdev->entity, 0);
+		ret = v4l2_pipeline_pm_use(&stream->vnode.vdev.entity, 0);
 		if (ret < 0)
 			v4l2_err(&dev->v4l2_dev,
 				"set pipeline power failed %d\n", ret);
-
 		atomic_dec(&dev->open_cnt);
 	}
-
 	return ret;
 }
 
@@ -2202,7 +2169,7 @@ static int rkisp1_register_stream_vdev(struct rkisp1_stream *stream)
 		return ret;
 	}
 
-	ret = media_entity_init(&vdev->entity, 1, &node->pad, 0);
+	ret = media_entity_pads_init(&vdev->entity, 1, &node->pad);
 	if (ret < 0)
 		goto unreg;
 
@@ -2233,39 +2200,6 @@ err:
 	}
 
 	return ret;
-}
-
-int rkisp1_dma_attach_device(struct rkisp1_device *rkisp1_dev)
-{
-	struct iommu_domain *domain = rkisp1_dev->domain;
-	struct device *dev = rkisp1_dev->dev;
-	int ret;
-
-	if (!domain)
-		return 0;
-
-	ret = iommu_attach_device(domain, dev);
-	if (ret) {
-		dev_err(dev, "Failed to attach iommu device\n");
-		return ret;
-	}
-
-	if (!common_iommu_setup_dma_ops(dev, 0x10000000, SZ_2G, domain->ops)) {
-		dev_err(dev, "Failed to set dma_ops\n");
-		iommu_detach_device(domain, dev);
-		ret = -ENODEV;
-	}
-
-	return ret;
-}
-
-void rkisp1_dma_detach_device(struct rkisp1_device *rkisp1_dev)
-{
-	struct iommu_domain *domain = rkisp1_dev->domain;
-	struct device *dev = rkisp1_dev->dev;
-
-	if (domain)
-		iommu_detach_device(domain, dev);
 }
 
 /****************  Interrupter Handler ****************/

@@ -18,7 +18,6 @@ source "drivers/media/usb/zr364xx/Kconfig"
 source "drivers/media/usb/stkwebcam/Kconfig"
 source "drivers/media/usb/s2255/Kconfig"
 source "drivers/media/usb/usbtv/Kconfig"
-source "drivers/media/usb/rockchip/Kconfig"
 endif
 
 if MEDIA_ANALOG_TV_SUPPORT
@@ -59,6 +58,12 @@ if MEDIA_SDR_SUPPORT
 source "drivers/media/usb/airspy/Kconfig"
 source "drivers/media/usb/hackrf/Kconfig"
 source "drivers/media/usb/msi2500/Kconfig"
+endif
+
+if MEDIA_CEC_SUPPORT
+	comment "USB HDMI CEC adapters"
+source "drivers/media/usb/pulse8-cec/Kconfig"
+source "drivers/media/usb/rainshadow-cec/Kconfig"
 endif
 
 endif #MEDIA_USB_SUPPORT

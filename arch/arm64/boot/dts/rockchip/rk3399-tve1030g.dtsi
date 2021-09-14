@@ -5,15 +5,35 @@
  */
 
 /dts-v1/;
-#include <dt-bindings/soc/rockchip-io-domain.h>
 #include <dt-bindings/pwm/pwm.h>
 #include <dt-bindings/sensor-dev.h>
 #include "rk3399.dtsi"
 #include "rk3399-android.dtsi"
 #include "rk3399-opp.dtsi"
 #include "rk3399-vop-clk-set.dtsi"
+#include <dt-bindings/display/mipi_dsi.h>
 
 / {
+	adc_keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 1>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		poll-interval = <100>;
+
+		vol-up-key {
+			label = "volume up";
+			linux,code = <KEY_VOLUMEUP>;
+			press-threshold-microvolt = <1000>;
+		};
+
+		vol-down-key {
+			label = "volume down";
+			linux,code = <KEY_VOLUMEDOWN>;
+			press-threshold-microvolt = <170000>;
+		};
+	};
+
 	backlight: backlight {
 		compatible = "pwm-backlight";
 		pwms = <&pwm0 0 25000 0>;
@@ -69,18 +89,29 @@
 			"Headphone Jack", "HPOR";
 		simple-audio-card,cpu {
 			sound-dai = <&i2s0>;
+			system-clock-frequency = <11289600>;
 		};
 		simple-audio-card,codec {
 			sound-dai = <&es8316>;
+			system-clock-frequency = <11289600>;
 		};
 	};
 
-	rk_headset {
+	rk_headset: rk-headset {
 		compatible = "rockchip_headset";
 		headset_gpio = <&gpio4 RK_PD4 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&hp_det>;
 		io-channels = <&saradc 2>;
+	};
+
+	charge-animation {
+		compatible = "rockchip,uboot-charge";
+		rockchip,uboot-charge-on = <1>;
+		rockchip,android-charge-on = <0>;
+		rockchip,uboot-low-power-voltage = <6700>;
+		rockchip,screen-on-voltage = <6800>;
+		status = "okay";
 	};
 
 	sdio_pwrseq: sdio-pwrseq {
@@ -97,12 +128,6 @@
 		 * - PDN (power down when low)
 		 */
 		reset-gpios = <&gpio0 RK_PB2 GPIO_ACTIVE_LOW>;
-	};
-
-	uboot-charge {
-		compatible = "rockchip,uboot-charge";
-		rockchip,uboot-charge-on = <0>;
-		rockchip,android-charge-on = <1>;
 	};
 
 	vcc_sys: vcc-sys {
@@ -214,66 +239,88 @@
 
 &dmc {
 	status = "okay";
+	center-supply = <&vdd_center>;
+	upthreshold = <20>;
+	downdifferential = <10>;
 	system-status-freq = <
 		/*system status         freq(KHz)*/
-		SYS_STATUS_NORMAL       800000
-		SYS_STATUS_REBOOT       400000
-		SYS_STATUS_SUSPEND      400000
-		SYS_STATUS_VIDEO_1080P  800000
-		SYS_STATUS_VIDEO_4K     800000
-		SYS_STATUS_VIDEO_4K_10B 800000
-		SYS_STATUS_PERFORMANCE  800000
-		SYS_STATUS_BOOST        800000
-		SYS_STATUS_DUALVIEW     800000
-		SYS_STATUS_ISP          800000
+		SYS_STATUS_NORMAL       856000
+		SYS_STATUS_REBOOT       856000
+		SYS_STATUS_SUSPEND      416000
+		SYS_STATUS_VIDEO_1080P  416000
+		SYS_STATUS_VIDEO_4K     666000
+		SYS_STATUS_VIDEO_4K_10B 856000
+		SYS_STATUS_PERFORMANCE  856000
+		SYS_STATUS_BOOST        856000
+		SYS_STATUS_DUALVIEW     856000
+		SYS_STATUS_ISP          856000
 	>;
-	auto-min-freq = <400000>;
-	auto-freq-en = <0>;
+	vop-bw-dmc-freq = <
+	/* min_bw(MB/s) max_bw(MB/s) freq(KHz) */
+		0       762      328000
+		763     3012     666000
+		3013    99999    856000
+	>;
+
+	auto-min-freq = <328000>;
+	auto-freq-en = <1>;
 };
 
 &dmc_opp_table {
-	compatible = "operating-points-v2";
+		compatible = "operating-points-v2";
 
-	opp-200000000 {
-		opp-hz = /bits/ 64 <200000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-300000000 {
-		opp-hz = /bits/ 64 <300000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-400000000 {
-		opp-hz = /bits/ 64 <400000000>;
-		opp-microvolt = <900000>;
-	};
-	opp-528000000 {
-		opp-hz = /bits/ 64 <528000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-600000000 {
-		opp-hz = /bits/ 64 <600000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-800000000 {
-		opp-hz = /bits/ 64 <800000000>;
-		opp-microvolt = <900000>;
-	};
-	opp-928000000 {
-		opp-hz = /bits/ 64 <928000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
-	opp-1056000000 {
-		opp-hz = /bits/ 64 <1056000000>;
-		opp-microvolt = <900000>;
-		status = "disabled";
-	};
+		opp-200000000 {
+			opp-hz = /bits/ 64 <200000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-300000000 {
+			opp-hz = /bits/ 64 <300000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-328000000 {
+			opp-hz = /bits/ 64 <328000000>;
+			opp-microvolt = <900000>;
+		};
+		opp-400000000 {
+			opp-hz = /bits/ 64 <400000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-416000000 {
+			opp-hz = /bits/ 64 <416000000>;
+			opp-microvolt = <900000>;
+		};
+		opp-528000000 {
+			opp-hz = /bits/ 64 <528000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-600000000 {
+			opp-hz = /bits/ 64 <600000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-666000000 {
+			opp-hz = /bits/ 64 <666000000>;
+			opp-microvolt = <900000>;
+		};
+		opp-800000000 {
+			opp-hz = /bits/ 64 <800000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
+		opp-856000000 {
+			opp-hz = /bits/ 64 <856000000>;
+			opp-microvolt = <900000>;
+		};
+		opp-928000000 {
+			opp-hz = /bits/ 64 <928000000>;
+			opp-microvolt = <900000>;
+			status = "disabled";
+		};
 };
-
 &dp_in_vopb {
 	status = "disabled";
 };
@@ -286,7 +333,6 @@
 		compatible = "simple-panel-dsi";
 		reg = <0>;
 		backlight = <&backlight>;
-		power-supply = <&vcc3v3_s0>;
 		reset-gpios = <&gpio3 RK_PA4 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&lcd_rst_gpio>;
@@ -296,7 +342,7 @@
 		unprepare-delay-ms = <60>;
 		disable-delay-ms = <60>;
 		dsi,flags = <(MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
-			      MIPI_DSI_MODE_LPM | MIPI_DSI_MODE_EOT_PACKET)>;
+			MIPI_DSI_MODE_LPM | MIPI_DSI_MODE_EOT_PACKET)>;
 		dsi,format = <MIPI_DSI_FMT_RGB888>;
 		dsi,lanes  = <4>;
 		panel-init-sequence = [
@@ -327,6 +373,30 @@
 				vsync-active = <0>;
 				de-active = <0>;
 				pixelclk-active = <0>;
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				panel_in_dsi: endpoint {
+					remote-endpoint = <&dsi_out_panel>;
+				};
+			};
+		};
+	};
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+			dsi_out_panel: endpoint {
+				remote-endpoint = <&panel_in_dsi>;
 			};
 		};
 	};
@@ -562,6 +632,7 @@
 			};
 			vcc3v3_s0: SWITCH_REG2 {
 				regulator-boot-on;
+				regulator-always-on;
 				regulator-name = "vcc3v3_s0";
 				regulator-state-mem {
 					regulator-off-in-suspend;
@@ -585,6 +656,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&i2s_8ch_mclk>;
 		spk-con-gpio = <&gpio0 RK_PB3 GPIO_ACTIVE_HIGH>;
+		extcon = <&rk_headset>;
 	};
 };
 
@@ -702,28 +774,6 @@
 
 &io_domains {
 	status = "okay";
-	/*
-	 * If the uboot use rkdevelop branch, the io-domain is not set
-	 * during uboot phase, it will cause the io voltage is not suit for
-	 * the hardware,maybe will damage the io of rk3399, so we add
-	 * uboot-set value to make sure the value is same with the kernel,
-	 * ofcause you must make sure firstly the value here is suit for your
-	 * hardware. The available value is defined in
-	 * include/dt-bindings/soc/rockchip-io-domain.h, they are
-	 * also list here for more convenient configuration:
-	 * bt656-supply: RK3399_BT656_VDD_1V8 or RK3399_BT656_VDD_3V3
-	 * audio-supply: RK3399_AUDIO_VDD_1V8 or RK3399_AUDIO_VDD_3V3
-	 * gpio1830-supply: RK3399_GPIO1833_VDD_1V8 or RK3399_GPIO1833_VDD_3V3
-	 * sdmmc-supply: don't need to configure because the voltage
-	 *                       is set in source code during runtime.
-	 * NOTE:
-	 * 1. The value in uboot-set must be enclosed in "()", otherwise will
-	 *     cause compile error.
-	 * 2. The uboot-set configuration must be cooperated with submit
-	 *     in u-boot.
-	 */
-	uboot-set = <(RK3399_BT656_VDD_1V8 | RK3399_AUDIO_VDD_1V8 |
-				RK3399_GPIO1833_VDD_3V3)>;
 	bt656-supply = <&vcc1v8_dvp>;
 	audio-supply = <&vcca1v8_codec>;
 	sdmmc-supply = <&vcc_sd>;
@@ -816,18 +866,6 @@
 
 &pmu_io_domains {
 	status = "okay";
-	/*
-	 * If the uboot use rkdevelop branch, the pmu_io_domain is not set
-	 * during uboot phase, it will cause the io voltage is not suit for
-	 * the hardware,maybe will damage the io of rk3399, so we add
-	 * uboot-set value to make sure the value is same with the kernel,
-	 * ofcause you must make sure firstly the value here is suit for your
-	 * hardware. The available value is defined in
-	 * include/dt-bindings/soc/rockchip-io-domain.h, they are
-	 * also list here for more convenient configuration:
-	 * pmu1830-supply: RK3399_PMU1830_VDD_1V8 or RK3399_PMU1830_VDD_3V0
-	 */
-	uboot-set = <RK3399_PMU1830_VDD_1V8>;
 	pmu1830-supply = <&vcc_1v8>;
 };
 
@@ -837,31 +875,8 @@
 
 &pwm2 {
 	status = "okay";
-};
-
-&rk_key {
-	status = "okay";
-	compatible = "rockchip,key";
-	io-channels = <&saradc 1>;
-
-	vol-up-key {
-		linux,code = <114>;
-		label = "volume up";
-		rockchip,adc_value = <170>;
-	};
-
-	vol-down-key {
-		linux,code = <115>;
-		label = "volume down";
-		rockchip,adc_value = <1>;
-	};
-
-	power-key {
-		gpios = <&gpio0 5 GPIO_ACTIVE_LOW>;
-		linux,code = <116>;
-		label = "power";
-		gpio-key,wakeup;
-	};
+	pinctrl-names = "active";
+	pinctrl-0 = <&pwm2_pin_pull_down>;
 };
 
 &rockchip_suspend {
@@ -913,7 +928,8 @@
 };
 
 &sdio0 {
-	max-frequency = <100000000>;
+	clock-frequency = <100000000>;
+	clock-freq-min-max = <200000 100000000>;
 	supports-sdio;
 	bus-width = <4>;
 	disable-wp;
@@ -976,6 +992,10 @@
 	status = "okay";
 };
 
+&uart2 {
+	status = "disabled";
+};
+
 &usb_host0_ehci {
 	status = "okay";
 };
@@ -985,12 +1005,12 @@
 };
 
 &usbdrd3_0 {
-	extcon = <&fusb0>;
 	status = "okay";
 };
 
 &usbdrd_dwc3_0 {
 	status = "okay";
+	extcon = <&fusb0>;
 };
 
 &vopb {

@@ -413,7 +413,7 @@ static struct clk *hym8563_clkout_register_clk(struct hym8563 *hym8563)
 
 	init.name = "hym8563-clkout";
 	init.ops = &hym8563_clkout_ops;
-	init.flags = CLK_IS_ROOT;
+	init.flags = 0;
 	init.parent_names = NULL;
 	init.num_parents = 0;
 	hym8563->clkout_hw.init = &init;
@@ -600,8 +600,6 @@ static int hym8563_probe(struct i2c_client *client,
 #ifdef CONFIG_COMMON_CLK
 	hym8563_clkout_register_clk(hym8563);
 #endif
-
-	dev_warn(&client->dev, "probe successed !\n");
 
 	return 0;
 }

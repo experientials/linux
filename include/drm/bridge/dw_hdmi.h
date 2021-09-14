@@ -22,56 +22,56 @@ struct dw_hdmi;
  * 48bit bus.
  *
  * +----------------------+----------------------------------+------------------------------+
- * + Format Name          + Format Code                      + Encodings                    +
+ * | Format Name          | Format Code                      | Encodings                    |
  * +----------------------+----------------------------------+------------------------------+
- * + RGB 4:4:4 8bit       + ``MEDIA_BUS_FMT_RGB888_1X24``    + ``V4L2_YCBCR_ENC_DEFAULT``   +
+ * | RGB 4:4:4 8bit       | ``MEDIA_BUS_FMT_RGB888_1X24``    | ``V4L2_YCBCR_ENC_DEFAULT``   |
  * +----------------------+----------------------------------+------------------------------+
- * + RGB 4:4:4 10bits     + ``MEDIA_BUS_FMT_RGB101010_1X30`` + ``V4L2_YCBCR_ENC_DEFAULT``   +
+ * | RGB 4:4:4 10bits     | ``MEDIA_BUS_FMT_RGB101010_1X30`` | ``V4L2_YCBCR_ENC_DEFAULT``   |
  * +----------------------+----------------------------------+------------------------------+
- * + RGB 4:4:4 12bits     + ``MEDIA_BUS_FMT_RGB121212_1X36`` + ``V4L2_YCBCR_ENC_DEFAULT``   +
+ * | RGB 4:4:4 12bits     | ``MEDIA_BUS_FMT_RGB121212_1X36`` | ``V4L2_YCBCR_ENC_DEFAULT``   |
  * +----------------------+----------------------------------+------------------------------+
- * + RGB 4:4:4 16bits     + ``MEDIA_BUS_FMT_RGB161616_1X48`` + ``V4L2_YCBCR_ENC_DEFAULT``   +
+ * | RGB 4:4:4 16bits     | ``MEDIA_BUS_FMT_RGB161616_1X48`` | ``V4L2_YCBCR_ENC_DEFAULT``   |
  * +----------------------+----------------------------------+------------------------------+
- * + YCbCr 4:4:4 8bit     + ``MEDIA_BUS_FMT_YUV8_1X24``      + ``V4L2_YCBCR_ENC_601``       +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_709``    +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_XV601``  +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_XV709``  +
+ * | YCbCr 4:4:4 8bit     | ``MEDIA_BUS_FMT_YUV8_1X24``      | ``V4L2_YCBCR_ENC_601``       |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_709``    |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_XV601``  |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_XV709``  |
  * +----------------------+----------------------------------+------------------------------+
- * + YCbCr 4:4:4 10bits   + ``MEDIA_BUS_FMT_YUV10_1X30``     + ``V4L2_YCBCR_ENC_601``       +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_709``    +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_XV601``  +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_XV709``  +
+ * | YCbCr 4:4:4 10bits   | ``MEDIA_BUS_FMT_YUV10_1X30``     | ``V4L2_YCBCR_ENC_601``       |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_709``    |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_XV601``  |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_XV709``  |
  * +----------------------+----------------------------------+------------------------------+
- * + YCbCr 4:4:4 12bits   + ``MEDIA_BUS_FMT_YUV12_1X36``     + ``V4L2_YCBCR_ENC_601``       +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_709``    +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_XV601``  +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_XV709``  +
+ * | YCbCr 4:4:4 12bits   | ``MEDIA_BUS_FMT_YUV12_1X36``     | ``V4L2_YCBCR_ENC_601``       |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_709``    |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_XV601``  |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_XV709``  |
  * +----------------------+----------------------------------+------------------------------+
- * + YCbCr 4:4:4 16bits   + ``MEDIA_BUS_FMT_YUV16_1X48``     + ``V4L2_YCBCR_ENC_601``       +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_709``    +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_XV601``  +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_XV709``  +
+ * | YCbCr 4:4:4 16bits   | ``MEDIA_BUS_FMT_YUV16_1X48``     | ``V4L2_YCBCR_ENC_601``       |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_709``    |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_XV601``  |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_XV709``  |
  * +----------------------+----------------------------------+------------------------------+
- * + YCbCr 4:2:2 8bit     + ``MEDIA_BUS_FMT_UYVY8_1X16``     + ``V4L2_YCBCR_ENC_601``       +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_709``    +
+ * | YCbCr 4:2:2 8bit     | ``MEDIA_BUS_FMT_UYVY8_1X16``     | ``V4L2_YCBCR_ENC_601``       |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_709``    |
  * +----------------------+----------------------------------+------------------------------+
- * + YCbCr 4:2:2 10bits   + ``MEDIA_BUS_FMT_UYVY10_1X20``    + ``V4L2_YCBCR_ENC_601``       +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_709``    +
+ * | YCbCr 4:2:2 10bits   | ``MEDIA_BUS_FMT_UYVY10_1X20``    | ``V4L2_YCBCR_ENC_601``       |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_709``    |
  * +----------------------+----------------------------------+------------------------------+
- * + YCbCr 4:2:2 12bits   + ``MEDIA_BUS_FMT_UYVY12_1X24``    + ``V4L2_YCBCR_ENC_601``       +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_709``    +
+ * | YCbCr 4:2:2 12bits   | ``MEDIA_BUS_FMT_UYVY12_1X24``    | ``V4L2_YCBCR_ENC_601``       |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_709``    |
  * +----------------------+----------------------------------+------------------------------+
- * + YCbCr 4:2:0 8bit     + ``MEDIA_BUS_FMT_UYYVYY8_0_5X24`` + ``V4L2_YCBCR_ENC_601``       +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_709``    +
+ * | YCbCr 4:2:0 8bit     | ``MEDIA_BUS_FMT_UYYVYY8_0_5X24`` | ``V4L2_YCBCR_ENC_601``       |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_709``    |
  * +----------------------+----------------------------------+------------------------------+
- * + YCbCr 4:2:0 10bits   + ``MEDIA_BUS_FMT_UYYVYY10_0_5X30``+ ``V4L2_YCBCR_ENC_601``       +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_709``    +
+ * | YCbCr 4:2:0 10bits   | ``MEDIA_BUS_FMT_UYYVYY10_0_5X30``| ``V4L2_YCBCR_ENC_601``       |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_709``    |
  * +----------------------+----------------------------------+------------------------------+
- * + YCbCr 4:2:0 12bits   + ``MEDIA_BUS_FMT_UYYVYY12_0_5X36``+ ``V4L2_YCBCR_ENC_601``       +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_709``    +
+ * | YCbCr 4:2:0 12bits   | ``MEDIA_BUS_FMT_UYYVYY12_0_5X36``| ``V4L2_YCBCR_ENC_601``       |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_709``    |
  * +----------------------+----------------------------------+------------------------------+
- * + YCbCr 4:2:0 16bits   + ``MEDIA_BUS_FMT_UYYVYY16_0_5X48``+ ``V4L2_YCBCR_ENC_601``       +
- * +                      +                                  + or ``V4L2_YCBCR_ENC_709``    +
+ * | YCbCr 4:2:0 16bits   | ``MEDIA_BUS_FMT_UYYVYY16_0_5X48``| ``V4L2_YCBCR_ENC_601``       |
+ * |                      |                                  | or ``V4L2_YCBCR_ENC_709``    |
  * +----------------------+----------------------------------+------------------------------+
  */
 
@@ -82,24 +82,6 @@ enum {
 	DW_HDMI_RES_MAX,
 };
 
-enum dw_hdmi_devtype {
-	IMX6Q_HDMI,
-	IMX6DL_HDMI,
-	RK3228_HDMI,
-	RK3288_HDMI,
-	RK3328_HDMI,
-	RK3366_HDMI,
-	RK3368_HDMI,
-	RK3399_HDMI,
-};
-
-struct dw_hdmi_audio_tmds_n {
-	unsigned long tmds;
-	unsigned int n_32k;
-	unsigned int n_44k1;
-	unsigned int n_48k;
-};
-
 enum dw_hdmi_phy_type {
 	DW_HDMI_PHY_DWC_HDMI_TX_PHY = 0x00,
 	DW_HDMI_PHY_DWC_MHL_PHY_HEAC = 0xb2,
@@ -108,6 +90,13 @@ enum dw_hdmi_phy_type {
 	DW_HDMI_PHY_DWC_HDMI_3D_TX_PHY = 0xf2,
 	DW_HDMI_PHY_DWC_HDMI20_TX_PHY = 0xf3,
 	DW_HDMI_PHY_VENDOR_PHY = 0xfe,
+};
+
+struct dw_hdmi_audio_tmds_n {
+	unsigned long tmds;
+	unsigned int n_32k;
+	unsigned int n_44k1;
+	unsigned int n_48k;
 };
 
 struct dw_hdmi_mpll_config {
@@ -135,12 +124,15 @@ struct dw_hdmi_phy_ops {
 		    struct drm_display_mode *mode);
 	void (*disable)(struct dw_hdmi *hdmi, void *data);
 	enum drm_connector_status (*read_hpd)(struct dw_hdmi *hdmi, void *data);
+	void (*update_hpd)(struct dw_hdmi *hdmi, void *data,
+			   bool force, bool disabled, bool rxsense);
+	void (*setup_hpd)(struct dw_hdmi *hdmi, void *data);
 };
 
 struct dw_hdmi_property_ops {
-	void (*attatch_properties)(struct drm_connector *connector,
-				   unsigned int color, int version,
-				   void *data);
+	void (*attach_properties)(struct drm_connector *connector,
+				  unsigned int color, int version,
+				  void *data);
 	void (*destroy_properties)(struct drm_connector *connector,
 				   void *data);
 	int (*set_property)(struct drm_connector *connector,
@@ -156,17 +148,19 @@ struct dw_hdmi_property_ops {
 };
 
 struct dw_hdmi_plat_data {
-	enum dw_hdmi_devtype dev_type;
-	const struct dw_hdmi_audio_tmds_n *tmds_n_table;
+	struct regmap *regm;
 	enum drm_mode_status (*mode_valid)(struct drm_connector *connector,
-					   struct drm_display_mode *mode);
+					   const struct drm_display_mode *mode);
 	unsigned long input_bus_format;
 	unsigned long input_bus_encoding;
+	bool ycbcr_420_allowed;
 
 	/* Vendor PHY support */
 	const struct dw_hdmi_phy_ops *phy_ops;
 	const char *phy_name;
 	void *phy_data;
+	unsigned int phy_force_vendor;
+        const struct dw_hdmi_audio_tmds_n *tmds_n_table;
 
 	/* Synopsys PHY support */
 	const struct dw_hdmi_mpll_config *mpll_cfg;
@@ -182,27 +176,45 @@ struct dw_hdmi_plat_data {
 	unsigned long (*get_enc_in_encoding)(void *data);
 	unsigned long (*get_enc_out_encoding)(void *data);
 	unsigned long (*get_quant_range)(void *data);
+	struct drm_property *(*get_hdr_property)(void *data);
+	struct drm_property_blob *(*get_hdr_blob)(void *data);
+	bool (*get_color_changed)(void *data);
 
 	/* Vendor Property support */
 	const struct dw_hdmi_property_ops *property_ops;
+	struct drm_connector *connector;
 };
 
-void dw_hdmi_unbind(struct device *dev, struct device *master, void *data);
-int dw_hdmi_bind(struct device *dev, struct device *master,
-		 void *data, struct drm_encoder *encoder,
-		 struct resource *iores, int irq,
-		 const struct dw_hdmi_plat_data *plat_data);
-void dw_hdmi_suspend(struct device *dev);
-void dw_hdmi_resume(struct device *dev);
-enum drm_connector_status dw_hdmi_phy_read_hpd(struct dw_hdmi *hdmi,
-					       void *data);
+struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
+			      const struct dw_hdmi_plat_data *plat_data);
+void dw_hdmi_remove(struct dw_hdmi *hdmi);
+void dw_hdmi_unbind(struct dw_hdmi *hdmi);
+struct dw_hdmi *dw_hdmi_bind(struct platform_device *pdev,
+			     struct drm_encoder *encoder,
+			     struct dw_hdmi_plat_data *plat_data);
+void dw_hdmi_suspend(struct device *dev, struct dw_hdmi *hdmi);
+void dw_hdmi_resume(struct device *dev, struct dw_hdmi *hdmi);
+
+void dw_hdmi_setup_rx_sense(struct dw_hdmi *hdmi, bool hpd, bool rx_sense);
+
 void dw_hdmi_set_sample_rate(struct dw_hdmi *hdmi, unsigned int rate);
 void dw_hdmi_audio_enable(struct dw_hdmi *hdmi);
 void dw_hdmi_audio_disable(struct dw_hdmi *hdmi);
 void dw_hdmi_set_high_tmds_clock_ratio(struct dw_hdmi *hdmi);
 
 /* PHY configuration */
+void dw_hdmi_phy_i2c_set_addr(struct dw_hdmi *hdmi, u8 address);
 void dw_hdmi_phy_i2c_write(struct dw_hdmi *hdmi, unsigned short data,
 			   unsigned char addr);
+
+void dw_hdmi_phy_gen2_pddq(struct dw_hdmi *hdmi, u8 enable);
+void dw_hdmi_phy_gen2_txpwron(struct dw_hdmi *hdmi, u8 enable);
+void dw_hdmi_phy_reset(struct dw_hdmi *hdmi);
+
+enum drm_connector_status dw_hdmi_phy_read_hpd(struct dw_hdmi *hdmi,
+					       void *data);
+void dw_hdmi_phy_update_hpd(struct dw_hdmi *hdmi, void *data,
+			    bool force, bool disabled, bool rxsense);
+void dw_hdmi_phy_setup_hpd(struct dw_hdmi *hdmi, void *data);
 
 #endif /* __IMX_HDMI_H__ */

@@ -36,11 +36,13 @@
 #define _RKISP1_COMMON_H
 
 #include <linux/mutex.h>
+#include <linux/media.h>
 #include <media/media-device.h>
 #include <media/media-entity.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/videobuf2-v4l2.h>
+#include <media/v4l2-mc.h>
 
 #define RKISP1_DEFAULT_WIDTH		800
 #define RKISP1_DEFAULT_HEIGHT		600

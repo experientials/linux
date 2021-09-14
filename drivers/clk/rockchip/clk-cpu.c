@@ -117,7 +117,7 @@ static void rockchip_cpuclk_set_dividers(struct rockchip_cpuclk *cpuclk,
 
 		pr_debug("%s: setting reg 0x%x to 0x%x\n",
 			 __func__, clksel->reg, clksel->val);
-		writel(clksel->val , cpuclk->reg_base + clksel->reg);
+		writel(clksel->val, cpuclk->reg_base + clksel->reg);
 	}
 }
 
@@ -165,6 +165,19 @@ static int rockchip_cpuclk_pre_rate_change(struct rockchip_cpuclk *cpuclk,
 		writel(HIWORD_UPDATE(alt_div, reg_data->div_core_mask,
 				     reg_data->div_core_shift),
 		       cpuclk->reg_base + reg_data->core_reg);
+		if (reg_data->core1_reg)
+			writel(HIWORD_UPDATE(alt_div, reg_data->div_core1_mask,
+					     reg_data->div_core1_shift),
+			       cpuclk->reg_base + reg_data->core1_reg);
+		if (reg_data->core2_reg)
+			writel(HIWORD_UPDATE(alt_div, reg_data->div_core2_mask,
+					     reg_data->div_core2_shift),
+			       cpuclk->reg_base + reg_data->core2_reg);
+		if (reg_data->core3_reg)
+			writel(HIWORD_UPDATE(alt_div, reg_data->div_core3_mask,
+					     reg_data->div_core3_shift),
+			       cpuclk->reg_base + reg_data->core3_reg);
+
 	}
 	rockchip_boost_add_core_div(cpuclk->pll_hw, alt_prate);
 
@@ -207,6 +220,18 @@ static int rockchip_cpuclk_post_rate_change(struct rockchip_cpuclk *cpuclk,
 	writel(HIWORD_UPDATE(0, reg_data->div_core_mask,
 			     reg_data->div_core_shift),
 	       cpuclk->reg_base + reg_data->core_reg);
+	if (reg_data->core1_reg)
+		writel(HIWORD_UPDATE(0, reg_data->div_core1_mask,
+				     reg_data->div_core1_shift),
+		       cpuclk->reg_base + reg_data->core1_reg);
+	if (reg_data->core2_reg)
+		writel(HIWORD_UPDATE(0, reg_data->div_core2_mask,
+				     reg_data->div_core2_shift),
+		       cpuclk->reg_base + reg_data->core2_reg);
+	if (reg_data->core3_reg)
+		writel(HIWORD_UPDATE(0, reg_data->div_core3_mask,
+				     reg_data->div_core3_shift),
+		       cpuclk->reg_base + reg_data->core3_reg);
 
 	if (ndata->old_rate > ndata->new_rate)
 		rockchip_cpuclk_set_dividers(cpuclk, rate);
@@ -311,14 +336,14 @@ struct clk *rockchip_clk_register_cpuclk(const char *name,
 		       __func__, reg_data->mux_core_main,
 		       parent_names[reg_data->mux_core_main]);
 		ret = -EINVAL;
-		goto free_cpuclk;
+		goto free_alt_parent;
 	}
 
 	ret = clk_notifier_register(clk, &cpuclk->clk_nb);
 	if (ret) {
 		pr_err("%s: failed to register clock notifier for %s\n",
 				__func__, name);
-		goto free_cpuclk;
+		goto free_alt_parent;
 	}
 
 	if (nrates > 0) {
@@ -327,8 +352,6 @@ struct clk *rockchip_clk_register_cpuclk(const char *name,
 					     sizeof(*rates) * nrates,
 					     GFP_KERNEL);
 		if (!cpuclk->rate_table) {
-			pr_err("%s: could not allocate memory for cpuclk rates\n",
-			       __func__);
 			ret = -ENOMEM;
 			goto unregister_notifier;
 		}
@@ -347,6 +370,8 @@ free_rate_table:
 	kfree(cpuclk->rate_table);
 unregister_notifier:
 	clk_notifier_unregister(clk, &cpuclk->clk_nb);
+free_alt_parent:
+	clk_disable_unprepare(cpuclk->alt_parent);
 free_cpuclk:
 	kfree(cpuclk);
 	return ERR_PTR(ret);

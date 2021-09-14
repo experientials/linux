@@ -1,14 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * u_ether.h -- interface to USB gadget "ethernet link" utilities
  *
  * Copyright (C) 2003-2005,2008 David Brownell
  * Copyright (C) 2003-2004 Robert Schwebel, Benedikt Spranger
  * Copyright (C) 2008 Nokia Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __U_ETHER_H
@@ -73,9 +69,6 @@ struct gether {
 	bool				is_fixed;
 	u32				fixed_out_len;
 	u32				fixed_in_len;
-	unsigned		ul_max_pkts_per_xfer;
-	unsigned		dl_max_pkts_per_xfer;
-	bool				multi_pkt_xfer;
 	bool				supports_multi_frame;
 	struct sk_buff			*(*wrap)(struct gether *port,
 						struct sk_buff *skb);
@@ -115,7 +108,7 @@ static inline struct eth_dev *gether_setup(struct usb_gadget *g,
 		const char *dev_addr, const char *host_addr,
 		u8 ethaddr[ETH_ALEN], unsigned qmult)
 {
-	return gether_setup_name(g, dev_addr, host_addr, ethaddr, qmult, "usb");
+	return gether_setup_name(g, dev_addr, host_addr, ethaddr, qmult, "eth");
 }
 
 /*
@@ -144,7 +137,7 @@ int gether_register_netdev(struct net_device *net);
  */
 static inline struct net_device *gether_setup_default(void)
 {
-	return gether_setup_name_default("usb");
+	return gether_setup_name_default("eth");
 }
 
 /**

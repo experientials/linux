@@ -1,12 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * epautoconf.c -- endpoint autoconfiguration for usb gadget drivers
  *
  * Copyright (C) 2004 David Brownell
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -127,6 +123,12 @@ found_ep:
 	ep->desc = NULL;
 	ep->comp_desc = NULL;
 	ep->claimed = true;
+#ifdef CONFIG_ARCH_ROCKCHIP
+	ep->transfer_type = type;
+	if (type == USB_ENDPOINT_XFER_ISOC ||
+	    type == USB_ENDPOINT_XFER_INT)
+		ep->mult = usb_endpoint_maxp_mult(desc);
+#endif
 	return ep;
 }
 EXPORT_SYMBOL_GPL(usb_ep_autoconfig_ss);

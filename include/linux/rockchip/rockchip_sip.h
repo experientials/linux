@@ -31,7 +31,7 @@
 #define SIP_SIP_VERSION			0x8200000a
 #define SIP_REMOTECTL_CFG		0x8200000b
 #define PSCI_SIP_VPU_RESET		0x8200000c
-#define RK_SIP_SOC_BUS_DIV		0x8200000d
+#define SIP_BUS_CFG			0x8200000d
 #define SIP_LAST_LOG			0x8200000e
 
 /* Rockchip Sip version */
@@ -103,6 +103,7 @@ typedef enum {
 	SHARE_PAGE_TYPE_INVALID = 0,
 	SHARE_PAGE_TYPE_UARTDBG,
 	SHARE_PAGE_TYPE_DDR,
+	SHARE_PAGE_TYPE_DDRDBG,
 	SHARE_PAGE_TYPE_MAX,
 } share_page_type_t;
 
@@ -112,7 +113,7 @@ typedef enum {
  * a0: error code(0: success, !0: error);
  * a1~a3: data
  */
-#ifdef CONFIG_ROCKCHIP_SIP
+#if IS_ENABLED(CONFIG_ROCKCHIP_SIP)
 struct arm_smccc_res sip_smc_get_atf_version(void);
 struct arm_smccc_res sip_smc_get_sip_version(void);
 struct arm_smccc_res sip_smc_dram(u32 arg0, u32 arg1, u32 arg2);
@@ -129,7 +130,7 @@ int sip_smc_remotectl_config(u32 func, u32 data);
 
 int sip_smc_secure_reg_write(u32 addr_phy, u32 val);
 u32 sip_smc_secure_reg_read(u32 addr_phy);
-struct arm_smccc_res sip_smc_soc_bus_div(u32 arg0, u32 arg1, u32 arg2);
+struct arm_smccc_res sip_smc_bus_config(u32 arg0, u32 arg1, u32 arg2);
 
 /***************************fiq debugger **************************************/
 void sip_fiq_debugger_enable_fiq(bool enable, uint32_t tgt_cpu);

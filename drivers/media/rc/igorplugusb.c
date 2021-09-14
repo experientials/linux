@@ -56,7 +56,7 @@ static void igorplugusb_cmd(struct igorplugusb *ir, int cmd);
 
 static void igorplugusb_irdata(struct igorplugusb *ir, unsigned len)
 {
-	struct ir_raw_event rawir = {};
+	DEFINE_IR_RAW_EVENT(rawir);
 	unsigned i, start, overflow;
 
 	dev_dbg(ir->dev, "irdata: %*ph (len=%u)", len, ir->buf_in, len);
@@ -152,7 +152,7 @@ static int igorplugusb_probe(struct usb_interface *intf,
 	struct usb_endpoint_descriptor *ep;
 	struct igorplugusb *ir;
 	struct rc_dev *rc;
-	int ret;
+	int ret = -ENOMEM;
 
 	udev = interface_to_usbdev(intf);
 	idesc = intf->cur_altsetting;
@@ -182,7 +182,7 @@ static int igorplugusb_probe(struct usb_interface *intf,
 
 	ir->urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!ir->urb)
-		return -ENOMEM;
+		goto fail;
 
 	usb_fill_control_urb(ir->urb, udev,
 		usb_rcvctrlpipe(udev, 0), (uint8_t *)&ir->request,
@@ -190,12 +190,14 @@ static int igorplugusb_probe(struct usb_interface *intf,
 
 	usb_make_path(udev, ir->phys, sizeof(ir->phys));
 
-	rc = rc_allocate_device();
-	rc->input_name = DRIVER_DESC;
+	rc = rc_allocate_device(RC_DRIVER_IR_RAW);
+	if (!rc)
+		goto fail;
+
+	rc->device_name = DRIVER_DESC;
 	rc->input_phys = ir->phys;
 	usb_to_input_id(udev, &rc->input_id);
 	rc->dev.parent = &intf->dev;
-	rc->driver_type = RC_DRIVER_IR_RAW;
 	/*
 	 * This device can only store 36 pulses + spaces, which is not enough
 	 * for the NEC protocol and many others.
@@ -216,9 +218,7 @@ static int igorplugusb_probe(struct usb_interface *intf,
 	ret = rc_register_device(rc);
 	if (ret) {
 		dev_err(&intf->dev, "failed to register rc device: %d", ret);
-		rc_free_device(rc);
-		usb_free_urb(ir->urb);
-		return ret;
+		goto fail;
 	}
 
 	usb_set_intfdata(intf, ir);
@@ -226,6 +226,12 @@ static int igorplugusb_probe(struct usb_interface *intf,
 	igorplugusb_cmd(ir, SET_INFRABUFFER_EMPTY);
 
 	return 0;
+fail:
+	rc_free_device(ir->rc);
+	usb_free_urb(ir->urb);
+	del_timer(&ir->timer);
+
+	return ret;
 }
 
 static void igorplugusb_disconnect(struct usb_interface *intf)
@@ -239,7 +245,7 @@ static void igorplugusb_disconnect(struct usb_interface *intf)
 	usb_free_urb(ir->urb);
 }
 
-static struct usb_device_id igorplugusb_table[] = {
+static const struct usb_device_id igorplugusb_table[] = {
 	/* Igor Plug USB (Atmel's Manufact. ID) */
 	{ USB_DEVICE(0x03eb, 0x0002) },
 	/* Fit PC2 Infrared Adapter */

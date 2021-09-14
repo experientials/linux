@@ -8,6 +8,7 @@ Required Properties:
 - torch-gpio: Specifier of the GPIO connected to GPIO pin,
 this pin is for torch mode, if not, will using assist mode.
 
+
 A discrete LED element connected to the device must be represented by a child
 node - see Documentation/devicetree/bindings/leds/common.txt.
 

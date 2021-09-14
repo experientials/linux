@@ -14,7 +14,7 @@
 #include <dt-bindings/soc/rockchip,boot-mode.h>
 #include <dt-bindings/thermal/thermal.h>
 #include <dt-bindings/soc/rockchip-system-status.h>
-#include <rk322x-dram-default-timing.dtsi>
+#include "rk322x-dram-default-timing.dtsi"
 #include "skeleton.dtsi"
 
 / {
@@ -137,7 +137,7 @@
 			#dma-cells = <1>;
 			clocks = <&cru ACLK_DMAC>;
 			clock-names = "apb_pclk";
-			peripherals-req-type-burst;
+			arm,pl330-periph-burst;
 		};
 	};
 
@@ -236,6 +236,13 @@
 			opp-microvolt-L0 = <1150000>;
 			opp-microvolt-L1 = <1100000>;
 			status = "disabled";
+		};
+	};
+
+	firmware {
+		optee: optee {
+			compatible = "linaro,optee-tz";
+			method = "smc";
 		};
 	};
 
@@ -843,7 +850,7 @@
 		reg = <0x20020800 0x40>;
 		interrupts = <GIC_SPI 10 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "vpu_mmu";
-		clock-names = "aclk", "hclk";
+		clock-names = "aclk", "iface";
 		clocks = <&cru ACLK_VPU>, <&cru HCLK_VPU>;
 		power-domains = <&power RK3228_PD_VPU>;
 		#iommu-cells = <0>;
@@ -917,7 +924,7 @@
 		interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "rkvdec_mmu";
 		clocks = <&cru ACLK_RKVDEC>, <&cru HCLK_RKVDEC>;
-		clock-names = "aclk", "hclk";
+		clock-names = "aclk", "iface";
 		power-domains = <&power RK3228_PD_RKVDEC>;
 		#iommu-cells = <0>;
 		status = "disabled";
@@ -957,7 +964,7 @@
 		interrupts = <GIC_SPI 32 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "vop_mmu";
 		clocks = <&cru ACLK_VOP>, <&cru HCLK_VOP>;
-		clock-names = "aclk", "hclk";
+		clock-names = "aclk", "iface";
 		#iommu-cells = <0>;
 		status = "disabled";
 	};

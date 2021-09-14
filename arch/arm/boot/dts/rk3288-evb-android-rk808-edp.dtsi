@@ -7,8 +7,42 @@
 /dts-v1/;
 #include "rk3288-evb.dtsi"
 #include "rk3288-android.dtsi"
+#include <dt-bindings/sensor-dev.h>
 
 / {
+	panel {
+		compatible = "simple-panel";
+		backlight = <&backlight>;
+		enable-gpios = <&gpio7 RK_PA4 GPIO_ACTIVE_HIGH>;
+		prepare-delay-ms = <120>;
+
+		display-timings {
+			native-mode = <&timing0>;
+
+			timing0: timing0 {
+				clock-frequency = <200000000>;
+				hactive = <1536>;
+				vactive = <2048>;
+				hfront-porch = <12>;
+				hsync-len = <16>;
+				hback-porch = <48>;
+				vfront-porch = <8>;
+				vsync-len = <4>;
+				vback-porch = <8>;
+				hsync-active = <0>;
+				vsync-active = <0>;
+				de-active = <0>;
+				pixelclk-active = <0>;
+			};
+		};
+
+		port {
+			panel_in_edp: endpoint {
+				remote-endpoint = <&edp_out_panel>;
+			};
+		};
+	};
+
 	sdio_pwrseq: sdio-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		clocks = <&rk808 1>;
@@ -52,6 +86,11 @@
 	};
 };
 
+&backlight {
+	pwms = <&pwm0 0 1000000 0>;
+	enable-gpios = <&gpio7 RK_PA2 GPIO_ACTIVE_HIGH>;
+};
+
 &cpu0 {
 	cpu-supply = <&vdd_cpu>;
 };
@@ -70,33 +109,16 @@
 };
 
 &edp {
-	status = "okay";
-};
-
-&edp_panel {
-	compatible = "simple-panel";
-	backlight = <&backlight>;
-	enable-gpios = <&gpio7 4 GPIO_ACTIVE_HIGH>;
-	prepare-delay-ms = <120>;
+	force-hpd;
 	status = "okay";
 
-	display-timings {
-		native-mode = <&timing0>;
+	ports {
+		port@1 {
+			reg = <1>;
 
-		timing0: timing0 {
-			clock-frequency = <200000000>;
-			hactive = <1536>;
-			vactive = <2048>;
-			hfront-porch = <12>;
-			hsync-len = <16>;
-			hback-porch = <48>;
-			vfront-porch = <8>;
-			vsync-len = <4>;
-			vback-porch = <8>;
-			hsync-active = <0>;
-			vsync-active = <0>;
-			de-active = <0>;
-			pixelclk-active = <0>;
+			edp_out_panel: endpoint {
+				remote-endpoint = <&panel_in_edp>;
+			};
 		};
 	};
 };
@@ -105,7 +127,16 @@
 	status = "okay";
 };
 
+&edp_in_vopb {
+	status = "disabled";
+};
+
+&edp_in_vopl {
+	status = "okay";
+};
+
 &route_edp {
+	connect = <&vopl_out_edp>;
 	status = "okay";
 };
 
@@ -119,6 +150,10 @@
 };
 
 &hdmi_analog_sound {
+	status = "disabled";
+};
+
+&sound {
 	status = "okay";
 };
 
@@ -326,35 +361,42 @@
 	status = "okay";
 	clock-frequency = <400000>;
 
-	mpu6050@68 {
-		compatible = "invensense,mpu6050";
+	mpu6050_acc: mpu-acc@68 {
 		status = "okay";
+		compatible = "mpu6500_acc";
 		pinctrl-names = "default";
 		pinctrl-0 = <&mpu6050_irq_gpio>;
 		reg = <0x68>;
 		irq-gpio = <&gpio8 0 IRQ_TYPE_EDGE_RISING>;
-		mpu-int_config = <0x10>;
-		mpu-level_shifter = <0>;
-		mpu-orientation = <0 1 0 1 0 0 0 0 1>;
-		orientation-x= <0>;
-		orientation-y= <0>;
-		orientation-z= <1>;
-		support-hw-poweroff = <0>;
-		mpu-debug = <1>;
+		irq_enable = <0>;
+		poll_delay_ms = <30>;
+		type = <SENSOR_TYPE_ACCEL>;
+		layout = <8>;
 	};
 
-	ak8963:compass@0d{
-		compatible = "mpu_ak8963";
-		reg = <0x0d>;
-		compass-bus = <0>;
-		compass-adapt_num = <0>;
-		compass-orientation = <1 0 0 0 1 0 0 0 1>;
-		orientation-x= <0>;
-		orientation-y= <0>;
-		orientation-z= <1>;
-		compass-debug = <1>;
+	mpu6050_gyro: mpu-gyro@68 {
 		status = "okay";
+		compatible = "mpu6500_gyro";
+		reg = <0x68>;
+		irq_enable = <0>;
+		poll_delay_ms = <30>;
+		type = <SENSOR_TYPE_GYROSCOPE>;
+		layout = <8>;
 	};
+
+	ak8963_compass: ak8963-compass@0d {
+		status = "okay";
+		compatible = "ak8963";
+		pinctrl-names = "default";
+		pinctrl-0 = <&ak8963_irq_gpio>;
+		reg = <0x0d>;
+		type = <SENSOR_TYPE_COMPASS>;
+		irq-gpio = <&gpio8 1 IRQ_TYPE_EDGE_RISING>;
+		irq_enable = <0>;
+		poll_delay_ms = <30>;
+		layout = <1>;
+	};
+
 };
 
 &io_domains {
@@ -371,10 +413,6 @@
 	wifi-supply = <&vcc_wl>;
 };
 
-&lvds_panel {
-	power-supply = <&vcc_lcd>;
-};
-
 &rockchip_suspend {
 	status = "okay";
 	rockchip,pwm-regulator-config = <
@@ -382,6 +420,10 @@
 	| PWM1_REGULATOR_EN
 	)
 	>;
+};
+
+&pwm0 {
+	status = "okay";
 };
 
 &pwm1 {
@@ -394,6 +436,12 @@
 	mpu6050 {
 		mpu6050_irq_gpio: mpu6050-irq-gpio {
 			rockchip,pins = <8 0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	ak8963 {
+		ak8963_irq_gpio: ak8963-irq-gpio {
+			rockchip,pins = <8 1 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 };

@@ -18,14 +18,14 @@
 #include <drm/drm_atomic.h>
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_crtc_helper.h>
+#include <drm/drm_gem_framebuffer_helper.h>
 #include <linux/memblock.h>
-#include <linux/iommu.h>
 #include <soc/rockchip/rockchip_dmc.h>
 
 #include "rockchip_drm_drv.h"
 #include "rockchip_drm_fb.h"
 #include "rockchip_drm_gem.h"
-#include "rockchip_drm_backlight.h"
+#include "rockchip_drm_psr.h"
 
 bool rockchip_fb_is_logo(struct drm_framebuffer *fb)
 {
@@ -57,9 +57,9 @@ void *rockchip_fb_get_kvaddr(struct drm_framebuffer *fb, unsigned int plane)
 
 static void rockchip_drm_fb_destroy(struct drm_framebuffer *fb)
 {
-	struct rockchip_drm_fb *rockchip_fb = to_rockchip_fb(fb);
 	struct drm_gem_object *obj;
 	int i;
+	struct rockchip_drm_fb *rockchip_fb = to_rockchip_fb(fb);
 
 	for (i = 0; i < ROCKCHIP_MAX_FB_BUFFER; i++) {
 		obj = rockchip_fb->obj[i];
@@ -88,13 +88,24 @@ static int rockchip_drm_fb_create_handle(struct drm_framebuffer *fb,
 				     rockchip_fb->obj[0], handle);
 }
 
+static int rockchip_drm_fb_dirty(struct drm_framebuffer *fb,
+				 struct drm_file *file,
+				 unsigned int flags, unsigned int color,
+				 struct drm_clip_rect *clips,
+				 unsigned int num_clips)
+{
+	rockchip_drm_psr_flush_all(fb->dev);
+	return 0;
+}
+
 static const struct drm_framebuffer_funcs rockchip_drm_fb_funcs = {
-	.destroy	= rockchip_drm_fb_destroy,
-	.create_handle	= rockchip_drm_fb_create_handle,
+	.destroy       = rockchip_drm_fb_destroy,
+	.create_handle = rockchip_drm_fb_create_handle,
+	.dirty	       = rockchip_drm_fb_dirty,
 };
 
 struct drm_framebuffer *
-rockchip_fb_alloc(struct drm_device *dev, struct drm_mode_fb_cmd2 *mode_cmd,
+rockchip_fb_alloc(struct drm_device *dev, const struct drm_mode_fb_cmd2 *mode_cmd,
 		  struct drm_gem_object **obj, struct rockchip_logo *logo,
 		  unsigned int num_planes)
 {
@@ -109,7 +120,7 @@ rockchip_fb_alloc(struct drm_device *dev, struct drm_mode_fb_cmd2 *mode_cmd,
 	if (!rockchip_fb)
 		return ERR_PTR(-ENOMEM);
 
-	drm_helper_mode_fill_fb_struct(&rockchip_fb->fb, mode_cmd);
+	drm_helper_mode_fill_fb_struct(dev, &rockchip_fb->fb, mode_cmd);
 
 	ret = drm_framebuffer_init(dev, &rockchip_fb->fb,
 				   &rockchip_drm_fb_funcs);
@@ -155,7 +166,7 @@ err_free_fb:
 
 static struct drm_framebuffer *
 rockchip_user_fb_create(struct drm_device *dev, struct drm_file *file_priv,
-			struct drm_mode_fb_cmd2 *mode_cmd)
+			const struct drm_mode_fb_cmd2 *mode_cmd)
 {
 	struct drm_framebuffer *fb;
 	struct drm_gem_object *objs[ROCKCHIP_MAX_FB_BUFFER];
@@ -175,23 +186,21 @@ rockchip_user_fb_create(struct drm_device *dev, struct drm_file *file_priv,
 		unsigned int width = mode_cmd->width / (i ? hsub : 1);
 		unsigned int height = mode_cmd->height / (i ? vsub : 1);
 		unsigned int min_size;
-		unsigned int bpp =
-			drm_format_plane_bpp(mode_cmd->pixel_format, i);
 
-		obj = drm_gem_object_lookup(dev, file_priv,
-					    mode_cmd->handles[i]);
+		obj = drm_gem_object_lookup(file_priv, mode_cmd->handles[i]);
 		if (!obj) {
-			dev_err(dev->dev, "Failed to lookup GEM object\n");
+			DRM_DEV_ERROR(dev->dev,
+				      "Failed to lookup GEM object\n");
 			ret = -ENXIO;
 			goto err_gem_object_unreference;
 		}
 
 		min_size = (height - 1) * mode_cmd->pitches[i] +
-			mode_cmd->offsets[i] + roundup(width * bpp, 8) / 8;
+			mode_cmd->offsets[i] +
+			width * drm_format_plane_cpp(mode_cmd->pixel_format, i);
+
 		if (obj->size < min_size) {
-			DRM_ERROR("Invalid Gem size on plane[%d]: %zd < %d\n",
-				  i, obj->size, min_size);
-			drm_gem_object_unreference_unlocked(obj);
+			drm_gem_object_put_unlocked(obj);
 			ret = -EINVAL;
 			goto err_gem_object_unreference;
 		}
@@ -208,7 +217,7 @@ rockchip_user_fb_create(struct drm_device *dev, struct drm_file *file_priv,
 
 err_gem_object_unreference:
 	for (i--; i >= 0; i--)
-		drm_gem_object_unreference_unlocked(objs[i]);
+		drm_gem_object_put_unlocked(objs[i]);
 	return ERR_PTR(ret);
 }
 
@@ -217,7 +226,7 @@ static void rockchip_drm_output_poll_changed(struct drm_device *dev)
 	struct rockchip_drm_private *private = dev->dev_private;
 	struct drm_fb_helper *fb_helper = private->fbdev_helper;
 
-	if (fb_helper)
+	if (fb_helper && !private->loader_protect)
 		drm_fb_helper_hotplug_event(fb_helper);
 }
 
@@ -234,7 +243,7 @@ static int rockchip_drm_bandwidth_atomic_check(struct drm_device *dev,
 
 	*bandwidth = 0;
 	*plane_num = 0;
-	for_each_crtc_in_state(state, crtc, crtc_state, i) {
+	for_each_new_crtc_in_state(state, crtc, crtc_state, i) {
 		funcs = priv->crtc_funcs[drm_crtc_index(crtc)];
 
 		if (funcs && funcs->bandwidth)
@@ -257,6 +266,118 @@ static int rockchip_drm_bandwidth_atomic_check(struct drm_device *dev,
 
 	return ret;
 }
+
+static void rockchip_drm_psr_inhibit_get_state(struct drm_atomic_state *state)
+{
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *crtc_state;
+	struct drm_encoder *encoder;
+	u32 encoder_mask = 0;
+	int i;
+
+	for_each_old_crtc_in_state(state, crtc, crtc_state, i) {
+		encoder_mask |= crtc_state->encoder_mask;
+		encoder_mask |= crtc->state->encoder_mask;
+	}
+
+	drm_for_each_encoder_mask(encoder, state->dev, encoder_mask)
+		rockchip_drm_psr_inhibit_get(encoder);
+}
+
+static void
+rockchip_drm_psr_inhibit_put_state(struct drm_atomic_state *state)
+{
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *crtc_state;
+	struct drm_encoder *encoder;
+	u32 encoder_mask = 0;
+	int i;
+
+	for_each_old_crtc_in_state(state, crtc, crtc_state, i) {
+		encoder_mask |= crtc_state->encoder_mask;
+		encoder_mask |= crtc->state->encoder_mask;
+	}
+
+	drm_for_each_encoder_mask(encoder, state->dev, encoder_mask)
+		rockchip_drm_psr_inhibit_put(encoder);
+}
+
+static void
+rockchip_drm_atomic_helper_wait_for_vblanks(struct drm_device *dev,
+					    struct drm_atomic_state *old_state)
+{
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *old_crtc_state, *new_crtc_state;
+	int i, ret;
+	unsigned int crtc_mask = 0;
+	struct rockchip_crtc_state *s;
+
+	 /*
+	  * Legacy cursor ioctls are completely unsynced, and userspace
+	  * relies on that (by doing tons of cursor updates).
+	  */
+	if (old_state->legacy_cursor_update)
+		return;
+
+	for_each_new_crtc_in_state(old_state, crtc, new_crtc_state, i) {
+		if (!new_crtc_state->active)
+			continue;
+
+		ret = drm_crtc_vblank_get(crtc);
+		if (ret != 0)
+			continue;
+
+		crtc_mask |= drm_crtc_mask(crtc);
+		old_state->crtcs[i].last_vblank_count =
+						drm_crtc_vblank_count(crtc);
+	}
+
+	for_each_old_crtc_in_state(old_state, crtc, old_crtc_state, i) {
+		if (!(crtc_mask & drm_crtc_mask(crtc)))
+			continue;
+
+		ret = wait_event_timeout(dev->vblank[i].queue,
+				old_state->crtcs[i].last_vblank_count !=
+					drm_crtc_vblank_count(crtc),
+				msecs_to_jiffies(50));
+
+		s = to_rockchip_crtc_state(crtc->state);
+
+		if (!s->mode_update)
+			WARN(!ret, "[CRTC:%d:%s] state:%d, vblank wait timed out\n",
+			     crtc->base.id, crtc->name, old_crtc_state->active);
+
+		drm_crtc_vblank_put(crtc);
+		s->mode_update = false;
+	}
+}
+
+static void
+rockchip_atomic_helper_commit_tail_rpm(struct drm_atomic_state *old_state)
+{
+	struct drm_device *dev = old_state->dev;
+
+	rockchip_drm_psr_inhibit_get_state(old_state);
+
+	drm_atomic_helper_commit_modeset_disables(dev, old_state);
+
+	drm_atomic_helper_commit_modeset_enables(dev, old_state);
+
+	drm_atomic_helper_commit_planes(dev, old_state,
+					DRM_PLANE_COMMIT_ACTIVE_ONLY);
+
+	rockchip_drm_psr_inhibit_put_state(old_state);
+
+	drm_atomic_helper_commit_hw_done(old_state);
+
+	rockchip_drm_atomic_helper_wait_for_vblanks(dev, old_state);
+
+	drm_atomic_helper_cleanup_planes(dev, old_state);
+}
+
+static const struct drm_mode_config_helper_funcs rockchip_mode_config_helpers = {
+	.atomic_commit_tail = rockchip_atomic_helper_commit_tail_rpm,
+};
 
 static void
 rockchip_atomic_commit_complete(struct rockchip_atomic_commit *commit)
@@ -288,11 +409,11 @@ rockchip_atomic_commit_complete(struct rockchip_atomic_commit *commit)
 	 */
 	drm_atomic_helper_wait_for_dependencies(state);
 
+	rockchip_drm_psr_inhibit_get_state(state);
+
 	drm_atomic_helper_commit_modeset_disables(dev, state);
 
 	drm_atomic_helper_commit_modeset_enables(dev, state);
-
-	rockchip_drm_backlight_update(dev);
 
 	if (prv->dmc_support && !prv->devfreq) {
 		prv->devfreq = devfreq_get_devfreq_by_phandle(dev->dev, 0);
@@ -305,15 +426,17 @@ rockchip_atomic_commit_complete(struct rockchip_atomic_commit *commit)
 
 	drm_atomic_helper_commit_planes(dev, state, true);
 
+	rockchip_drm_psr_inhibit_put_state(state);
+
 	drm_atomic_helper_commit_hw_done(state);
 
-	drm_atomic_helper_wait_for_vblanks(dev, state);
+	rockchip_drm_atomic_helper_wait_for_vblanks(dev, state);
 
 	drm_atomic_helper_cleanup_planes(dev, state);
 
 	drm_atomic_helper_commit_cleanup_done(state);
 
-	drm_atomic_state_free(state);
+	drm_atomic_state_put(state);
 
 	kfree(commit);
 }
@@ -355,8 +478,9 @@ static int rockchip_drm_atomic_commit(struct drm_device *dev,
 		DRM_ERROR("vop bandwidth too large %zd\n", bandwidth);
 	}
 
-	drm_atomic_helper_swap_state(dev, state);
+	WARN_ON(drm_atomic_helper_swap_state(state, true) < 0);
 
+	drm_atomic_state_get(state);
 	commit = kmalloc(sizeof(*commit), GFP_KERNEL);
 	if (!commit)
 		return -ENOMEM;
@@ -391,14 +515,14 @@ static const struct drm_mode_config_funcs rockchip_drm_mode_config_funcs = {
 
 struct drm_framebuffer *
 rockchip_drm_framebuffer_init(struct drm_device *dev,
-			      struct drm_mode_fb_cmd2 *mode_cmd,
+			      const struct drm_mode_fb_cmd2 *mode_cmd,
 			      struct drm_gem_object *obj)
 {
 	struct drm_framebuffer *fb;
 
 	fb = rockchip_fb_alloc(dev, mode_cmd, &obj, NULL, 1);
 	if (IS_ERR(fb))
-		return NULL;
+		return ERR_CAST(fb);
 
 	return fb;
 }
@@ -418,4 +542,5 @@ void rockchip_drm_mode_config_init(struct drm_device *dev)
 	dev->mode_config.async_page_flip = true;
 
 	dev->mode_config.funcs = &rockchip_drm_mode_config_funcs;
+	dev->mode_config.helper_private = &rockchip_mode_config_helpers;
 }

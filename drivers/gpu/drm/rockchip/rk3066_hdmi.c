@@ -496,10 +496,8 @@ static int rk3066_hdmi_connector_get_modes(struct drm_connector *connector)
 {
 	struct rk3066_hdmi *hdmi = to_rk3066_hdmi(connector);
 	struct edid *edid;
-	const u8 def_modes[6] = {4, 16, 31, 19, 17, 2};
-	struct drm_display_mode *mode;
 	struct drm_display_info *info = &connector->display_info;
-	int i, ret = 0;
+	int ret = 0;
 
 	if (!hdmi->ddc)
 		return 0;
@@ -514,18 +512,7 @@ static int rk3066_hdmi_connector_get_modes(struct drm_connector *connector)
 	} else {
 		hdmi->hdmi_data.sink_is_hdmi = true;
 		hdmi->hdmi_data.sink_has_audio = true;
-		for (i = 0; i < sizeof(def_modes); i++) {
-			mode = drm_display_mode_from_vic_index(connector,
-							       def_modes,
-							       31, i);
-			if (mode) {
-				if (!i)
-					mode->type = DRM_MODE_TYPE_PREFERRED;
-				drm_mode_probed_add(connector, mode);
-				ret++;
-			}
-		}
-
+		ret = rockchip_drm_add_modes_noedid(connector);
 		info->edid_hdmi_dc_modes = 0;
 		info->hdmi.y420_dc_modes = 0;
 		info->color_formats = 0;
@@ -920,9 +907,6 @@ static int rk3066_hdmi_i2c_write(struct rk3066_hdmi *hdmi, struct i2c_msg *msgs)
 		hdmi->i2c->segment_addr = msgs->buf[0];
 	if (msgs->addr == DDC_ADDR)
 		hdmi->i2c->ddc_addr = msgs->buf[0];
-
-	/* Set edid fifo first addr */
-	hdmi_writeb(hdmi, HDMI_EDID_FIFO_ADDR, 0x00);
 
 	/* Set edid word address 0x00/0x80 */
 	hdmi_writeb(hdmi, HDMI_EDID_WORD_ADDR, hdmi->i2c->ddc_addr);

@@ -123,7 +123,6 @@ static const struct rockchip_cpuclk_reg_data rk1808_cpuclk_data = {
 	.mux_core_main = 0,
 	.mux_core_shift = 6,
 	.mux_core_mask = 0x3,
-	.pll_name = "pll_apll",
 };
 
 PNAME(mux_pll_p)		= { "xin24m", "xin32k"};
@@ -1165,7 +1164,6 @@ static const char *const rk1808_critical_clocks[] __initconst = {
 	"pclk_ddr_grf",
 	"aclk_gic",
 	"hsclk_imem",
-	"cpll",
 };
 
 static void __iomem *rk1808_cru_base;

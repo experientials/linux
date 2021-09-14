@@ -19,9 +19,6 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_dp_helper.h>
 #include <drm/drm_panel.h>
-#ifdef CONFIG_SWITCH
-#include <linux/switch.h>
-#endif
 #include "rockchip_drm_drv.h"
 
 #define MAX_PHY		2
@@ -72,26 +69,6 @@ struct cdn_dp_port {
 	u8 id;
 };
 
-enum {
-	CDN_DP_HDCP_KSV_LEN = 8,
-	CDN_DP_HDCP_UID_LEN = 16,
-	CDN_DP_HDCP_SHA_LEN = 20,
-	CDN_DP_HDCP_DPK_LEN = 280,
-	CDN_DP_HDCP_KEY_LEN = 308,
-};
-
-/*
- * Size must be divisible by 6
- */
-struct cdn_dp_hdcp_key_1x {
-	u8 ksv[CDN_DP_HDCP_KSV_LEN];
-	u8 device_key[CDN_DP_HDCP_DPK_LEN];
-	u8 sha1[CDN_DP_HDCP_SHA_LEN];
-	u8 uid[CDN_DP_HDCP_UID_LEN];
-	u16 seed;
-	u8 reserved[10];
-};
-
 struct cdn_dp_device {
 	struct device *dev;
 	struct drm_device *drm_dev;
@@ -132,19 +109,7 @@ struct cdn_dp_device {
 	int active_port;
 	u8 train_set[4];
 
-	u8 tu_size;
-	u64 tu_symbol;
-
 	u8 dpcd[DP_RECEIVER_CAP_SIZE];
 	bool sink_has_audio;
-#ifdef CONFIG_SWITCH
-	struct switch_dev switchdev;
-#endif
-	bool hdcp_enabled;
-	bool hdcp_desired;
-	struct cdn_dp_hdcp_key_1x key;
-	struct delayed_work hdcp_event_work;
-	struct work_struct hdcp_prop_work;
-	bool auto_test_mode;
 };
 #endif  /* _CDN_DP_CORE_H */

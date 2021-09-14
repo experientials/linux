@@ -144,7 +144,8 @@ static int rockchip_mmc_set_phase(struct clk_hw *hw, int degrees)
 	raw_value = delay_num ? ROCKCHIP_MMC_DELAY_SEL : 0;
 	raw_value |= delay_num << ROCKCHIP_MMC_DELAYNUM_OFFSET;
 	raw_value |= nineties;
-	writel(HIWORD_UPDATE(raw_value, 0x07ff, mmc_clock->shift), mmc_clock->reg);
+	writel(HIWORD_UPDATE(raw_value, 0x07ff, mmc_clock->shift),
+	       mmc_clock->reg);
 
 	pr_debug("%s->set_phase(%d) delay_nums=%u reg[0x%p]=0x%03x actual_degrees=%d\n",
 		clk_hw_get_name(hw), degrees, delay_num,
@@ -174,7 +175,14 @@ static int rockchip_mmc_clk_rate_notify(struct notifier_block *nb,
 	 * the intput data, which expects the fixed phase after the tuning
 	 * process. However if the clock rate is changed, the phase is stale
 	 * and may break the data sampling. So here we try to restore the phase
-	 * for that case.
+	 * for that case, except that
+	 * (1) cached_phase is invaild since we inevitably cached it when the
+	 * clock provider be reparented from orphan to its real parent in the
+	 * first place. Otherwise we may mess up the initialization of MMC cards
+	 * since we only set the default sample phase and drive phase later on.
+	 * (2) the new coming rate is higher than the older one since mmc driver
+	 * set the max-frequency to match the boards' ability but we can't go
+	 * over the heads of that, otherwise the tests smoke out the issue.
 	 */
 	if (ndata->old_rate <= ndata->new_rate)
 		return NOTIFY_DONE;
@@ -200,7 +208,7 @@ struct clk *rockchip_clk_register_mmc(const char *name,
 
 	mmc_clock = kmalloc(sizeof(*mmc_clock), GFP_KERNEL);
 	if (!mmc_clock)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 
 	init.name = name;
 	init.flags = 0;

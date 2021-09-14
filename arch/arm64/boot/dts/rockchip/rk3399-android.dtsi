@@ -43,6 +43,7 @@
 #include <dt-bindings/display/drm_mipi_dsi.h>
 #include <dt-bindings/display/media-bus-format.h>
 #include "rk3399-vop-clk-set.dtsi"
+#include <dt-bindings/input/input.h>
 
 / {
 	compatible = "rockchip,android", "rockchip,rk3399";
@@ -51,18 +52,10 @@
 		bootargs = "earlycon=uart8250,mmio32,0xff1a0000 swiotlb=1 coherent_pool=1m";
 	};
 
-	ramoops_mem: ramoops_mem {
-		reg = <0x0 0x110000 0x0 0xf0000>;
-		reg-names = "ramoops_mem";
-	};
-
-	ramoops {
-		compatible = "ramoops";
-		record-size = <0x0 0x20000>;
-		console-size = <0x0 0x80000>;
-		ftrace-size = <0x0 0x00000>;
-		pmsg-size = <0x0 0x50000>;
-		memory-region = <&ramoops_mem>;
+	cpuinfo {
+		compatible = "rockchip,cpuinfo";
+		nvmem-cells = <&cpu_id>;
+		nvmem-cell-names = "id";
 	};
 
 	fiq_debugger: fiq-debugger {
@@ -86,6 +79,15 @@
 			reg = <0x0 0x0 0x0 0x0>;
 		};
 
+		ramoops: ramoops@110000 {
+			compatible = "ramoops";
+			reg = <0x0 0x110000 0x0 0xf0000>;
+			record-size = <0x20000>;
+			console-size = <0x80000>;
+			ftrace-size = <0x00000>;
+			pmsg-size = <0x50000>;
+		};
+
 		secure_memory: secure-memory@20000000 {
 			compatible = "rockchip,secure-memory";
 			reg = <0x0 0x20000000 0x0 0x10000000>;
@@ -98,53 +100,18 @@
 		};
 	};
 
-	rk_key: rockchip-key {
-		compatible = "rockchip,key";
-		status = "okay";
+	gpio_keys: gpio-keys {
+		compatible = "gpio-keys";
+		autorepeat;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pwrbtn>;
 
-		io-channels = <&saradc 1>;
-
-		vol-up-key {
-			linux,code = <115>;
-			label = "volume up";
-			rockchip,adc_value = <1>;
-		};
-
-		vol-down-key {
-			linux,code = <114>;
-			label = "volume down";
-			rockchip,adc_value = <170>;
-		};
-
-		power-key {
+		power {
+			debounce-interval = <100>;
 			gpios = <&gpio0 5 GPIO_ACTIVE_LOW>;
-			linux,code = <116>;
-			label = "power";
-			gpio-key,wakeup;
-		};
-
-		menu-key {
-			linux,code = <59>;
-			label = "menu";
-			rockchip,adc_value = <746>;
-		};
-
-		home-key {
-			linux,code = <102>;
-			label = "home";
-			rockchip,adc_value = <355>;
-		};
-
-		back-key {
-			linux,code = <158>;
-			label = "back";
-			rockchip,adc_value = <560>;
-		};
-
-		camera-key {
-			linux,code = <212>;
-			label = "camera";
-			rockchip,adc_value = <450>;
+			label = "GPIO Key Power";
+			linux,code = <KEY_POWER>;
+			wakeup-source;
 		};
 	};
 
@@ -156,101 +123,7 @@
 		clocks = <&cru ACLK_RGA>, <&cru HCLK_RGA>, <&cru SCLK_RGA_CORE>;
 		clock-names = "aclk_rga", "hclk_rga", "clk_rga";
 		power-domains = <&power RK3399_PD_RGA>;
-		dma-coherent;
 		status = "okay";
-	};
-
-	isp0: isp@ff910000 {
-		compatible = "rockchip,rk3399-isp", "rockchip,isp";
-		reg = <0x0 0xff910000 0x0 0x4000>;
-		interrupts = <GIC_SPI 43 IRQ_TYPE_LEVEL_HIGH 0>;
-		assigned-clocks = <&cru SCLK_CIF_OUT_SRC>;
-		assigned-clock-parents = <&cru PLL_GPLL>;
-		assigned-clock-rates = <800000000>;
-		clocks =
-			<&cru SCLK_CIF_OUT>, <&cru SCLK_CIF_OUT_SRC>,
-			<&cru SCLK_DPHY_TX1RX1_CFG>, <&cru SCLK_MIPIDPHY_REF>,
-			<&cru ACLK_ISP0_NOC>, <&cru ACLK_ISP0_WRAPPER>,
-			<&cru HCLK_ISP0_NOC>, <&cru HCLK_ISP0_WRAPPER>,
-			<&cru SCLK_ISP0>, <&cru SCLK_DPHY_RX0_CFG>;
-		clock-names =
-			"clk_cif_out", "clk_cif_pll",
-			"pclk_dphytxrx", "pclk_dphy_ref",
-			"aclk_isp0_noc", "aclk_isp0_wrapper",
-			"hclk_isp0_noc", "hclk_isp0_wrapper",
-			"clk_isp0", "pclk_dphyrx";
-		resets = <&cru SRST_H_ISP0>, <&cru SRST_ISP0>;
-		reset-names = "h_isp0", "isp0";
-		pinctrl-names =
-			"cif_clkout", "isp_dvp8bit0", "isp_mipi_fl",
-			"isp_mipi_fl_prefl", "isp_flash_as_gpio",
-			"isp_flash_as_trigger_out";
-		pinctrl-0 = <&cif_clkout>;
-		pinctrl-1 = <&cif_clkout &isp_dvp_d0d7>;
-		pinctrl-2 = <&cif_clkout>;
-		pinctrl-3 = <&cif_clkout &isp_prelight>;
-		pinctrl-4 = <&isp_flash_trigger_as_gpio>;
-		pinctrl-5 = <&isp_flash_trigger>;
-		rockchip,isp,mipiphy = <2>;
-		rockchip,isp,cifphy = <1>;
-		rockchip,isp,dsiphy,reg = <0xff968000 0x8000>;
-		rockchip,grf = <&grf>;
-		rockchip,cru = <&cru>;
-		rockchip,gpios = <&gpio1 3 GPIO_ACTIVE_HIGH>;
-		rockchip,isp,iommu-enable = <1>;
-		power-domains = <&power RK3399_PD_ISP0>;
-		iommus = <&isp0_mmu>;
-		status = "disabled";
-	};
-
-	isp1: isp@ff920000 {
-		compatible = "rockchip,rk3399-isp", "rockchip,isp";
-		reg = <0x0 0xff920000 0x0 0x4000>;
-		interrupts = <GIC_SPI 44 IRQ_TYPE_LEVEL_HIGH 0>;
-		clocks =
-			<&cru ACLK_ISP1_NOC>, <&cru ACLK_ISP1_WRAPPER>,
-			<&cru HCLK_ISP1_NOC>, <&cru HCLK_ISP1_WRAPPER>,
-			<&cru SCLK_ISP1>, <&cru SCLK_CIF_OUT>,
-			<&cru SCLK_CIF_OUT_SRC>, <&cru SCLK_DPHY_TX1RX1_CFG>,
-			<&cru SCLK_MIPIDPHY_REF>, <&cru PCLK_ISP1_WRAPPER>,
-			<&cru SCLK_DPHY_RX0_CFG>, <&cru PCLK_MIPI_DSI1>,
-			<&cru SCLK_MIPIDPHY_CFG>;
-		clock-names =
-			"aclk_isp1_noc", "aclk_isp1_wrapper",
-			"hclk_isp1_noc", "hclk_isp1_wrapper",
-			"clk_isp1", "clk_cif_out",
-			"clk_cif_pll", "pclk_dphytxrx",
-			"pclk_dphy_ref", "pclk_isp1",
-			"pclk_dphyrx", "pclk_mipi_dsi",
-			"mipi_dphy_cfg";
-		resets = <&cru SRST_H_ISP1>, <&cru SRST_ISP1>;
-		reset-names = "h_isp1", "isp1";
-		pinctrl-names =
-			"cif_clkout", "isp_dvp8bit0", "isp_mipi_fl",
-			"isp_mipi_fl_prefl", "isp_flash_as_gpio",
-			"isp_flash_as_trigger_out";
-		pinctrl-0 = <&cif_clkout>;
-		pinctrl-1 = <&cif_clkout &isp_dvp_d0d7>;
-		pinctrl-2 = <&cif_clkout>;
-		pinctrl-3 = <&isp_prelight>;
-		pinctrl-4 = <&isp_flash_trigger_as_gpio>;
-		pinctrl-5 = <&isp_flash_trigger>;
-		rockchip,isp,mipiphy = <2>;
-		rockchip,isp,cifphy = <1>;
-		rockchip,isp,dsiphy,reg = <0xff968000 0x8000>;
-		rockchip,grf = <&grf>;
-		rockchip,cru = <&cru>;
-		rockchip,gpios = <&gpio1 3 GPIO_ACTIVE_HIGH>;
-		rockchip,isp,iommu-enable = <1>;
-		power-domains = <&power RK3399_PD_ISP1>;
-		iommus = <&isp1_mmu>;
-		status = "disabled";
-	};
-
-	uboot-charge {
-		compatible = "rockchip,uboot-charge";
-		rockchip,uboot-charge-on = <1>;
-		rockchip,android-charge-on = <0>;
 	};
 
 	hdmi_dp_sound: hdmi-dp-sound {
@@ -270,6 +143,7 @@
 };
 
 &vopb {
+	support-multi-area;
 	status = "okay";
 };
 
@@ -278,6 +152,7 @@
 };
 
 &vopl {
+	support-multi-area;
 	status = "okay";
 };
 
@@ -339,12 +214,48 @@
 	};
 };
 
+&dsi {
+	panel@0 {
+		reg = <0>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				panel_in_dsi: endpoint {
+					remote-endpoint = <&dsi_out_panel>;
+				};
+			};
+		};
+	};
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@1 {
+			reg = <1>;
+
+			dsi_out_panel: endpoint {
+				remote-endpoint = <&panel_in_dsi>;
+			};
+		};
+	};
+};
+
 &i2s2 {
 	#sound-dai-cells = <0>;
 	rockchip,bclk-fs = <128>;
 };
 
 &rkvdec {
+	status = "okay";
+};
+
+&rkvdec_mmu {
 	status = "okay";
 };
 
@@ -360,7 +271,19 @@
 	status = "okay";
 };
 
-&vpu {
+&mpp_srv {
+	status = "okay";
+};
+
+&vdpu {
+	status = "okay";
+};
+
+&vepu {
+	status = "okay";
+};
+
+&vpu_mmu {
 	status = "okay";
 };
 
@@ -405,29 +328,11 @@
 				/*cif_clkin*/
 				<2 10 RK_FUNC_3 &pcfg_pull_none>;
 		};
+	};
 
-		isp_shutter: isp-shutter {
-			rockchip,pins =
-				/*SHUTTEREN*/
-				<1 1 RK_FUNC_1 &pcfg_pull_none>,
-				/*SHUTTERTRIG*/
-				<1 0 RK_FUNC_1 &pcfg_pull_none>;
-		};
-
-		isp_flash_trigger: isp-flash-trigger {
-			/*ISP_FLASHTRIGOU*/
-			rockchip,pins = <1 3 RK_FUNC_1 &pcfg_pull_none>;
-		};
-
-		isp_prelight: isp-prelight {
-			/*ISP_PRELIGHTTRIG*/
-			rockchip,pins = <1 4 RK_FUNC_1 &pcfg_pull_none>;
-		};
-
-		isp_flash_trigger_as_gpio: isp_flash_trigger_as_gpio {
-			/*ISP_FLASHTRIGOU*/
-			rockchip,pins =
-				<1 3 RK_FUNC_GPIO &pcfg_pull_none>;
+	buttons {
+		pwrbtn: pwrbtn {
+			rockchip,pins = <0 5 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 };

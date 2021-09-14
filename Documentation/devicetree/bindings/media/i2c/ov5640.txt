@@ -1,80 +1,91 @@
-* Omnivision OV5640 1/4-Inch 5Mp SOC Camera sensor
-
-The Omnivision OV5640 is a 1/4-Inch 5Mp SOC Camera sensor,
-with an active array size of 2592 x 1944.
-It is programmable through a SCCB.
-The OV5640 sensor supports multiple output formats,
-such as RAW RGB, CCIR656, YUV422/420 and YCbCr422.
-It also Support DVP/MIPI CSI-2 output interfaces.
+* Omnivision OV5640 MIPI CSI-2 / parallel sensor
 
 Required Properties:
 - compatible: should be "ovti,ov5640"
-- clocks: reference to the 24M xvclk input clock.
-- clock-names: should be "xvclk".
-- dovdd-supply: Digital I/O voltage supply, 1.8/2.8 volts
-- avdd-supply: Analog voltage supply, 2.8 volts
-- dvdd-supply: Digital core voltage supply, 1.5 volts(embedded 1.5V regulator)
-- reset-gpios: Low active reset gpio
-- powerdown-gpios: Low active powerdown gpio
+- clocks: reference to the xclk input clock.
+- clock-names: should be "xclk".
+- DOVDD-supply: Digital I/O voltage supply, 1.8 volts
+- AVDD-supply: Analog voltage supply, 2.8 volts
+- DVDD-supply: Digital core voltage supply, 1.5 volts
+
+Optional Properties:
+- reset-gpios: reference to the GPIO connected to the reset pin, if any.
+	       This is an active low signal to the OV5640.
+- powerdown-gpios: reference to the GPIO connected to the powerdown pin,
+		   if any. This is an active high signal to the OV5640.
+- rotation: as defined in
+	    Documentation/devicetree/bindings/media/video-interfaces.txt,
+	    valid values are 0 (sensor mounted upright) and 180 (sensor
+	    mounted upside down).
 
 The device node must contain one 'port' child node for its digital output
 video port, in accordance with the video interface bindings defined in
 Documentation/devicetree/bindings/media/video-interfaces.txt.
 
-Example:
-&i2c2 {
-	status = "okay";
+OV5640 can be connected to a MIPI CSI-2 bus or a parallel bus endpoint.
 
-	/* MIPI Interface */
-	ov5640: ov5640@3c {
-		status = "okay";
+Endpoint node required properties for CSI-2 connection are:
+- remote-endpoint: a phandle to the bus receiver's endpoint node.
+- clock-lanes: should be set to <0> (clock lane on hardware lane 0)
+- data-lanes: should be set to <1> or <1 2> (one or two CSI-2 lanes supported)
+
+Endpoint node required properties for parallel connection are:
+- remote-endpoint: a phandle to the bus receiver's endpoint node.
+- bus-width: shall be set to <8> for 8 bits parallel bus
+	     or <10> for 10 bits parallel bus
+- data-shift: shall be set to <2> for 8 bits parallel bus
+	      (lines 9:2 are used) or <0> for 10 bits parallel bus
+- hsync-active: active state of the HSYNC signal, 0/1 for LOW/HIGH respectively.
+- vsync-active: active state of the VSYNC signal, 0/1 for LOW/HIGH respectively.
+- pclk-sample: sample data on rising (1) or falling (0) edge of the pixel clock
+	       signal.
+
+Examples:
+
+&i2c1 {
+	ov5640: camera@3c {
 		compatible = "ovti,ov5640";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_ov5640>;
 		reg = <0x3c>;
-		clocks = <&cru SCLK_CIF_OUT>;
-		clock-names = "xvclk";
+		clocks = <&clks IMX6QDL_CLK_CKO>;
+		clock-names = "xclk";
+		DOVDD-supply = <&vgen4_reg>; /* 1.8v */
+		AVDD-supply = <&vgen3_reg>;  /* 2.8v */
+		DVDD-supply = <&vgen2_reg>;  /* 1.5v */
+		powerdown-gpios = <&gpio1 19 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio1 20 GPIO_ACTIVE_LOW>;
+		rotation = <180>;
 
-		avdd-supply = <&vcc2v8_dvp>;
-		dovdd-supply = <&vcc1v8_dvp>;
-		//dvdd-supply = <&vdd1v5_dvp>;
-		pinctrl-names = "rockchip,camera_default";
-		pinctrl-0 = <&cif_clkout>;
-		//reset-gpios = <&gpio2 5 GPIO_ACTIVE_HIGH>;
-		pwdn-gpios = <&gpio2 13 GPIO_ACTIVE_HIGH>;
-		power-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
-		rockchip,camera-module-index = <0>;
-		rockchip,camera-module-facing = "back";
-		rockchip,camera-module-name = "CameraKing";
-		rockchip,camera-module-lens-name = "CHT-842B-MD";
 		port {
-			ucam_out: endpoint {
-				remote-endpoint = <&mipi_in_ucam>;
+			/* MIPI CSI-2 bus endpoint */
+			ov5640_to_mipi_csi2: endpoint {
+				remote-endpoint = <&mipi_csi2_from_ov5640>;
+				clock-lanes = <0>;
 				data-lanes = <1 2>;
 			};
 		};
 	};
+};
 
-	/* DVP Interface 10-bit parallel */
-	ov5640: ov5640@3c {
-		status = "okay";
+&i2c1 {
+	ov5640: camera@3c {
 		compatible = "ovti,ov5640";
-		reg = <0x3c>;
-		clocks = <&cru SCLK_VIP_OUT>;
-		clock-names = "xvclk";
-
-		avdd-supply = <&vcc2v8_dvp>;
-		dovdd-supply = <&vcc1v8_dvp>;
-		//dvdd-supply = <&vdd1v5_dvp>;
 		pinctrl-names = "default";
-		pinctrl-0 = <&isp_dvp_d2d9 &isp_dvp_d10d11 &cif_clkout>;
-		pwdn-gpios = <&gpio1 RK_PB5 GPIO_ACTIVE_HIGH>;
-		power-gpio = <&gpio3 RK_PB2 GPIO_ACTIVE_HIGH>;
-		rockchip,camera-module-index = <0>;
-		rockchip,camera-module-facing = "back";
-		rockchip,camera-module-name = "CameraKing";
-		rockchip,camera-module-lens-name = "Largan";
+		pinctrl-0 = <&pinctrl_ov5640>;
+		reg = <0x3c>;
+		clocks = <&clk_ext_camera>;
+		clock-names = "xclk";
+
 		port {
-			ov5640_out: endpoint {
-				remote-endpoint = <&dvp_in_bcam>;
+			/* Parallel bus endpoint */
+			ov5640_to_parallel: endpoint {
+				remote-endpoint = <&parallel_from_ov5640>;
+				bus-width = <8>;
+				data-shift = <2>; /* lines 9:2 are used */
+				hsync-active = <0>;
+				vsync-active = <0>;
+				pclk-sample = <1>;
 			};
 		};
 	};

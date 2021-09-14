@@ -28,6 +28,8 @@ struct fwnode_handle;
 struct v4l2_async_notifier;
 struct v4l2_async_subdev;
 
+#define V4L2_FWNODE_CSI2_MAX_DATA_LANES	4
+
 /**
  * struct v4l2_fwnode_bus_mipi_csi2 - MIPI CSI-2 bus data structure
  * @flags: media bus (V4L2_MBUS_*) flags
@@ -39,10 +41,10 @@ struct v4l2_async_subdev;
  */
 struct v4l2_fwnode_bus_mipi_csi2 {
 	unsigned int flags;
-	unsigned char data_lanes[4];
+	unsigned char data_lanes[V4L2_FWNODE_CSI2_MAX_DATA_LANES];
 	unsigned char clock_lane;
 	unsigned short num_data_lanes;
-	bool lane_polarities[5];
+	bool lane_polarities[1 + V4L2_FWNODE_CSI2_MAX_DATA_LANES];
 };
 
 /**
@@ -58,10 +60,38 @@ struct v4l2_fwnode_bus_parallel {
 };
 
 /**
+ * struct v4l2_fwnode_bus_mipi_csi1 - CSI-1/CCP2 data bus structure
+ * @clock_inv: polarity of clock/strobe signal
+ *	       false - not inverted, true - inverted
+ * @strobe: false - data/clock, true - data/strobe
+ * @lane_polarity: the polarities of the clock (index 0) and data lanes
+ *		   index (1)
+ * @data_lane: the number of the data lane
+ * @clock_lane: the number of the clock lane
+ */
+struct v4l2_fwnode_bus_mipi_csi1 {
+	bool clock_inv;
+	bool strobe;
+	bool lane_polarity[2];
+	unsigned char data_lane;
+	unsigned char clock_lane;
+};
+
+/**
  * struct v4l2_fwnode_endpoint - the endpoint data structure
  * @base: fwnode endpoint of the v4l2_fwnode
  * @bus_type: bus type
- * @bus: bus configuration data structure
+ * @bus: union with bus configuration data structure
+ * @bus.parallel: embedded &struct v4l2_fwnode_bus_parallel.
+ *		  Used if the bus is parallel.
+ * @bus.mipi_csi1: embedded &struct v4l2_fwnode_bus_mipi_csi1.
+ *		   Used if the bus is MIPI Alliance's Camera Serial
+ *		   Interface version 1 (MIPI CSI1) or Standard
+ *		   Mobile Imaging Architecture's Compact Camera Port 2
+ *		   (SMIA CCP2).
+ * @bus.mipi_csi2: embedded &struct v4l2_fwnode_bus_mipi_csi2.
+ *		   Used if the bus is MIPI Alliance's Camera Serial
+ *		   Interface version 2 (MIPI CSI2).
  * @link_frequencies: array of supported link frequencies
  * @nr_of_link_frequencies: number of elements in link_frequenccies array
  */
@@ -69,11 +99,12 @@ struct v4l2_fwnode_endpoint {
 	struct fwnode_endpoint base;
 	/*
 	 * Fields below this line will be zeroed by
-	 * v4l2_fwnode_parse_endpoint()
+	 * v4l2_fwnode_endpoint_parse()
 	 */
 	enum v4l2_mbus_type bus_type;
 	union {
 		struct v4l2_fwnode_bus_parallel parallel;
+		struct v4l2_fwnode_bus_mipi_csi1 mipi_csi1;
 		struct v4l2_fwnode_bus_mipi_csi2 mipi_csi2;
 	} bus;
 	u64 *link_frequencies;
@@ -116,10 +147,10 @@ struct v4l2_fwnode_link {
 int v4l2_fwnode_endpoint_parse(struct fwnode_handle *fwnode,
 			       struct v4l2_fwnode_endpoint *vep);
 
-/*
+/**
  * v4l2_fwnode_endpoint_free() - free the V4L2 fwnode acquired by
  * v4l2_fwnode_endpoint_alloc_parse()
- * @vep - the V4L2 fwnode the resources of which are to be released
+ * @vep: the V4L2 fwnode the resources of which are to be released
  *
  * It is safe to call this function with NULL argument or on a V4L2 fwnode the
  * parsing of which failed.
@@ -182,6 +213,26 @@ int v4l2_fwnode_parse_link(struct fwnode_handle *fwnode,
  */
 void v4l2_fwnode_put_link(struct v4l2_fwnode_link *link);
 
+
+/**
+ * typedef parse_endpoint_func - Driver's callback function to be called on
+ *	each V4L2 fwnode endpoint.
+ *
+ * @dev: pointer to &struct device
+ * @vep: pointer to &struct v4l2_fwnode_endpoint
+ * @asd: pointer to &struct v4l2_async_subdev
+ *
+ * Return:
+ * * %0 on success
+ * * %-ENOTCONN if the endpoint is to be skipped but this
+ *   should not be considered as an error
+ * * %-EINVAL if the endpoint configuration is invalid
+ */
+typedef int (*parse_endpoint_func)(struct device *dev,
+				  struct v4l2_fwnode_endpoint *vep,
+				  struct v4l2_async_subdev *asd);
+
+
 /**
  * v4l2_async_notifier_parse_fwnode_endpoints - Parse V4L2 fwnode endpoints in a
  *						device node
@@ -194,10 +245,6 @@ void v4l2_fwnode_put_link(struct v4l2_fwnode_link *link);
  *		     begin at the same memory address.
  * @parse_endpoint: Driver's callback function called on each V4L2 fwnode
  *		    endpoint. Optional.
- *		    Return: %0 on success
- *			    %-ENOTCONN if the endpoint is to be skipped but this
- *				       should not be considered as an error
- *			    %-EINVAL if the endpoint configuration is invalid
  *
  * Parse the fwnode endpoints of the @dev device and populate the async sub-
  * devices array of the notifier. The @parse_endpoint callback function is
@@ -232,9 +279,7 @@ void v4l2_fwnode_put_link(struct v4l2_fwnode_link *link);
 int v4l2_async_notifier_parse_fwnode_endpoints(
 	struct device *dev, struct v4l2_async_notifier *notifier,
 	size_t asd_struct_size,
-	int (*parse_endpoint)(struct device *dev,
-			      struct v4l2_fwnode_endpoint *vep,
-			      struct v4l2_async_subdev *asd));
+	parse_endpoint_func parse_endpoint);
 
 /**
  * v4l2_async_notifier_parse_fwnode_endpoints_by_port - Parse V4L2 fwnode
@@ -250,10 +295,6 @@ int v4l2_async_notifier_parse_fwnode_endpoints(
  * @port: port number where endpoints are to be parsed
  * @parse_endpoint: Driver's callback function called on each V4L2 fwnode
  *		    endpoint. Optional.
- *		    Return: %0 on success
- *			    %-ENOTCONN if the endpoint is to be skipped but this
- *				       should not be considered as an error
- *			    %-EINVAL if the endpoint configuration is invalid
  *
  * This function is just like v4l2_async_notifier_parse_fwnode_endpoints() with
  * the exception that it only parses endpoints in a given port. This is useful
@@ -294,9 +335,7 @@ int v4l2_async_notifier_parse_fwnode_endpoints(
 int v4l2_async_notifier_parse_fwnode_endpoints_by_port(
 	struct device *dev, struct v4l2_async_notifier *notifier,
 	size_t asd_struct_size, unsigned int port,
-	int (*parse_endpoint)(struct device *dev,
-			      struct v4l2_fwnode_endpoint *vep,
-			      struct v4l2_async_subdev *asd));
+	parse_endpoint_func parse_endpoint);
 
 /**
  * v4l2_fwnode_reference_parse_sensor_common - parse common references on

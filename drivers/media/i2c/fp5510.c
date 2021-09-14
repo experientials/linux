@@ -261,8 +261,8 @@ static unsigned int fp5510_move_time(struct fp5510_device *dev_vcm,
 	unsigned int codes_per_step = 1;
 	struct i2c_client *client = v4l2_get_subdevdata(&dev_vcm->sd);
 
-	if ((dev_vcm->esc_enable == ENABLE) ||
-		(dev_vcm->tsc_enable == ENABLE)) {
+	if (dev_vcm->esc_enable == ENABLE ||
+		dev_vcm->tsc_enable == ENABLE) {
 		step_case = dev_vcm->mclk & 0x3;
 		table_cnt = sizeof(fp5510_dlc_time_table) /
 					sizeof(struct TimeTabel_s);
@@ -310,7 +310,7 @@ static unsigned int fp5510_move_time(struct fp5510_device *dev_vcm,
 	if (codes_per_step > 1)
 		codes_per_step = 1 << (codes_per_step - 1);
 
-	if ((dev_vcm->esc_enable == ENABLE) || (dev_vcm->tsc_enable == ENABLE))
+	if (dev_vcm->esc_enable == ENABLE || dev_vcm->tsc_enable == ENABLE)
 		step_period = step_period_dlc;
 	else
 		step_period = step_period_lsc;
@@ -340,7 +340,7 @@ static int fp5510_get_pos(struct fp5510_device *dev_vcm,
 	unsigned int abs_step;
 
 	ret = fp5510_read_msg(client, &msb, &lsb);
-	if (IS_ERR_VALUE(ret))
+	if (ret != 0)
 		goto err;
 
 	abs_step = (((unsigned int)(msb & 0x3FU)) << 4U) |
@@ -387,7 +387,7 @@ static int fp5510_set_pos(struct fp5510_device *dev_vcm,
 	lsb = (((dev_vcm->current_lens_pos & 0x0FU) << 4U) |
 		dev_vcm->step_mode);
 	ret = fp5510_write_msg(client, msb, lsb);
-	if (IS_ERR_VALUE(ret))
+	if (ret != 0)
 		goto err;
 
 	return ret;
@@ -422,31 +422,30 @@ static int fp5510_set_ctrl(struct v4l2_ctrl *ctrl)
 				"%s dest_pos is error. %d > %d\n",
 				__func__, dest_pos, VCMDRV_MAX_LOG);
 			return -EINVAL;
-		} else {
+		}
 			/* calculate move time */
-			move_pos = dev_vcm->current_related_pos - dest_pos;
-			if (move_pos < 0)
-				move_pos = -move_pos;
+		move_pos = dev_vcm->current_related_pos - dest_pos;
+		if (move_pos < 0)
+			move_pos = -move_pos;
 
-			ret = fp5510_set_pos(dev_vcm, dest_pos);
+		ret = fp5510_set_pos(dev_vcm, dest_pos);
 
-			dev_vcm->move_ms =
-				((dev_vcm->vcm_movefull_t *
-				(uint32_t)move_pos) /
-				VCMDRV_MAX_LOG);
+		dev_vcm->move_ms =
+			((dev_vcm->vcm_movefull_t *
+			(uint32_t)move_pos) /
+			VCMDRV_MAX_LOG);
 
-			dev_vcm->start_move_tv = ns_to_timeval(ktime_get_ns());
-			mv_us = dev_vcm->start_move_tv.tv_usec +
-					dev_vcm->move_ms * 1000;
-			if (mv_us >= 1000000) {
-				dev_vcm->end_move_tv.tv_sec =
-					dev_vcm->start_move_tv.tv_sec + 1;
-				dev_vcm->end_move_tv.tv_usec = mv_us - 1000000;
-			} else {
-				dev_vcm->end_move_tv.tv_sec =
-						dev_vcm->start_move_tv.tv_sec;
-				dev_vcm->end_move_tv.tv_usec = mv_us;
-			}
+		dev_vcm->start_move_tv = ns_to_timeval(ktime_get_ns());
+		mv_us = dev_vcm->start_move_tv.tv_usec +
+				dev_vcm->move_ms * 1000;
+		if (mv_us >= 1000000) {
+			dev_vcm->end_move_tv.tv_sec =
+				dev_vcm->start_move_tv.tv_sec + 1;
+			dev_vcm->end_move_tv.tv_usec = mv_us - 1000000;
+		} else {
+			dev_vcm->end_move_tv.tv_sec =
+					dev_vcm->start_move_tv.tv_sec;
+			dev_vcm->end_move_tv.tv_usec = mv_us;
 		}
 	}
 
@@ -601,8 +600,7 @@ static int fp5510_probe(struct i2c_client *client,
 	unsigned char data = 0x0;
 
 	dev_info(&client->dev, "probing...\n");
-	if (of_property_read_u32(
-		np,
+	if (of_property_read_u32(np,
 		OF_CAMERA_VCMDRV_START_CURRENT,
 		(unsigned int *)&start_current)) {
 		start_current = FP5510_DEFAULT_START_CURRENT;
@@ -610,8 +608,7 @@ static int fp5510_probe(struct i2c_client *client,
 			"could not get module %s from dts!\n",
 			OF_CAMERA_VCMDRV_START_CURRENT);
 	}
-	if (of_property_read_u32(
-		np,
+	if (of_property_read_u32(np,
 		OF_CAMERA_VCMDRV_RATED_CURRENT,
 		(unsigned int *)&rated_current)) {
 		rated_current = FP5510_DEFAULT_RATED_CURRENT;
@@ -619,8 +616,7 @@ static int fp5510_probe(struct i2c_client *client,
 			"could not get module %s from dts!\n",
 			OF_CAMERA_VCMDRV_RATED_CURRENT);
 	}
-	if (of_property_read_u32(
-		np,
+	if (of_property_read_u32(np,
 		OF_CAMERA_VCMDRV_STEP_MODE,
 		(unsigned int *)&step_mode)) {
 		step_mode = FP5510_DEFAULT_STEP_MODE;
@@ -659,12 +655,12 @@ static int fp5510_probe(struct i2c_client *client,
 
 	__fp5510_power_on(fp5510_dev);
 
-	ret = media_entity_init(&fp5510_dev->sd.entity, 0, NULL, 0);
+	ret = media_entity_pads_init(&fp5510_dev->sd.entity, 0, NULL);
 	if (ret < 0)
 		goto err_cleanup;
 
 	sd = &fp5510_dev->sd;
-	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV_LENS;
+	sd->entity.function = MEDIA_ENT_F_LENS;
 
 	memset(facing, 0, sizeof(facing));
 	if (strcmp(fp5510_dev->module_facing, "back") == 0)
@@ -705,7 +701,7 @@ static int fp5510_probe(struct i2c_client *client,
 	fp5510_dev->t_src = 0x0;
 
 	ret = fp5510_write_msg(client, 0xEC, 0xA3);
-	if (IS_ERR_VALUE(ret))
+	if (ret != 0)
 		dev_err(&client->dev,
 			"%s: failed with error %d\n", __func__, ret);
 
@@ -713,18 +709,18 @@ static int fp5510_probe(struct i2c_client *client,
 			(((fp5510_dev->tsc_enable << 0x3) |
 			(fp5510_dev->esc_enable << 0x4)) & 0x18);
 	ret = fp5510_write_msg(client, 0xA1, data);
-	if (IS_ERR_VALUE(ret))
+	if (ret != 0)
 		dev_err(&client->dev,
 			"%s: failed with error %d\n", __func__, ret);
 
 	data = (fp5510_dev->t_src << 0x3) & 0xf8;
 	ret = fp5510_write_msg(client, 0xF2, data);
-	if (IS_ERR_VALUE(ret))
+	if (ret != 0)
 		dev_err(&client->dev,
 			"%s: failed with error %d\n", __func__, ret);
 
 	ret = fp5510_write_msg(client, 0xDC, 0x51);
-	if (IS_ERR_VALUE(ret))
+	if (ret != 0)
 		dev_err(&client->dev,
 			"%s: failed with error %d\n", __func__, ret);
 

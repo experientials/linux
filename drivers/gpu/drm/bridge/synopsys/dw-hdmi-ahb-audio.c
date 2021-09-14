@@ -517,7 +517,7 @@ static snd_pcm_uframes_t dw_hdmi_pointer(struct snd_pcm_substream *substream)
 	return bytes_to_frames(runtime, dw->buf_offset);
 }
 
-static struct snd_pcm_ops snd_dw_hdmi_ops = {
+static const struct snd_pcm_ops snd_dw_hdmi_ops = {
 	.open = dw_hdmi_open,
 	.close = dw_hdmi_close,
 	.ioctl = snd_pcm_lib_ioctl,
@@ -640,7 +640,6 @@ static struct platform_driver snd_dw_hdmi_driver = {
 	.remove	= snd_dw_hdmi_remove,
 	.driver	= {
 		.name = DRIVER_NAME,
-		.owner = THIS_MODULE,
 		.pm = PM_OPS,
 	},
 };

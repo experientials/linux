@@ -16,6 +16,7 @@
 #include <linux/of_gpio.h>
 #include <linux/of_device.h>
 #include <linux/clk.h>
+#include <linux/clk/rockchip.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/reset.h>
@@ -24,8 +25,12 @@
 #include <sound/dmaengine_pcm.h>
 
 #include "rockchip_i2s.h"
+#include "rockchip_pcm.h"
 
 #define DRV_NAME "rockchip-i2s"
+
+#define CLK_PPM_MIN		(-1000)
+#define CLK_PPM_MAX		(1000)
 
 struct rk_i2s_pins {
 	u32 reg_offset;
@@ -37,6 +42,7 @@ struct rk_i2s_dev {
 
 	struct clk *hclk;
 	struct clk *mclk;
+	struct clk *mclk_root;
 
 	struct snd_dmaengine_dai_dma_data capture_dma_data;
 	struct snd_dmaengine_dai_dma_data playback_dma_data;
@@ -57,6 +63,12 @@ struct rk_i2s_dev {
 	const struct rk_i2s_pins *pins;
 	unsigned int bclk_fs;
 	unsigned int clk_trcm;
+
+	unsigned int mclk_root_rate;
+	unsigned int mclk_root_initial_rate;
+	int clk_ppm;
+	bool mclk_calibrate;
+
 };
 
 /* txctrl/rxctrl lock */
@@ -446,18 +458,121 @@ static int rockchip_i2s_trigger(struct snd_pcm_substream *substream,
 	return ret;
 }
 
+static int rockchip_i2s_clk_set_rate(struct rk_i2s_dev *i2s,
+				     struct clk *clk, unsigned long rate,
+				     int ppm)
+{
+	unsigned long rate_target;
+	int delta, ret;
+
+	if (ppm == i2s->clk_ppm)
+		return 0;
+
+	ret = rockchip_pll_clk_compensation(clk, ppm);
+	if (ret != -ENOSYS)
+		goto out;
+
+	delta = (ppm < 0) ? -1 : 1;
+	delta *= (int)div64_u64((uint64_t)rate * (uint64_t)abs(ppm) + 500000, 1000000);
+
+	rate_target = rate + delta;
+
+	if (!rate_target)
+		return -EINVAL;
+
+	ret = clk_set_rate(clk, rate_target);
+	if (ret)
+		return ret;
+out:
+	if (!ret)
+		i2s->clk_ppm = ppm;
+
+	return ret;
+}
+
 static int rockchip_i2s_set_sysclk(struct snd_soc_dai *cpu_dai, int clk_id,
-				   unsigned int freq, int dir)
+				   unsigned int rate, int dir)
 {
 	struct rk_i2s_dev *i2s = to_info(cpu_dai);
+	unsigned int root_rate, div, delta;
+	uint64_t ppm;
 	int ret;
 
-	ret = clk_set_rate(i2s->mclk, freq);
+	if (i2s->mclk_calibrate) {
+		ret = rockchip_i2s_clk_set_rate(i2s, i2s->mclk_root,
+						i2s->mclk_root_rate, 0);
+		if (ret)
+			return ret;
+
+		root_rate = i2s->mclk_root_rate;
+		delta = abs(root_rate % rate - rate);
+		ppm = div64_u64((uint64_t)delta * 1000000, (uint64_t)root_rate);
+
+		if (ppm) {
+			div = DIV_ROUND_CLOSEST(i2s->mclk_root_initial_rate, rate);
+			if (!div)
+				return -EINVAL;
+
+			root_rate = rate * round_up(div, 2);
+			ret = clk_set_rate(i2s->mclk_root, root_rate);
+			if (ret)
+				return ret;
+
+			i2s->mclk_root_rate = clk_get_rate(i2s->mclk_root);
+		}
+	}
+
+	ret = clk_set_rate(i2s->mclk, rate);
 	if (ret)
 		dev_err(i2s->dev, "Fail to set mclk %d\n", ret);
 
 	return ret;
 }
+
+static int rockchip_i2s_clk_compensation_info(struct snd_kcontrol *kcontrol,
+					      struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+	uinfo->count = 1;
+	uinfo->value.integer.min = CLK_PPM_MIN;
+	uinfo->value.integer.max = CLK_PPM_MAX;
+	uinfo->value.integer.step = 1;
+
+	return 0;
+}
+
+static int rockchip_i2s_clk_compensation_get(struct snd_kcontrol *kcontrol,
+					     struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dai *dai = snd_kcontrol_chip(kcontrol);
+	struct rk_i2s_dev *i2s = snd_soc_dai_get_drvdata(dai);
+
+	ucontrol->value.integer.value[0] = i2s->clk_ppm;
+
+	return 0;
+}
+
+static int rockchip_i2s_clk_compensation_put(struct snd_kcontrol *kcontrol,
+					     struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dai *dai = snd_kcontrol_chip(kcontrol);
+	struct rk_i2s_dev *i2s = snd_soc_dai_get_drvdata(dai);
+	int ppm = ucontrol->value.integer.value[0];
+
+	if ((ucontrol->value.integer.value[0] < CLK_PPM_MIN) ||
+	    (ucontrol->value.integer.value[0] > CLK_PPM_MAX))
+		return -EINVAL;
+
+	return rockchip_i2s_clk_set_rate(i2s, i2s->mclk_root, i2s->mclk_root_rate, ppm);
+}
+
+static struct snd_kcontrol_new rockchip_i2s_compensation_control = {
+	.iface = SNDRV_CTL_ELEM_IFACE_PCM,
+	.name = "PCM Clk Compensation In PPM",
+	.info = rockchip_i2s_clk_compensation_info,
+	.get = rockchip_i2s_clk_compensation_get,
+	.put = rockchip_i2s_clk_compensation_put,
+};
 
 static int rockchip_i2s_dai_probe(struct snd_soc_dai *dai)
 {
@@ -465,6 +580,9 @@ static int rockchip_i2s_dai_probe(struct snd_soc_dai *dai)
 
 	dai->capture_dma_data = &i2s->capture_dma_data;
 	dai->playback_dma_data = &i2s->playback_dma_data;
+
+	if (i2s->mclk_calibrate)
+		snd_soc_add_dai_controls(dai, &rockchip_i2s_compensation_control, 1);
 
 	return 0;
 }
@@ -607,6 +725,7 @@ static const struct of_device_id rockchip_i2s_match[] = {
 	{ .compatible = "rockchip,rk3328-i2s", },
 	{ .compatible = "rockchip,rk3368-i2s", },
 	{ .compatible = "rockchip,rk3399-i2s", .data = &rk3399_i2s_pins },
+	{ .compatible = "rockchip,rv1126-i2s", },
 	{},
 };
 
@@ -622,10 +741,8 @@ static int rockchip_i2s_probe(struct platform_device *pdev)
 	int val;
 
 	i2s = devm_kzalloc(&pdev->dev, sizeof(*i2s), GFP_KERNEL);
-	if (!i2s) {
-		dev_err(&pdev->dev, "Can't allocate rk_i2s_dev\n");
+	if (!i2s)
 		return -ENOMEM;
-	}
 
 	i2s->dev = &pdev->dev;
 
@@ -640,6 +757,17 @@ static int rockchip_i2s_probe(struct platform_device *pdev)
 
 	i2s->reset_m = devm_reset_control_get(&pdev->dev, "reset-m");
 	i2s->reset_h = devm_reset_control_get(&pdev->dev, "reset-h");
+
+	i2s->mclk_calibrate =
+		of_property_read_bool(node, "rockchip,mclk-calibrate");
+	if (i2s->mclk_calibrate) {
+		i2s->mclk_root = devm_clk_get(&pdev->dev, "i2s_clk_root");
+		if (IS_ERR(i2s->mclk_root))
+			return PTR_ERR(i2s->mclk_root);
+
+		i2s->mclk_root_initial_rate = clk_get_rate(i2s->mclk_root);
+		i2s->mclk_root_rate = i2s->mclk_root_initial_rate;
+	}
 
 	/* try to prepare related clocks */
 	i2s->hclk = devm_clk_get(&pdev->dev, "i2s_hclk");
@@ -689,12 +817,13 @@ static int rockchip_i2s_probe(struct platform_device *pdev)
 			goto err_pm_disable;
 	}
 
-	soc_dai = devm_kzalloc(&pdev->dev,
+	soc_dai = devm_kmemdup(&pdev->dev, &rockchip_i2s_dai,
 			       sizeof(*soc_dai), GFP_KERNEL);
-	if (!soc_dai)
-		return -ENOMEM;
+	if (!soc_dai) {
+		ret = -ENOMEM;
+		goto err_pm_disable;
+	}
 
-	memcpy(soc_dai, &rockchip_i2s_dai, sizeof(*soc_dai));
 	if (!of_property_read_u32(node, "rockchip,playback-channels", &val)) {
 		if (val >= 2 && val <= 8)
 			soc_dai->playback.channels_max = val;
@@ -739,10 +868,10 @@ static int rockchip_i2s_probe(struct platform_device *pdev)
 
 	if (of_property_read_bool(node, "rockchip,no-dmaengine"))
 		return ret;
-	ret = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
+	ret = rockchip_pcm_platform_register(&pdev->dev);
 	if (ret) {
 		dev_err(&pdev->dev, "Could not register PCM\n");
-		return ret;
+		goto err_suspend;
 	}
 
 	return 0;
@@ -764,41 +893,14 @@ static int rockchip_i2s_remove(struct platform_device *pdev)
 	if (!pm_runtime_status_suspended(&pdev->dev))
 		i2s_runtime_suspend(&pdev->dev);
 
-	clk_disable_unprepare(i2s->mclk);
 	clk_disable_unprepare(i2s->hclk);
 
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int rockchip_i2s_suspend(struct device *dev)
-{
-	struct rk_i2s_dev *i2s = dev_get_drvdata(dev);
-
-	regcache_mark_dirty(i2s->regmap);
-
-	return 0;
-}
-
-static int rockchip_i2s_resume(struct device *dev)
-{
-	struct rk_i2s_dev *i2s = dev_get_drvdata(dev);
-	int ret;
-
-	ret = pm_runtime_get_sync(dev);
-	if (ret < 0)
-		return ret;
-	ret = regcache_sync(i2s->regmap);
-	pm_runtime_put(dev);
-
-	return ret;
-}
-#endif
-
 static const struct dev_pm_ops rockchip_i2s_pm_ops = {
 	SET_RUNTIME_PM_OPS(i2s_runtime_suspend, i2s_runtime_resume,
 			   NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(rockchip_i2s_suspend, rockchip_i2s_resume)
 };
 
 static struct platform_driver rockchip_i2s_driver = {

@@ -72,7 +72,7 @@ static int modem_poweron_off(int on_off)
 	return 0;
 }
 
-static ssize_t modem_status_write(struct class *cls,
+static ssize_t modem_status_store(struct class *cls,
 				  struct class_attribute *attr,
 				  const char *buf, size_t count)
 {
@@ -98,14 +98,14 @@ static ssize_t modem_status_write(struct class *cls,
 	return count;
 }
 
-static ssize_t modem_status_read(struct class *cls,
+static ssize_t modem_status_show(struct class *cls,
 				 struct class_attribute *attr,
 				 char *buf)
 {
 	return sprintf(buf, "%d\n", modem_status);
 }
 
-static CLASS_ATTR(modem_status, 0644, modem_status_read, modem_status_write);
+static CLASS_ATTR_RW(modem_status);
 
 static int modem_platdata_parse_dt(struct device *dev,
 				   struct lte_data *data)
