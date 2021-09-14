@@ -689,6 +689,8 @@ const struct iommu_ops *iommu_ops_from_fwnode(struct fwnode_handle *fwnode)
 	return NULL;
 }
 
+<<<<<<< HEAD   (02517e ARM: dts: rv1126: monitor en to ispp)
+=======
 static inline int iommu_is_available(struct device *dev)
 {
 	return -ENODEV;
@@ -701,6 +703,7 @@ static inline void rk_iommu_mask_irq(struct device *dev)
 static inline void rk_iommu_unmask_irq(struct device *dev)
 {
 }
+>>>>>>> CHANGE (b1d573 iommu/rockchip: add irq mask cb)
 #endif /* CONFIG_IOMMU_API */
 
 #ifdef CONFIG_IOMMU_DEBUGFS

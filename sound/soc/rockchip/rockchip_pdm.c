@@ -790,12 +790,11 @@ static int rockchip_pdm_probe(struct platform_device *pdev)
 	rockchip_pdm_rxctrl(pdm, 0);
 
 	ret = rockchip_pdm_path_parse(pdm, node);
-	if (ret != 0 && ret != -ENOENT)
+	if (ret != -ENOENT)
 		goto err_suspend;
 
 	if (of_property_read_bool(node, "rockchip,no-dmaengine"))
-		return 0;
-
+		return ret;
 	ret = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
 	if (ret) {
 		dev_err(&pdev->dev, "could not register pcm: %d\n", ret);

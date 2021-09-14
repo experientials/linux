@@ -1,10 +1,9 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /**
  * @file definition of host message ring functionality
  * Provides type definitions and function prototypes used to link the
  * DHD OS, bus, and protocol modules.
  *
- * Copyright (C) 1999-2019, Broadcom Corporation
+ * Copyright (C) 1999-2017, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -42,11 +41,7 @@
 #include <dhd.h>
 #include <dhd_proto.h>
 
-#ifdef BCMDBUS
-#include <dbus.h>
-#else
 #include <dhd_bus.h>
-#endif /* BCMDBUS */
 
 #include <dhd_dbg.h>
 #include <siutils.h>
@@ -3716,7 +3711,7 @@ dhd_prot_txstatus_process(dhd_pub_t *dhd, void *msg)
 
 		/* Release the Lock when no more tx packets are pending */
 		if (prot->active_tx_count == 0)
-			 DHD_TXFL_WAKE_UNLOCK(dhd);
+			 DHD_OS_WAKE_UNLOCK(dhd);
 
 	} else {
 		DHD_ERROR(("Extra packets are freed\n"));
@@ -4200,7 +4195,7 @@ dhd_prot_txdata(dhd_pub_t *dhd, void *PKTBUF, uint8 ifidx)
 	 * to finish.
 	 */
 	if (prot->active_tx_count == 1)
-		DHD_TXFL_WAKE_LOCK_TIMEOUT(dhd, MAX_TX_TIMEOUT);
+		DHD_OS_WAKE_LOCK(dhd);
 
 	DHD_GENERAL_UNLOCK(dhd, flags);
 

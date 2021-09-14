@@ -915,6 +915,7 @@
 		rockchip,camera-module-facing = "front";
 		rockchip,camera-module-name = "CMK-OT1607-FV1";
 		rockchip,camera-module-lens-name = "M12-40IRC-4MP-F16";
+		ir-cut = <&cam_ircut0>;
 		port {
 			ucam_out0: endpoint {
 				remote-endpoint = <&mipi_in_ucam0>;
@@ -1156,6 +1157,21 @@
 &rkcif_mipi_lvds {
 	status = "okay";
 
+	/* parameters for do cif reset detecting:
+	 * index0: monitor mode,
+		   0 for idle,
+		   1 for continue,
+		   2 for trigger,
+		   3 for hotplug (for nextchip)
+	 * index1: the frame id to start timer,
+		   min is 2
+	 * index2: frame num of monitoring cycle
+	 * index3: err time for keep monitoring
+		   after finding out err (ms)
+	 * index4: csi2 err reference val for resetting
+	 */
+	rockchip,cif-monitor = <1 2 5 1000 5>;
+
 	port {
 		/* MIPI CSI-2 endpoint */
 		cif_mipi_in: endpoint {
@@ -1275,7 +1291,6 @@
 	sd-uhs-sdr25;
 	sd-uhs-sdr104;
 	vqmmc-supply = <&vccio_sd>;
-	vmmc-supply = <&vcc3v3_sd>;
 	status = "okay";
 };
 
@@ -1335,8 +1350,7 @@
 
 &usbdrd_dwc3 {
 	status = "okay";
-        snps,tx-fifo-resize;
-	dr_mode = "peripheral";
+	extcon = <&u2phy0>;
 };
 
 &vdpu {

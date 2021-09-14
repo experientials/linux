@@ -120,15 +120,15 @@ static void __dwc3_set_mode(struct work_struct *work)
 
 	if (dwc->dr_mode != USB_DR_MODE_OTG)
 		return;
-
+	
 	if (dwc->current_dr_role == DWC3_GCTL_PRTCAP_OTG)
 		dwc3_otg_update(dwc, 0);
 
 	if (!dwc->desired_dr_role)
 		return;
-
-	if (dwc->en_runtime)
+	if (dwc->en_runtime){
 		goto runtime;
+	}
 
 	if (dwc->desired_dr_role == dwc->current_dr_role)
 		return;
@@ -1257,9 +1257,6 @@ static int dwc3_core_init_mode(struct dwc3 *dwc)
 				dev_err(dev, "failed to initialize gadget\n");
 			return ret;
 		}
-
-		if (dwc->uwk_en)
-			device_init_wakeup(dev, true);
 		break;
 	case USB_DR_MODE_HOST:
 		/*
@@ -1304,9 +1301,6 @@ static int dwc3_core_init_mode(struct dwc3 *dwc)
 				dev_err(dev, "failed to initialize dual-role\n");
 			return ret;
 		}
-
-		if (dwc->uwk_en)
-			device_init_wakeup(dev, true);
 		break;
 	default:
 		dev_err(dev, "Unsupported mode of operation %d\n", dwc->dr_mode);
@@ -1448,8 +1442,6 @@ static void dwc3_get_properties(struct dwc3 *dwc)
 				"snps,tx-fifo-resize");
 	dwc->xhci_warm_reset_on_suspend_quirk = device_property_read_bool(dev,
 				"snps,xhci-warm-reset-on-suspend-quirk");
-	dwc->uwk_en = device_property_read_bool(dev,
-				"wakeup-source");
 
 	dwc->lpm_nyet_threshold = lpm_nyet_threshold;
 	dwc->tx_de_emphasis = tx_de_emphasis;
@@ -1529,6 +1521,7 @@ static int dwc3_probe(struct platform_device *pdev)
 	struct device		*dev = &pdev->dev;
 	struct resource		*res, dwc_res;
 	struct dwc3		*dwc;
+	struct device_node *np = pdev->dev.of_node;
 
 	int			ret;
 
@@ -1644,12 +1637,14 @@ static int dwc3_probe(struct platform_device *pdev)
 	ret = dwc3_get_dr_mode(dwc);
 	if (ret)
 		goto err3;
-
-	if (dwc->dr_mode == USB_DR_MODE_OTG &&
-	    of_device_is_compatible(dev->parent->of_node,
-				    "rockchip,rk3399-dwc3")) {
-		pm_runtime_allow(dev);
-		dwc->en_runtime = true;
+	
+	if(!of_property_read_bool(np, "firefly,force_set_dr_mode")){
+		if (dwc->dr_mode == USB_DR_MODE_OTG &&
+	    	of_device_is_compatible(dev->parent->of_node,
+					    "rockchip,rk3399-dwc3")) {
+			pm_runtime_allow(dev);
+			dwc->en_runtime = true;
+		}
 	}
 
 	ret = dwc3_alloc_scratch_buffers(dwc);
@@ -1972,12 +1967,6 @@ static int dwc3_suspend(struct device *dev)
 	struct dwc3	*dwc = dev_get_drvdata(dev);
 	int		ret;
 
-	if (dwc->uwk_en) {
-		dwc3_gadget_disable_irq(dwc);
-		synchronize_irq(dwc->irq_gadget);
-		return 0;
-	}
-
 	if (pm_runtime_suspended(dwc->dev))
 		return 0;
 
@@ -2016,11 +2005,6 @@ static int dwc3_resume(struct device *dev)
 {
 	struct dwc3	*dwc = dev_get_drvdata(dev);
 	int		ret;
-
-	if (dwc->uwk_en) {
-		dwc3_gadget_enable_irq(dwc);
-		return 0;
-	}
 
 	if (pm_runtime_suspended(dwc->dev))
 		return 0;

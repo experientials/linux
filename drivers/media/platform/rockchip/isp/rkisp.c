@@ -653,8 +653,6 @@ static int rkisp_config_isp(struct rkisp_device *dev)
 		    CIF_ISP_FRAME_IN;
 	if (dev->isp_ver == ISP_V20 || dev->isp_ver == ISP_V21)
 		irq_mask |= ISP2X_LSC_LUT_ERR;
-	if (dev->isp_ver == ISP_V20)
-		irq_mask |= ISP2X_HDR_DONE;
 	rkisp_write(dev, CIF_ISP_IMSC, irq_mask, true);
 
 	if ((dev->isp_ver == ISP_V20 || dev->isp_ver == ISP_V21) &&
@@ -850,8 +848,7 @@ static void rkisp_start_3a_run(struct rkisp_device *dev)
 	};
 	int ret;
 
-	if (!rkisp_is_need_3a(dev) || dev->isp_ver == ISP_V20 ||
-	    !params_vdev->is_subs_evt)
+	if (!rkisp_is_need_3a(dev) || dev->isp_ver == ISP_V20)
 		return;
 
 	v4l2_event_queue(vdev, &ev);
@@ -878,8 +875,7 @@ static void rkisp_stop_3a_run(struct rkisp_device *dev)
 	};
 	int ret;
 
-	if (!rkisp_is_need_3a(dev) || dev->isp_ver == ISP_V20 ||
-	    !params_vdev->is_subs_evt)
+	if (!rkisp_is_need_3a(dev) || dev->isp_ver == ISP_V20)
 		return;
 
 	v4l2_event_queue(vdev, &ev);
@@ -1901,17 +1897,10 @@ static long rkisp_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		}
 
 		rkisp_chk_tb_over(isp_dev);
-		dma_sync_single_for_cpu(isp_dev->dev, isp_dev->resmem_addr,
-					sizeof(struct rkisp_thunderboot_resmem_head),
-					DMA_FROM_DEVICE);
-
 		resmem_va = phys_to_virt(isp_dev->resmem_pa);
 		head = (struct rkisp_thunderboot_resmem_head *)resmem_va;
 		if (head->complete != RKISP_TB_OK) {
 			resmem->resmem_size = 0;
-			dma_unmap_single(isp_dev->dev, isp_dev->resmem_pa,
-					 sizeof(struct rkisp_thunderboot_resmem_head),
-					 DMA_FROM_DEVICE);
 			free_reserved_area(phys_to_virt(isp_dev->resmem_pa),
 					   phys_to_virt(isp_dev->resmem_pa) + isp_dev->resmem_size,
 					   -1, "rkisp_thunderboot");
@@ -1921,14 +1910,10 @@ static long rkisp_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
 		}
 		break;
 	case RKISP_CMD_FREE_SHARED_BUF:
-		if (isp_dev->resmem_pa && isp_dev->resmem_size) {
-			dma_unmap_single(isp_dev->dev, isp_dev->resmem_pa,
-					 sizeof(struct rkisp_thunderboot_resmem_head),
-					 DMA_FROM_DEVICE);
+		if (isp_dev->resmem_pa && isp_dev->resmem_size)
 			free_reserved_area(phys_to_virt(isp_dev->resmem_pa),
 					   phys_to_virt(isp_dev->resmem_pa) + isp_dev->resmem_size,
 					   -1, "rkisp_thunderboot");
-		}
 
 		isp_dev->resmem_pa = 0;
 		isp_dev->resmem_size = 0;
@@ -2133,34 +2118,13 @@ void rkisp_unregister_isp_subdev(struct rkisp_device *isp_dev)
 	media_entity_cleanup(&sd->entity);
 }
 
-#define shm_head_poll_timeout(isp_dev, cond, sleep_us, timeout_us)	\
-({ \
-	u64 __timeout_us = (timeout_us); \
-	unsigned long __sleep_us = (sleep_us); \
-	ktime_t __timeout = ktime_add_us(ktime_get(), __timeout_us); \
-	might_sleep_if((__sleep_us) != 0); \
-	for (;;) { \
-		dma_sync_single_for_cpu(isp_dev->dev, isp_dev->resmem_addr, \
-			sizeof(struct rkisp_thunderboot_resmem_head), \
-			DMA_FROM_DEVICE); \
-		if (cond) \
-			break; \
-		if (__timeout_us && \
-		    ktime_compare(ktime_get(), __timeout) > 0) { \
-			break; \
-		} \
-		if (__sleep_us) \
-			usleep_range((__sleep_us >> 2) + 1, __sleep_us); \
-	} \
-	(cond) ? 0 : -ETIMEDOUT; \
-})
-
 #ifdef CONFIG_VIDEO_ROCKCHIP_THUNDER_BOOT_ISP
 void rkisp_chk_tb_over(struct rkisp_device *isp_dev)
 {
 	struct rkisp_thunderboot_resmem_head *head;
 	enum rkisp_tb_state tb_state;
 	void *resmem_va;
+	u32 i;
 
 	if (!isp_dev->resmem_pa || !isp_dev->resmem_size) {
 		v4l2_info(&isp_dev->v4l2_dev,
@@ -2171,11 +2135,17 @@ void rkisp_chk_tb_over(struct rkisp_device *isp_dev)
 	resmem_va = phys_to_virt(isp_dev->resmem_pa);
 	head = (struct rkisp_thunderboot_resmem_head *)resmem_va;
 	if (isp_dev->hw_dev->is_thunderboot) {
-		shm_head_poll_timeout(isp_dev, !!head->enable, 2000, 200 * USEC_PER_MSEC);
-		shm_head_poll_timeout(isp_dev, !!head->complete, 5000, 500 * USEC_PER_MSEC);
-		if (head->complete != RKISP_TB_OK)
-			v4l2_info(&isp_dev->v4l2_dev,
-				  "wait thunderboot over timeout\n");
+		if ((!head->complete)) {
+			for (i = 0; i < 100; i++) {
+				usleep_range(5000, 6000);
+				if (head->complete)
+					break;
+			}
+
+			if (!head->complete)
+				v4l2_info(&isp_dev->v4l2_dev,
+					  "wait thunderboot over timeout\n");
+		}
 
 		v4l2_info(&isp_dev->v4l2_dev,
 			  "thunderboot info: %d, %d, %d, %d, %d, %d, 0x%x\n",
@@ -2336,9 +2306,6 @@ void rkisp_isp_isr(unsigned int isp_mis,
 		else
 			dev->csi_dev.filt_state[CSI_F_VS]--;
 		if (IS_HDR_RDBK(dev->hdr.op_mode)) {
-			/* read 3d lut at isp readback */
-			if (!dev->hw_dev->is_single)
-				rkisp_write(dev, ISP_3DLUT_UPDATE, 0, true);
 			rkisp_stats_rdbk_enable(&dev->stats_vdev, true);
 			goto vs_skip;
 		}

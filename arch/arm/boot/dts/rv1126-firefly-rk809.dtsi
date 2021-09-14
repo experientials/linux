@@ -9,7 +9,7 @@
 #include <dt-bindings/display/media-bus-format.h>
 
 / {
-	adc-keys {
+	adc_keys: adc-keys {
 		status = "okay";
 		compatible = "adc-keys";
 		io-channels = <&saradc 0>;
@@ -150,7 +150,7 @@
 		status = "okay";
 	};
 
-	wireless-bluetooth {
+	wireless_bluetooth: wireless-bluetooth {
 		compatible = "bluetooth-platdata";
 		uart_rts_gpios = <&gpio1 RK_PC0 GPIO_ACTIVE_LOW>;
 		pinctrl-names = "default", "rts_gpio";
@@ -161,7 +161,7 @@
 		status = "okay";
 	};
 
-	wireless-wlan {
+	wireless_wlan: wireless-wlan {
 		compatible = "wlan-platdata";
 		rockchip,grf = <&grf>;
 		clocks = <&rk809 1>;
@@ -174,7 +174,7 @@
 		status = "okay";
 	};
 
-	leds {
+	leds: leds {
         	compatible = "gpio-leds";
         	work {
         		label = "firefly:blue:power";
@@ -1158,6 +1158,24 @@
                         rockchip,pins =
                                 <0 RK_PD6 RK_FUNC_GPIO &pcfg_pull_up>;
                 };
+
+		lcd_rst: lcd-rst {
+                        rockchip,pins =
+                                <1 RK_PA2 RK_FUNC_GPIO &pcfg_pull_up_drv_level_3>;
+                };
+
+
+		tp_ctl: tp-ctl {
+                        rockchip,pins =
+                                <0 RK_PD4 RK_FUNC_GPIO &pcfg_pull_up>;
+                };
+
+		tp_irq: tp-irq {
+                        rockchip,pins =
+                                <1 RK_PA0 RK_FUNC_GPIO &pcfg_pull_up>;
+                };
+
+
         };
 	usb2 {
                 otg_vbus_drv: otg-vbus-drv {
@@ -1442,7 +1460,8 @@
 
 &usbdrd_dwc3 {
 	status = "okay";
-	dr_mode = "host";
+	dr_mode = "otg";
+	firefly,force_set_dr_mode;
 	extcon = <&u2phy0>;
 };
 
@@ -1476,15 +1495,4 @@
         status = "okay";
         //dr_mode = "otg";
         vbus-supply = <&vcc_otg_vbus>;
-};
-&sdmmc0_bus4 {
-        rockchip,pins =
-                /* sdmmc0_d0 */
-                <1 RK_PA4 1 &pcfg_pull_up_drv_level_0>,
-                /* sdmmc0_d1 */
-                <1 RK_PA5 1 &pcfg_pull_up_drv_level_0>,
-                /* sdmmc0_d2 */
-                <1 RK_PA6 1 &pcfg_pull_up_drv_level_0>,
-                /* sdmmc0_d3 */
-                <1 RK_PA7 1 &pcfg_pull_up_drv_level_0>;
 };

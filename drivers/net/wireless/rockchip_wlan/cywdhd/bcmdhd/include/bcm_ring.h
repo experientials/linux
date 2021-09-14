@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __bcm_ring_included__
 #define __bcm_ring_included__
 
@@ -82,7 +81,7 @@
  * private L1 data cache.
  * +----------------------------------------------------------------------------
  *
- * Copyright (C) 1999-2019, Broadcom Corporation
+ * Copyright (C) 1999-2017, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you

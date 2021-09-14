@@ -3,6 +3,7 @@
 
 #include <media/videobuf2-dma-contig.h>
 #include <linux/delay.h>
+#include <linux/iommu.h>
 #include <linux/of_platform.h>
 #include "dev.h"
 #include "regs.h"
@@ -196,7 +197,7 @@ static int rkispp_init_regbuf(struct rkispp_hw_dev *hw)
 	struct rkisp_ispp_reg *reg_buf;
 	u32 i, buf_size;
 
-	if (!rkispp_is_reg_withstream_global()) {
+	if (!rkispp_reg_withstream) {
 		hw->reg_buf = NULL;
 		return 0;
 	}
@@ -344,8 +345,6 @@ static void rkispp_queue_dmabuf(struct rkispp_hw_dev *hw, struct rkisp_ispp_buf 
 	spin_lock_irqsave(&hw->buf_lock, lock_flags);
 	if (!dbufs)
 		hw->is_idle = true;
-	if (hw->is_shutdown)
-		hw->is_idle = false;
 	if (dbufs && list_empty(list) && hw->is_idle) {
 		/* ispp idle or handle same device */
 		buf = dbufs;
@@ -367,7 +366,6 @@ static void rkispp_queue_dmabuf(struct rkispp_hw_dev *hw, struct rkisp_ispp_buf 
 		ispp = hw->ispp[buf->index];
 		vdev = &ispp->stream_vdev;
 		val = (vdev->module_ens & ISPP_MODULE_TNR) ? ISPP_MODULE_TNR : ISPP_MODULE_NR;
-		rkispp_params_cfg(&ispp->params_vdev, buf->frame_id);
 		rkispp_module_work_event(ispp, buf, NULL, val, false);
 	}
 
@@ -400,6 +398,19 @@ int rkispp_event_handle(struct rkispp_device *ispp, u32 cmd, void *arg)
 	}
 
 	return ret;
+}
+
+void rkispp_soft_reset(struct rkispp_device *ispp)
+{
+	struct rkispp_hw_dev *hw = ispp->hw_dev;
+	struct iommu_domain *domain = iommu_get_domain_for_dev(hw->dev);
+
+	if (domain)
+		iommu_detach_device(domain, hw->dev);
+	writel(GLB_SOFT_RST_ALL, hw->base_addr + RKISPP_CTRL_RESET);
+	udelay(10);
+	if (domain)
+		iommu_attach_device(domain, hw->dev);
 }
 
 static int rkispp_alloc_page_dummy_buf(struct rkispp_device *dev, u32 size)
@@ -552,6 +563,9 @@ void rkispp_release_regbuf(struct rkispp_device *ispp, struct rkisp_ispp_reg *fr
 			reg_buf[i].stat = ISP_ISPP_FREE;
 		}
 	}
+
+	freebuf->frame_id = 0;
+	freebuf->stat = ISP_ISPP_FREE;
 }
 
 void rkispp_request_regbuf(struct rkispp_device *dev, struct rkisp_ispp_reg **free_buf)
@@ -570,21 +584,7 @@ void rkispp_request_regbuf(struct rkispp_device *dev, struct rkisp_ispp_reg **fr
 	}
 }
 
-bool rkispp_is_reg_withstream_global(void)
+bool rkispp_get_reg_withstream(void)
 {
 	return rkispp_reg_withstream;
-}
-
-bool rkispp_is_reg_withstream_local(struct device *dev)
-{
-	const char *node_name = dev_name(dev);
-
-	if (!node_name)
-		return false;
-
-	if (!memcmp(rkispp_reg_withstream_video_name, node_name,
-		    strlen(node_name)))
-		return true;
-	else
-		return false;
 }

@@ -1,5 +1,4 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* SPDX-License-Identifier: GPL-2.0 */
 
 #include <osl.h>
 #include <dhd_linux.h>

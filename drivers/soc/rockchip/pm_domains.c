@@ -175,7 +175,7 @@ static void rockchip_pmu_unlock(struct rockchip_pm_domain *pd)
 	DOMAIN_M(pwr, pwr, req, idle, idle, wakeup, true)
 
 #define DOMAIN_RV1126_O(pwr, req, idle, r_offset, wakeup)	\
-	DOMAIN_M_O(pwr, pwr, 0, req, idle, idle, r_offset, wakeup, true)
+	DOMAIN_M_O(pwr, pwr, 0, req, idle, idle, r_offset, wakeup, false)
 
 #define DOMAIN_RK3288(pwr, status, req, wakeup)		\
 	DOMAIN(pwr, status, req, req, (req) << 16, wakeup, false)
@@ -1038,8 +1038,6 @@ static int __init rockchip_pd_keepon_release(void)
 	struct rockchip_pm_domain *pd;
 	int i;
 
-	return 0;
-
 	if (!g_pmu)
 		return 0;
 
@@ -1212,7 +1210,7 @@ static const struct rockchip_domain_info rv1126_pm_domains[] = {
 	[RV1126_PD_VDPU]	= DOMAIN_RV1126(BIT(3), BIT(10), BIT(10), false),
 	[RV1126_PD_NVM]		= DOMAIN_RV1126(BIT(7), BIT(11), BIT(11),  false),
 	[RV1126_PD_SDIO]	= DOMAIN_RV1126(BIT(8), BIT(13), BIT(13),  false),
-	[RV1126_PD_USB]		= DOMAIN_RV1126(BIT(9), BIT(15), BIT(15),  true),
+	[RV1126_PD_USB]		= DOMAIN_RV1126(BIT(9), BIT(15), BIT(15),  false),
 	[RV1126_PD_NPU]		= DOMAIN_RV1126_O(BIT(0), BIT(2), BIT(18), 0x4, false),
 };
 
