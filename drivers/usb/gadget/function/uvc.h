@@ -76,8 +76,6 @@ extern unsigned int uvc_gadget_trace_param;
 struct uvc_video {
 	struct usb_ep *ep;
 
-	struct work_struct pump;
-
 	/* Frame parameters */
 	u8 bpp;
 	u32 fcc;
@@ -100,7 +98,6 @@ struct uvc_video {
 	__u32 payload_size;
 	__u32 max_payload_size;
 
-	struct usb_request *frame_end_req;
 	struct uvc_video_queue queue;
 	unsigned int fid;
 };
@@ -137,7 +134,6 @@ struct uvc_device {
 	/* Events */
 	unsigned int event_length;
 	unsigned int event_setup_out : 1;
-	unsigned int event_suspend : 1;
 };
 
 static inline struct uvc_device *to_uvc(struct usb_function *f)
